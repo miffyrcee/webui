@@ -9,11 +9,11 @@
 
 <body class="bg-gray-900 text-gray-100 min-h-screen p-8">
     <div class="max-w-4xl mx-auto space-y-6">
-        <!-- 导航头 -->
+        <!-- 导航头区域 -->
         <header class="flex justify-between items-center bg-gray-800 p-4 rounded-lg shadow-lg">
             <div>
                 <h1 class="text-2xl font-bold font-mono text-blue-400">RG520N-EU 5G 核心管理器</h1>
-                <!-- 静态编译期注入：Askama 在首屏渲染时直接下发硬件固件版本 -->
+                <!-- Askama 编译期注入：首屏渲染时直接下发硬件固件版本 -->
                 <p class="text-xs text-gray-400 font-mono mt-1">固件版本: {{ firmware_version }}</p>
             </div>
             <div class="flex items-center space-x-2">
@@ -22,7 +22,7 @@
             </div>
         </header>
 
-        <!-- 监控看板 -->
+        <!-- 实时监控看板 -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div class="bg-gray-800 p-4 rounded-lg text-center shadow">
                 <div class="text-gray-400 text-sm">CPU 使用率</div>
@@ -42,14 +42,14 @@
             </div>
         </div>
 
-        <!-- 锁频段配置 -->
+        <!-- 锁频段配置面板 -->
         <div class="bg-gray-800 p-6 rounded-lg shadow space-y-4">
             <h2 class="text-xl font-semibold border-b border-gray-700 pb-2">4G / 5G 頻段部署管理</h2>
             <div class="flex flex-col md:flex-row gap-4">
                 <div class="flex-1">
                     <label class="block text-sm text-gray-400 mb-1">鎖定 5G NR 頻段 (多選以逗號分隔)</label>
                     <input type="text" id="band-lock-input" placeholder="例如: 41,78,79"
-                        class="w-100 bg-gray-700 border border-gray-600 rounded px-4 py-2 text-white focus:outline-none focus:border-blue-500 font-mono w-full">
+                        class="bg-gray-700 border border-gray-600 rounded px-4 py-2 text-white focus:outline-none focus:border-blue-500 font-mono w-full">
                 </div>
             </div>
             <button onclick="lockBand()"
@@ -70,7 +70,7 @@
         </div>
     </div>
 
-    <!-- 业务级高并发 JavaScript 脚本 -->
+    <!-- 业务级 WebSocket 全双工交互脚本 -->
     <script>
         let ws;
         const statusBadge = document.getElementById('ws-status');
@@ -99,7 +99,7 @@
 
             ws.onclose = () => {
                 statusBadge.className = 'w-3 h-3 rounded-full bg-red-500';
-                setTimeout(connectWs, 3000); // 嵌入式断线自动重连保护保护
+                setTimeout(connectWs, 3000); // 嵌入式断线自动重连保护
             };
         }
 
@@ -117,7 +117,7 @@
                 ws.send(JSON.stringify({ action: "lock_band", payload: bands }));
             }
         }
-
+        // 页面加载自动初始化物理管道
         connectWs();
     </script>
 </body>

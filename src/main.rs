@@ -5,6 +5,7 @@ use axum::{
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -71,6 +72,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(index_handler))
         .route("/ws", get(ws_handler))
+        .route("/style.css", get(style_handler))
         .with_state(app_state);
 
     // 4. 绑定端口，启动物理服务
@@ -177,4 +179,16 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
         _ = (&mut recv_task) => send_task.abort(),
     };
     state.active_clients.fetch_sub(1, Ordering::Relaxed); // 客户端退出，原子减 1
+}
+
+async fn style_handler() -> impl IntoResponse {
+    // 在编译期直接把 build.rs 生成的 style.css 加载进内存静态区
+    let css_content = include_str!("../templates/style.css");
+
+    // 构建 HTTP 响应，并强制给浏览器打上 text/css 的 Content-Type 标签
+    // 否则现代浏览器会因为 MIME 类型不匹配而拒绝解析样式
+    Response::builder()
+        .header(header::CONTENT_TYPE, "text/css; charset=utf-8")
+        .body(axum::body::Body::from(css_content))
+        .unwrap()
 }

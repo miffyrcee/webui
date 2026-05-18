@@ -1,11 +1,11 @@
-use askama::Template; // 引入编译期静态模板宏
+use askama::Template; // 恢复使用原生 Askama 宏
 use axum::{
     Router,
     extract::{
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::get,
 };
 use futures::{sink::SinkExt, stream::StreamExt};
@@ -22,6 +22,20 @@ use tokio::time::{Duration, sleep};
 #[template(path = "dist_index.html")] // 自动寻址项目根目录下的 templates/dist_index.html
 struct IndexTemplate {
     firmware_version: &'static str,
+}
+
+// 为 Askama 模板实现 Axum 的 IntoResponse 接口，确保 handler 可以直接返回模板实例
+impl IntoResponse for IndexTemplate {
+    fn into_response(self) -> Response {
+        match self.render() {
+            Ok(html) => axum::response::Html(html).into_response(),
+            Err(err) => (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Template error: {}", err),
+            )
+                .into_response(),
+        }
+    }
 }
 
 // 共享的底层上下文状态
@@ -113,9 +127,16 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
 
     // 任务 A：异步广播。将 Actor 搜集到的实时遥测状态泵向前端
     let mut send_task = tokio::spawn(async move {
-        while let Ok(msg) = rx.recv().await {
-            if ws_sender.send(Message::Text(msg.into())).await.is_err() {
-                break;
+        loop {
+            match rx.recv().await {
+                Ok(msg) => {
+                    if ws_sender.send(Message::Text(msg.into())).await.is_err() {
+                        break;
+                    }
+                }
+                // 处理广播延迟错误，防止单客户端卡顿导致整个发送任务中断
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
             }
         }
     });
@@ -123,20 +144,29 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     // 任务 B：异步接收。监听前端下发的手动 AT 或锁频配置
     let state_clone = state.clone();
     let mut recv_task = tokio::spawn(async move {
-        while let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
-            if let Ok(cmd) = serde_json::from_str::<WsCommand>(&text) {
-                // 执行敏感串口写入时，强制竞争串行独占锁
-                let _lock = state_clone.serial_lock.lock().await;
-                match cmd.action.as_str() {
-                    "manual_at" => {
-                        println!("物理串口接收到手动 AT 穿透指令: {:?}", cmd.payload);
+        while let Some(msg) = ws_receiver.next().await {
+            if let Ok(msg) = msg {
+                match msg {
+                    Message::Text(text) => {
+                        if let Ok(cmd) = serde_json::from_str::<WsCommand>(&text) {
+                            // 执行敏感串口写入时，强制竞争串行独占锁
+                            let _lock = state_clone.serial_lock.lock().await;
+                            match cmd.action.as_str() {
+                                "manual_at" => {
+                                    println!("物理串口接收到手动 AT 穿透指令: {:?}", cmd.payload);
+                                }
+                                "lock_band" => {
+                                    println!("物理串口接收到核心频段重署策略: {:?}", cmd.payload);
+                                }
+                                _ => {}
+                            }
+                        }
                     }
-                    "lock_band" => {
-                        println!("物理串口接收到核心频段重署策略: {:?}", cmd.payload);
-                    }
+                    Message::Close(_) => break,
                     _ => {}
                 }
-                drop(_lock);
+            } else {
+                break;
             }
         }
     });

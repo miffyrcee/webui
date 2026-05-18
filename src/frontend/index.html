@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RG520N-EU 5G WebUI</title>
+</head>
+
+<body class="bg-gray-900 text-gray-100 min-h-screen p-8">
+    <div class="max-w-4xl mx-auto space-y-6">
+        <!-- 导航头 -->
+        <header class="flex justify-between items-center bg-gray-800 p-4 rounded-lg shadow-lg">
+            <div>
+                <h1 class="text-2xl font-bold font-mono text-blue-400">RG520N-EU 5G 核心管理器</h1>
+                <!-- 静态编译期注入：Askama 在首屏渲染时直接下发硬件固件版本 -->
+                <p class="text-xs text-gray-400 font-mono mt-1">固件版本: {{ firmware_version }}</p>
+            </div>
+            <div class="flex items-center space-x-2">
+                <div id="ws-status" class="w-3 h-3 rounded-full bg-red-500"></div>
+                <span class="text-sm">WebSocket 狀態</span>
+            </div>
+        </header>
+
+        <!-- 监控看板 -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="bg-gray-800 p-4 rounded-lg text-center shadow">
+                <div class="text-gray-400 text-sm">CPU 使用率</div>
+                <div id="cpu-val" class="text-2xl font-bold font-mono mt-2 text-green-400">--%</div>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-lg text-center shadow">
+                <div class="text-gray-400 text-sm">模組溫度</div>
+                <div id="temp-val" class="text-2xl font-bold font-mono mt-2 text-amber-500">--°C</div>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-lg text-center shadow">
+                <div class="text-gray-400 text-sm">信號強度 (RSRP)</div>
+                <div id="sig-val" class="text-2xl font-bold font-mono mt-2 text-blue-400">--</div>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-lg text-center shadow">
+                <div class="text-gray-400 text-sm">工作頻段</div>
+                <div id="band-val" class="text-2xl font-bold font-mono mt-2 text-purple-400">--</div>
+            </div>
+        </div>
+
+        <!-- 锁频段配置 -->
+        <div class="bg-gray-800 p-6 rounded-lg shadow space-y-4">
+            <h2 class="text-xl font-semibold border-b border-gray-700 pb-2">4G / 5G 頻段部署管理</h2>
+            <div class="flex flex-col md:flex-row gap-4">
+                <div class="flex-1">
+                    <label class="block text-sm text-gray-400 mb-1">鎖定 5G NR 頻段 (多選以逗號分隔)</label>
+                    <input type="text" id="band-lock-input" placeholder="例如: 41,78,79"
+                        class="w-100 bg-gray-700 border border-gray-600 rounded px-4 py-2 text-white focus:outline-none focus:border-blue-500 font-mono w-full">
+                </div>
+            </div>
+            <button onclick="lockBand()"
+                class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded font-semibold transition">寫入鎖頻配置</button>
+        </div>
+
+        <!-- 串行独占 AT 控制台 -->
+        <div class="bg-gray-800 p-6 rounded-lg shadow space-y-4">
+            <h2 class="text-xl font-semibold border-b border-gray-700 pb-2">手動 AT 指令終端</h2>
+            <div class="flex space-x-2">
+                <input type="text" id="at-input" placeholder="例如: AT+QENG=&quot;servingcell&quot;"
+                    class="flex-1 bg-gray-700 border border-gray-600 rounded px-4 py-2 focus:outline-none focus:border-blue-500 font-mono">
+                <button onclick="sendAtCommand()"
+                    class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded font-semibold transition">執行</button>
+            </div>
+            <textarea id="at-output" readonly rows="6"
+                class="w-full bg-gray-900 border border-gray-700 rounded p-3 font-mono text-green-400 resize-none"></textarea>
+        </div>
+    </div>
+
+    <!-- 业务级高并发 JavaScript 脚本 -->
+    <script>
+        let ws;
+        const statusBadge = document.getElementById('ws-status');
+
+        function connectWs() {
+            // 自适应识别本地 Host 建立双工管道
+            ws = new WebSocket(`ws://${window.location.host}/ws`);
+
+            ws.onopen = () => {
+                statusBadge.className = 'w-3 h-3 rounded-full bg-green-500';
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'realtime') {
+                    document.getElementById('cpu-val').innerText = data.cpu + '%';
+                    document.getElementById('temp-val').innerText = data.temperature + '°C';
+                    document.getElementById('sig-val').innerText = data.signal;
+                    document.getElementById('band-val').innerText = data.band;
+                } else if (data.type === 'at_response') {
+                    const outputArea = document.getElementById('at-output');
+                    outputArea.value += `\n> ${data.cmd}\n${data.response}`;
+                    outputArea.scrollTop = outputArea.scrollHeight; // 滚动条自动追踪底部
+                }
+            };
+
+            ws.onclose = () => {
+                statusBadge.className = 'w-3 h-3 rounded-full bg-red-500';
+                setTimeout(connectWs, 3000); // 嵌入式断线自动重连保护保护
+            };
+        }
+
+        function sendAtCommand() {
+            const input = document.getElementById('at-input').value;
+            if (input && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: "manual_at", payload: input }));
+                document.getElementById('at-input').value = '';
+            }
+        }
+
+        function lockBand() {
+            const bands = document.getElementById('band-lock-input').value;
+            if (bands && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: "lock_band", payload: bands }));
+            }
+        }
+
+        connectWs();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,63 @@
+# --- Rust (Axum) ---
+# 忽略编译产物目录
+/target/
+
+# 如果你使用的是 Cargo 的各种插件产生的临时文件
+**/*.rs.bk
+cargo-expand-check.rs
+
+# --- Node.js ---
+# 忽略依赖库
+node_modules/
+/jspm_packages/
+
+# 忽略日志文件
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 忽略编译/构建产物 (如 Vite, Webpack, Next.js 等)
+dist/
+build/
+.next/
+.nuxt/
+out/
+
+# --- 环境变量与私密信息 ---
+# 必须忽略包含密钥的 .env 文件
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# --- 操作系统与编辑器 ---
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# IDE / Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# --- 其他 ---
+# 覆盖率报告
+coverage/
+.nyc_output/
+
+# 数据库文件 (如果你在本地使用 SQLite)
+*.db
+*.sqlite
+ode_ggv

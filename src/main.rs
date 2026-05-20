@@ -136,7 +136,8 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
 
                     let telemetry = serde_json::json!({
                         "type": "realtime",
-                        "cpu": format!("{:.1}%", cpu_usage), "temperature": temp.map_or("N/A".to_string(), |t| format!("{:.1}°C", t)),
+                        "cpu": format!("{:.1}%", cpu_usage),
+                        "temperature": temp.map_or("N/A".to_string(), |t| format!("{:.1}°C", t)),
                         "signal": "-74dBm",
                         "band": "N78"
                     });

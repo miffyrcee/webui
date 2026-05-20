@@ -134,12 +134,26 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                         .map(|c| c.temperature())
                         .unwrap_or(Some(0.0));
 
+                    // 模拟从 AT 指令解析出的信号数据
+                    // 在实际应用中，此处会通过 serial_lock 锁定时，向 /dev/ttyUSB 写入指令并解析返回结果
+                    // 例如: Assessment 可根据 RSRP 和 SINR 的阈值逻辑计算得出
+                    let ss_rsrp = -62;
+                    let assessment = if ss_rsrp > -80 { "Excellent" } else { "Good" };
+
                     let telemetry = serde_json::json!({
                         "type": "realtime",
                         "cpu": format!("{:.1}%", cpu_usage),
                         "temperature": temp.map_or("N/A".to_string(), |t| format!("{:.1}°C", t)),
-                        "signal": "-74dBm",
-                        "band": "N78"
+                        "band": "N78",
+                        "assessment": assessment,
+                        "traffic_stats": "143 MB DL / 54 MB UL",
+                        "cell_id": "Short 01(1), Long 39074C001(15308472321)",
+                        "enb_id": "59798720",
+                        "tac": "7471151 (72002F)",
+                        "ss_rsrq": "-11 / 75%",
+                        "ss_rsrp": format!("{} / 100%", ss_rsrp),
+                        "sinr": "23 / 73%",
+                        "updated": "2026/5/20 23:00:32"
                     });
 
                     let _ = state.tx.send(telemetry.to_string());

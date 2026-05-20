@@ -19,7 +19,7 @@ use sysinfo::{Components, System};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
 use tokio::time::{Duration, sleep};
-use tokio_serial::{SerialPortBuilderExt, SerialStream};
+use tokio_serial::SerialStream;
 
 // 串口配置
 const SERIAL_PORT: &str = "/dev/ttyUSB2"; // 移远模块标准的 AT 交互端口
@@ -103,7 +103,7 @@ async fn main() {
     let (actor_tx, actor_rx) = mpsc::channel(32);
 
     // 尝试初始化串口，若失败则在日志警告并降级运行
-    let serial_stream = match tokio_serial::new(SERIAL_PORT, BAUD_RATE).open_native() {
+    let serial_stream = match SerialStream::open(&tokio_serial::new(SERIAL_PORT, BAUD_RATE)) {
         Ok(stream) => {
             println!("✅ 成功打开移远模块串口: {}", SERIAL_PORT);
             Some(stream)
@@ -159,13 +159,14 @@ async fn send_at_command_raw(serial: &mut SerialStream, cmd: &str) -> Result<Str
     // 设定 500ms 超时等待响应
     let read_future = async {
         loop {
-            let n = serial.read(&mut buffer).await.unwrap_or(0);
-            if n == 0 {
-                break;
-            }
-            response.push_str(&String::from_utf8_lossy(&buffer[..n]));
-            if response.contains("OK\r\n") || response.contains("ERROR\r\n") {
-                break;
+            match serial.read(&mut buffer).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    response.push_str(&String::from_utf8_lossy(&buffer[..n]));
+                    if response.contains("OK\r\n") || response.contains("ERROR\r\n") {
+                        break;
+                    }
+                }
             }
         }
         response
@@ -179,7 +180,7 @@ async fn send_at_command_raw(serial: &mut SerialStream, cmd: &str) -> Result<Str
 
 // 调度入口（集成物理通道和降级模拟数据）
 async fn execute_at_command(serial_opt: &mut Option<SerialStream>, cmd: &str) -> String {
-    if let Some(ref mut serial) = serial_opt {
+    if let Some(serial) = serial_opt {
         match send_at_command_raw(serial, cmd).await {
             Ok(res) => res,
             Err(e) => format!("ERROR: {}", e),
@@ -199,6 +200,7 @@ async fn execute_at_command(serial_opt: &mut Option<SerialStream>, cmd: &str) ->
 
 async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiver<AtRequest>) {
     let mut sys = System::new_all();
+    let mut components = Components::new_with_refreshed_list();
     let mut interval = tokio::time::interval(Duration::from_millis(3000)); // 对应 3s 刷新率
 
     loop {
@@ -240,7 +242,7 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                     if let Some(line) = qeng_res.lines().find(|l| l.contains("+QENG: \"servingcell\"")) {
                         let cleaned = line.replace("\"", "");
                         let parts: Vec<&str> = cleaned.split(',').map(|s| s.trim()).collect();
-                        if parts.len() >= 15 {
+                        if parts.len() >= 14 {
                             telemetry.network_mode = format!("{} {}", parts[2], parts[3]); // 5G SA TDD
                             telemetry.mccmnc = format!("{}{}", parts[4], parts[5]); // 46000
                             telemetry.cell_id = format!("Short 01(1), Long {}(15308472321)", parts[6]);
@@ -283,18 +285,20 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                     }
 
                     // 5. 补充宿主机系统监控项
-                    sys.refresh_all();
-                    let components = Components::new_with_refreshed_list();
+                    sys.refresh_cpu_all();
+                    components.refresh(false);
                     let cpu_temp = components.iter()
                         .find(|c| c.label().to_uppercase().contains("CPU") || c.label().to_uppercase().contains("PACKAGE"))
+
                         .map_or(46.0, |c| c.temperature().unwrap_or(46.0));
 
                     telemetry.temperature = format!("{:.0} °C", cpu_temp);
+
                     telemetry.internet_connection = if telemetry.ipv4.is_empty() { "Disconnected" } else { "Connected" }.to_string();
 
                     let uptime_sec = System::uptime();
                     telemetry.uptime = format!("{} minutes", uptime_sec / 60);
-                    telemetry.updated = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
+                    // telemetry.updated = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) .map(|d| { let secs = d.as_secs(); format!("secs_since_epoch: {}", secs) }).unwrap_or_default();
 
                     // 广播更新
                     if let Ok(json_str) = serde_json::to_string(&telemetry) {

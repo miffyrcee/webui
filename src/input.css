@@ -1,1 +1,11 @@
 @import "tailwindcss";
+
+@source "./index.html";
+
+/* 注册自定义变量 */
+@theme {
+    --color-brandBg: #12141a;
+    --color-brandCard: #1b1e25;
+    --color-brandBorder: #2a2f3b;
+    --color-brandMuted: #9ca3af;
+}

@@ -5,23 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=device-width, initial-scale=1.0">
     <title>RM520N 5G WebUI</title>
-    <!-- 引入 Tailwind CSS -->
+    <!-- 引入由 build.rs 离线编译生成的本地 style.css -->
     <link rel="stylesheet" href="/style.css">
-
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        brandBg: '#12141a',      // 极深背景
-                        brandCard: '#1b1e25',    // 卡片背景
-                        brandBorder: '#2a2f3b',  // 边框线
-                        brandMuted: '#9ca3af',   // 辅助灰色
-                    }
-                }
-            }
-        }
-    </script>
 </head>
 
 <body class="bg-brandBg text-white font-sans min-h-full p-4 md:p-8">
@@ -46,7 +31,6 @@
             <div
                 class="bg-brandCard border border-brandBorder rounded-md p-6 flex flex-col justify-between min-h-[160px]">
                 <div class="flex justify-center items-center">
-                    <!-- 温度计图标 -->
                     <svg class="w-12 h-12 text-amber-500" fill="none" stroke="currentColor" stroke-width="2"
                         viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round"
@@ -65,7 +49,6 @@
             <div
                 class="bg-brandCard border border-brandBorder rounded-md p-6 flex flex-col justify-between min-h-[160px]">
                 <div class="flex justify-center items-center">
-                    <!-- SIM 卡图标 -->
                     <svg class="w-12 h-12 text-purple-500" fill="none" stroke="currentColor" stroke-width="2"
                         viewBox="0 0 24 24">
                         <rect x="5" y="3" width="14" height="18" rx="2" stroke-linejoin="round"></rect>
@@ -83,7 +66,6 @@
             <div
                 class="bg-brandCard border border-brandBorder rounded-md p-6 flex flex-col justify-between min-h-[160px]">
                 <div class="flex justify-center items-center">
-                    <!-- 信号图标 -->
                     <svg class="w-12 h-12 text-blue-500" fill="none" stroke="currentColor" stroke-width="2"
                         viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round"
@@ -102,7 +84,6 @@
             <div
                 class="bg-brandCard border border-brandBorder rounded-md p-6 flex flex-col justify-between min-h-[160px]">
                 <div class="flex justify-center items-center">
-                    <!-- 云/连接图标 -->
                     <svg class="w-12 h-12 text-teal-400" fill="none" stroke="currentColor" stroke-width="2"
                         viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round"
@@ -141,7 +122,7 @@
                         <div class="flex justify-between p-3"><span class="text-brandMuted">Network Mode</span><span
                                 id="info_mode">--</span></div>
                         <div class="flex justify-between p-3"><span class="text-brandMuted">Bands</span><span
-                                id="info_bands" class="text-right">--</span></div>
+                                id="info_bands" class="text-right text-xs">--</span></div>
                         <div class="flex justify-between p-3"><span class="text-brandMuted">Bandwidth</span><span
                                 id="info_bandwidth">--</span></div>
                         <div class="flex justify-between p-3"><span
@@ -158,7 +139,6 @@
                                 id="info_uptime">--</span></div>
                     </div>
                 </div>
-                <!-- 底部刷新率配置项 -->
                 <div class="p-4 border-t border-brandBorder/60 bg-black/10 flex items-center justify-between">
                     <span class="text-xs text-brandMuted">Refresh Rate (min 3s)</span>
                     <div class="flex space-x-2">
@@ -187,7 +167,7 @@
                         <div class="flex justify-between p-3"><span class="text-brandMuted">Traffic Stats</span><span
                                 id="sig_traffic">--</span></div>
                         <div class="flex justify-between p-3"><span class="text-brandMuted">CELL ID</span><span
-                                id="sig_cell_id" class="text-right">--</span></div>
+                                id="sig_cell_id" class="text-right text-xs">--</span></div>
                         <div class="flex justify-between p-3"><span class="text-brandMuted">eNB ID
                                 <sup>4G/5G</sup></span><span id="sig_enb">--</span></div>
                         <div class="flex justify-between p-3"><span class="text-brandMuted">TAC
@@ -245,7 +225,6 @@
 
     </div>
 
-    <!-- WebSocket 同步逻辑 -->
     <script>
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -261,8 +240,6 @@
             socket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-
-                    // 只处理实时流类型数据
                     if (data.type === "realtime" || !data.type) {
                         updateUI(data);
                     }
@@ -283,13 +260,11 @@
         }
 
         function updateUI(payload) {
-            // 顶栏通用状态指标
             document.getElementById("temp").innerText = payload.temperature || "-- °C";
             document.getElementById("sim_status").innerText = payload.sim_status || "--";
             document.getElementById("signal_pct").innerText = payload.signal_percentage || "--%";
             document.getElementById("conn_status").innerText = payload.internet_connection || "--";
 
-            // 左栏：网络基础参数
             document.getElementById("info_sim").innerText = payload.active_sim || "--";
             document.getElementById("info_provider").innerText = payload.network_provider || "--";
             document.getElementById("info_mccmnc").innerText = payload.mccmnc || "--";
@@ -297,21 +272,28 @@
             document.getElementById("info_mode").innerText = payload.network_mode || "--";
             document.getElementById("info_bands").innerText = payload.bands || "--";
             document.getElementById("info_bandwidth").innerText = payload.bandwidth || "--";
-            document.getElementById("info_earfcn").innerHTML = payload.earfcn || "--";
+            document.getElementById("info_earfcn").innerText = payload.earfcn || "--";
             document.getElementById("info_pci").innerText = payload.pci || "--";
             document.getElementById("info_ipv4").innerText = payload.ipv4 || "--";
             document.getElementById("info_ipv6").innerText = payload.ipv6 || "--";
             document.getElementById("info_uptime").innerText = payload.uptime || "--";
 
-            // 右栏：RF 信号及物理信息
             document.getElementById("sig_assessment").innerText = payload.assessment || "--";
             document.getElementById("sig_traffic").innerText = payload.traffic_stats || "--";
             document.getElementById("sig_cell_id").innerText = payload.cell_id || "--";
-            document.getElementById("sig_enb").innerHTML = payload.enb_id || "--";
-            document.getElementById("sig_tac").innerHTML = payload.tac || "--";
-            document.getElementById("last_updated").innerText = payload.updated || "--";
+            document.getElementById("sig_enb").innerText = payload.enb_id || "--";
+            document.getElementById("sig_tac").innerText = payload.tac || "--";
 
-            // RSRQ 进度条及标签值映射
+            // 前端更新时间逻辑（后台若无输出则自动产生客户端时间，不依赖 chrono）
+            if (payload.updated && payload.updated.trim() !== "") {
+                document.getElementById("last_updated").innerText = payload.updated;
+            } else {
+                const now = new Date();
+                const pad = (n) => n.toString().padStart(2, '0');
+                document.getElementById("last_updated").innerText =
+                    `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+            }
+
             if (payload.ss_rsrq) {
                 const parts = payload.ss_rsrq.split('/');
                 const pct = parts[1] ? parts[1].trim() : "0%";
@@ -319,7 +301,6 @@
                 document.getElementById("rsrq_val").innerText = payload.ss_rsrq;
             }
 
-            // RSRP 进度条及标签值映射
             if (payload.ss_rsrp) {
                 const parts = payload.ss_rsrp.split('/');
                 const pct = parts[1] ? parts[1].trim() : "0%";
@@ -327,7 +308,6 @@
                 document.getElementById("rsrp_val").innerText = payload.ss_rsrp;
             }
 
-            // SINR 进度条及标签值映射
             if (payload.sinr) {
                 const parts = payload.sinr.split('/');
                 const pct = parts[1] ? parts[1].trim() : "0%";
@@ -336,9 +316,8 @@
             }
         }
 
-        // 初始化运行连接
         connectWs();
     </script>
 </body>
 
-</html>/html>
+</html>

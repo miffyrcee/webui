@@ -12,14 +12,14 @@ fn main() {
     };
 
     // 1. 无损复制 HTML 作为 Askama 的模板模板
-    let _ = fs::copy("./frontend/index.html", "./templates/dist_index.html");
+    let _ = fs::copy("./src/index.html", "./templates/dist_index.html");
 
     // 2. 调用 Tailwind CLI，指定输出到 templates/style.css，让它回归一个纯粹的 CSS 文件
     let status = Command::new(npx_cmd)
         .args([
             "tailwindcss",
             "-i",
-            "./frontend/input.css",
+            "./src/input.css",
             "-o",
             "./templates/style.css",
             "--content",

@@ -1,126 +1,344 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="h-full">
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RG520N-EU 5G WebUI</title>
+    <meta name="viewport" content="width=device-width, initial-scale=device-width, initial-scale=1.0">
+    <title>RM520N 5G WebUI</title>
+    <!-- 引入 Tailwind CSS -->
     <link rel="stylesheet" href="/style.css">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brandBg: '#12141a',      // 极深背景
+                        brandCard: '#1b1e25',    // 卡片背景
+                        brandBorder: '#2a2f3b',  // 边框线
+                        brandMuted: '#9ca3af',   // 辅助灰色
+                    }
+                }
+            }
+        }
+    </script>
 </head>
 
-<body class="bg-gray-900 text-gray-100 min-h-screen p-8">
-    <div class="max-w-4xl mx-auto space-y-6">
-        <!-- 导航头区域 -->
-        <header class="flex justify-between items-center bg-gray-800 p-4 rounded-lg shadow-lg">
-            <div>
-                <h1 class="text-2xl font-bold font-mono text-blue-400">RG520N-EU 5G 核心管理器</h1>
-                <!-- Askama 编译期注入：首屏渲染时直接下发硬件固件版本 -->
-                <p class="text-xs text-gray-400 font-mono mt-1">固件版本: {{ firmware_version }}</p>
+<body class="bg-brandBg text-white font-sans min-h-full p-4 md:p-8">
+
+    <div class="max-w-7xl mx-auto space-y-6">
+
+        <!-- 头部标题区 -->
+        <header class="flex justify-between items-center pb-4 border-b border-brandBorder">
+            <div class="flex items-center space-x-3">
+                <span class="text-xl font-bold tracking-wider text-emerald-500">QUECTEL RM520N</span>
+                <span class="text-xs bg-slate-800 text-slate-400 px-2 py-1 rounded">5G NR SA/NSA</span>
             </div>
-            <div class="flex items-center space-x-2">
-                <div id="ws-status" class="w-3 h-3 rounded-full bg-red-500"></div>
-                <span class="text-sm">WebSocket 狀態</span>
+            <div class="text-xs text-brandMuted">
+                固件版本: <span class="text-white font-mono">{{ firmware_version }}</span>
             </div>
         </header>
 
-        <!-- 实时监控看板 -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="bg-gray-800 p-4 rounded-lg text-center shadow">
-                <div class="text-gray-400 text-sm">CPU 使用率</div>
-                <div id="cpu-val" class="text-2xl font-bold font-mono mt-2 text-green-400">--%</div>
-            </div>
-            <div class="bg-gray-800 p-4 rounded-lg text-center shadow">
-                <div class="text-gray-400 text-sm">模組溫度</div>
-                <div id="temp-val" class="text-2xl font-bold font-mono mt-2 text-amber-500">--°C</div>
-            </div>
-            <div class="bg-gray-800 p-4 rounded-lg text-center shadow">
-                <div class="text-gray-400 text-sm">信號強度 (RSRP)</div>
-                <div id="sig-val" class="text-2xl font-bold font-mono mt-2 text-blue-400">--</div>
-            </div>
-            <div class="bg-gray-800 p-4 rounded-lg text-center shadow">
-                <div class="text-gray-400 text-sm">工作頻段</div>
-                <div id="band-val" class="text-2xl font-bold font-mono mt-2 text-purple-400">--</div>
-            </div>
-        </div>
+        <!-- 1. 顶部四大指标卡片 -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
-        <!-- 锁频段配置面板 -->
-        <div class="bg-gray-800 p-6 rounded-lg shadow space-y-4">
-            <h2 class="text-xl font-semibold border-b border-gray-700 pb-2">4G / 5G 頻段部署管理</h2>
-            <div class="flex flex-col md:flex-row gap-4">
-                <div class="flex-1">
-                    <label class="block text-sm text-gray-400 mb-1">鎖定 5G NR 頻段 (多選以逗號分隔)</label>
-                    <input type="text" id="band-lock-input" placeholder="例如: 41,78,79"
-                        class="bg-gray-700 border border-gray-600 rounded px-4 py-2 text-white focus:outline-none focus:border-blue-500 font-mono w-full">
+            <!-- 温度卡片 -->
+            <div
+                class="bg-brandCard border border-brandBorder rounded-md p-6 flex flex-col justify-between min-h-[160px]">
+                <div class="flex justify-center items-center">
+                    <!-- 温度计图标 -->
+                    <svg class="w-12 h-12 text-amber-500" fill="none" stroke="currentColor" stroke-width="2"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2V5a3 3 0 116 0v14zm0 0h6m-6-4h6m-6-4h4m-4-4h4">
+                        </path>
+                    </svg>
+                </div>
+                <div class="text-center mt-2">
+                    <span id="temp" class="text-3xl font-semibold font-mono">-- °C</span>
+                </div>
+                <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">Temperature
                 </div>
             </div>
-            <button onclick="lockBand()"
-                class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded font-semibold transition">寫入鎖頻配置</button>
+
+            <!-- SIM卡状态卡片 -->
+            <div
+                class="bg-brandCard border border-brandBorder rounded-md p-6 flex flex-col justify-between min-h-[160px]">
+                <div class="flex justify-center items-center">
+                    <!-- SIM 卡图标 -->
+                    <svg class="w-12 h-12 text-purple-500" fill="none" stroke="currentColor" stroke-width="2"
+                        viewBox="0 0 24 24">
+                        <rect x="5" y="3" width="14" height="18" rx="2" stroke-linejoin="round"></rect>
+                        <path d="M12 9h4m-4 4h4m-4 4h4M8 7v10" stroke-linecap="round"></path>
+                    </svg>
+                </div>
+                <div class="text-center mt-2">
+                    <span id="sim_status" class="text-3xl font-semibold">--</span>
+                </div>
+                <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">SIM Status
+                </div>
+            </div>
+
+            <!-- 信号百分比卡片 -->
+            <div
+                class="bg-brandCard border border-brandBorder rounded-md p-6 flex flex-col justify-between min-h-[160px]">
+                <div class="flex justify-center items-center">
+                    <!-- 信号图标 -->
+                    <svg class="w-12 h-12 text-blue-500" fill="none" stroke="currentColor" stroke-width="2"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M18 10h.01M15 13h.01M12 16h.01M9 19h.01M21 6h.01"></path>
+                        <path stroke-linecap="round" d="M12 18v2m3-5v5m3-8v8M9 20v-1"></path>
+                    </svg>
+                </div>
+                <div class="text-center mt-2">
+                    <span id="signal_pct" class="text-3xl font-semibold font-mono">--%</span>
+                </div>
+                <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">Signal
+                    Percentage</div>
+            </div>
+
+            <!-- 网络连接状态卡片 -->
+            <div
+                class="bg-brandCard border border-brandBorder rounded-md p-6 flex flex-col justify-between min-h-[160px]">
+                <div class="flex justify-center items-center">
+                    <!-- 云/连接图标 -->
+                    <svg class="w-12 h-12 text-teal-400" fill="none" stroke="currentColor" stroke-width="2"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z">
+                        </path>
+                    </svg>
+                </div>
+                <div class="text-center mt-2">
+                    <span id="conn_status" class="text-3xl font-semibold">--</span>
+                </div>
+                <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">Internet
+                    Connection</div>
+            </div>
+
         </div>
 
-        <!-- 串行独占 AT 控制台 -->
-        <div class="bg-gray-800 p-6 rounded-lg shadow space-y-4">
-            <h2 class="text-xl font-semibold border-b border-gray-700 pb-2">手動 AT 指令終端</h2>
-            <div class="flex space-x-2">
-                <input type="text" id="at-input" placeholder="例如: AT+QENG=&quot;servingcell&quot;"
-                    class="flex-1 bg-gray-700 border border-gray-600 rounded px-4 py-2 focus:outline-none focus:border-blue-500 font-mono">
-                <button onclick="sendAtCommand()"
-                    class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded font-semibold transition">執行</button>
+        <!-- 2. 主体双栏配置表区 -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+            <!-- 左栏: Network Information -->
+            <div class="bg-brandCard border border-brandBorder rounded-md flex flex-col justify-between">
+                <div>
+                    <div class="p-4 border-b border-brandBorder">
+                        <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Network Information
+                        </h2>
+                    </div>
+                    <div class="divide-y divide-brandBorder/50 font-mono text-sm">
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Active Sim</span><span
+                                id="info_sim">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Network Provider</span><span
+                                id="info_provider" class="text-xs break-all text-right max-w-[220px]">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">MCCMNC</span><span
+                                id="info_mccmnc">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">APN</span><span
+                                id="info_apn" class="text-slate-300">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Network Mode</span><span
+                                id="info_mode">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Bands</span><span
+                                id="info_bands" class="text-right">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Bandwidth</span><span
+                                id="info_bandwidth">--</span></div>
+                        <div class="flex justify-between p-3"><span
+                                class="text-brandMuted">E/ARFCN<sup>4G/5G</sup></span><span id="info_earfcn">--</span>
+                        </div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">PCI</span><span
+                                id="info_pci">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">IPv4</span><span
+                                id="info_ipv4" class="text-emerald-400">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">IPv6</span><span
+                                id="info_ipv6"
+                                class="text-emerald-400 text-xs break-all text-right max-w-[220px]">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Uptime</span><span
+                                id="info_uptime">--</span></div>
+                    </div>
+                </div>
+                <!-- 底部刷新率配置项 -->
+                <div class="p-4 border-t border-brandBorder/60 bg-black/10 flex items-center justify-between">
+                    <span class="text-xs text-brandMuted">Refresh Rate (min 3s)</span>
+                    <div class="flex space-x-2">
+                        <select
+                            class="bg-[#12141a] border border-brandBorder text-xs rounded px-2 py-1 text-white focus:outline-none focus:border-emerald-500">
+                            <option value="3">3s</option>
+                            <option value="5">5s</option>
+                            <option value="10">10s</option>
+                        </select>
+                        <button
+                            class="bg-slate-800 border border-brandBorder px-3 py-1 text-xs rounded hover:bg-slate-700 transition">Set</button>
+                    </div>
+                </div>
             </div>
-            <textarea id="at-output" readonly rows="6"
-                class="w-full bg-gray-900 border border-gray-700 rounded p-3 font-mono text-green-400 resize-none"></textarea>
+
+            <!-- 右栏: Signal Information & 进度条 -->
+            <div class="bg-brandCard border border-brandBorder rounded-md flex flex-col justify-between">
+                <div>
+                    <div class="p-4 border-b border-brandBorder">
+                        <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Signal Information
+                        </h2>
+                    </div>
+                    <div class="divide-y divide-brandBorder/50 font-mono text-sm">
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Assessment</span><span
+                                id="sig_assessment" class="text-emerald-400 font-bold">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Traffic Stats</span><span
+                                id="sig_traffic">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">CELL ID</span><span
+                                id="sig_cell_id" class="text-right">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">eNB ID
+                                <sup>4G/5G</sup></span><span id="sig_enb">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">TAC
+                                <sup>4G/5G</sup></span><span id="sig_tac">--</span></div>
+
+                        <!-- RSRQ 进度条 -->
+                        <div class="p-3 space-y-1.5">
+                            <span class="text-brandMuted block text-xs">SS_RSRQ <sup>5G</sup></span>
+                            <div
+                                class="relative w-full bg-slate-900 h-6 rounded border border-brandBorder/30 overflow-hidden">
+                                <div id="rsrq_bar" class="bg-emerald-600 h-full transition-all duration-500"
+                                    style="width: 0%"></div>
+                                <span id="rsrq_val"
+                                    class="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white drop-shadow-md">--
+                                    / --%</span>
+                            </div>
+                        </div>
+
+                        <!-- RSRP 进度条 -->
+                        <div class="p-3 space-y-1.5">
+                            <span class="text-brandMuted block text-xs">SS_RSRP <sup>5G</sup></span>
+                            <div
+                                class="relative w-full bg-slate-900 h-6 rounded border border-brandBorder/30 overflow-hidden">
+                                <div id="rsrp_bar" class="bg-emerald-600 h-full transition-all duration-500"
+                                    style="width: 0%"></div>
+                                <span id="rsrp_val"
+                                    class="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white drop-shadow-md">--
+                                    / --%</span>
+                            </div>
+                        </div>
+
+                        <!-- SINR 进度条 -->
+                        <div class="p-3 space-y-1.5">
+                            <span class="text-brandMuted block text-xs">SINR <sup>5G</sup></span>
+                            <div
+                                class="relative w-full bg-slate-900 h-6 rounded border border-brandBorder/30 overflow-hidden">
+                                <div id="sinr_bar" class="bg-emerald-600 h-full transition-all duration-500"
+                                    style="width: 0%"></div>
+                                <span id="sinr_val"
+                                    class="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white drop-shadow-md">--
+                                    / --%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- 底部数据更新时间 -->
+                <div
+                    class="p-4 border-t border-brandBorder/60 bg-black/10 flex justify-between items-center text-xs text-brandMuted">
+                    <span>Date Updated</span>
+                    <span id="last_updated" class="text-white font-mono">--</span>
+                </div>
+            </div>
+
         </div>
+
     </div>
 
-    <!-- 业务级 WebSocket 全双工交互脚本 -->
+    <!-- WebSocket 同步逻辑 -->
     <script>
-        let ws;
-        const statusBadge = document.getElementById('ws-status');
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        let socket;
 
         function connectWs() {
-            // 自适应识别本地 Host 建立双工管道
-            ws = new WebSocket(`ws://${window.location.host}/ws`);
+            socket = new WebSocket(wsUrl);
 
-            ws.onopen = () => {
-                statusBadge.className = 'w-3 h-3 rounded-full bg-green-500';
+            socket.onopen = () => {
+                console.log("WebSocket connected successfully.");
             };
 
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                if (data.type === 'realtime') {
-                    document.getElementById('cpu-val').innerText = data.cpu + '%';
-                    document.getElementById('temp-val').innerText = data.temperature + '°C';
-                    document.getElementById('sig-val').innerText = data.signal;
-                    document.getElementById('band-val').innerText = data.band;
-                } else if (data.type === 'at_response') {
-                    const outputArea = document.getElementById('at-output');
-                    outputArea.value += `\n> ${data.cmd}\n${data.response}`;
-                    outputArea.scrollTop = outputArea.scrollHeight; // 滚动条自动追踪底部
+            socket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    // 只处理实时流类型数据
+                    if (data.type === "realtime" || !data.type) {
+                        updateUI(data);
+                    }
+                } catch (e) {
+                    console.error("Error parsing websocket packet: ", e);
                 }
             };
 
-            ws.onclose = () => {
-                statusBadge.className = 'w-3 h-3 rounded-full bg-red-500';
-                setTimeout(connectWs, 3000); // 嵌入式断线自动重连保护
+            socket.onclose = () => {
+                console.warn("WebSocket disconnected. Retrying in 3 seconds...");
+                setTimeout(connectWs, 3000);
+            };
+
+            socket.onerror = (err) => {
+                console.error("WebSocket error observed:", err);
+                socket.close();
             };
         }
 
-        function sendAtCommand() {
-            const input = document.getElementById('at-input').value;
-            if (input && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ action: "manual_at", payload: input }));
-                document.getElementById('at-input').value = '';
+        function updateUI(payload) {
+            // 顶栏通用状态指标
+            document.getElementById("temp").innerText = payload.temperature || "-- °C";
+            document.getElementById("sim_status").innerText = payload.sim_status || "--";
+            document.getElementById("signal_pct").innerText = payload.signal_percentage || "--%";
+            document.getElementById("conn_status").innerText = payload.internet_connection || "--";
+
+            // 左栏：网络基础参数
+            document.getElementById("info_sim").innerText = payload.active_sim || "--";
+            document.getElementById("info_provider").innerText = payload.network_provider || "--";
+            document.getElementById("info_mccmnc").innerText = payload.mccmnc || "--";
+            document.getElementById("info_apn").innerText = payload.apn || "--";
+            document.getElementById("info_mode").innerText = payload.network_mode || "--";
+            document.getElementById("info_bands").innerText = payload.bands || "--";
+            document.getElementById("info_bandwidth").innerText = payload.bandwidth || "--";
+            document.getElementById("info_earfcn").innerHTML = payload.earfcn || "--";
+            document.getElementById("info_pci").innerText = payload.pci || "--";
+            document.getElementById("info_ipv4").innerText = payload.ipv4 || "--";
+            document.getElementById("info_ipv6").innerText = payload.ipv6 || "--";
+            document.getElementById("info_uptime").innerText = payload.uptime || "--";
+
+            // 右栏：RF 信号及物理信息
+            document.getElementById("sig_assessment").innerText = payload.assessment || "--";
+            document.getElementById("sig_traffic").innerText = payload.traffic_stats || "--";
+            document.getElementById("sig_cell_id").innerText = payload.cell_id || "--";
+            document.getElementById("sig_enb").innerHTML = payload.enb_id || "--";
+            document.getElementById("sig_tac").innerHTML = payload.tac || "--";
+            document.getElementById("last_updated").innerText = payload.updated || "--";
+
+            // RSRQ 进度条及标签值映射
+            if (payload.ss_rsrq) {
+                const parts = payload.ss_rsrq.split('/');
+                const pct = parts[1] ? parts[1].trim() : "0%";
+                document.getElementById("rsrq_bar").style.width = pct;
+                document.getElementById("rsrq_val").innerText = payload.ss_rsrq;
+            }
+
+            // RSRP 进度条及标签值映射
+            if (payload.ss_rsrp) {
+                const parts = payload.ss_rsrp.split('/');
+                const pct = parts[1] ? parts[1].trim() : "0%";
+                document.getElementById("rsrp_bar").style.width = pct;
+                document.getElementById("rsrp_val").innerText = payload.ss_rsrp;
+            }
+
+            // SINR 进度条及标签值映射
+            if (payload.sinr) {
+                const parts = payload.sinr.split('/');
+                const pct = parts[1] ? parts[1].trim() : "0%";
+                document.getElementById("sinr_bar").style.width = pct;
+                document.getElementById("sinr_val").innerText = payload.sinr;
             }
         }
 
-        function lockBand() {
-            const bands = document.getElementById('band-lock-input').value;
-            if (bands && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ action: "lock_band", payload: bands }));
-            }
-        }
-        // 页面加载自动初始化物理管道
+        // 初始化运行连接
         connectWs();
     </script>
 </body>
 
-</html>
+</html>/html>

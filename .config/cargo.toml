@@ -1,0 +1,9 @@
+[target.armv7-unknown-linux-musleabihf]
+rustflags = [
+    "-C", "target-feature=+neon,+vfp4",
+    "-C", "target-cpu=cortex-a7",
+    "-C", "target-feature=+crt-static",  # 关键：启用全静态编译 (crt-static)
+    "-C", "link-self-contained=yes",     # 关键：自包含链接，不寻找外部启动文件
+    "-C", "linker-flavor=ld.lld",        # 使用 LLD 链接器
+    "-C", "linker=rust-lld"              # 使用 Rust 自带的 LLD
+]

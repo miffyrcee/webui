@@ -19,11 +19,9 @@ use sysinfo::{Components, System};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
 use tokio::time::{Duration, sleep};
-use tokio_serial::SerialStream;
 
-// 串口配置
-const SERIAL_PORT: &str = "/dev/ttyUSB2"; // 移远模块标准的 AT 交互端口
-const BAUD_RATE: u32 = 115200;
+// 配置内置共享内存接口
+const SERIAL_PORT: &str = "/dev/smd11";
 
 struct AtRequest {
     action: String,
@@ -53,7 +51,7 @@ impl IntoResponse for IndexTemplate {
 struct AppState {
     tx: broadcast::Sender<String>,
     active_clients: Arc<AtomicUsize>,
-    serial_port: Arc<Mutex<Option<SerialStream>>>, // 持有独占的串口流
+    serial_port: Arc<Mutex<Option<tokio::fs::File>>>, // 替换为安全的异步物理文件流
     actor_tx: mpsc::Sender<AtRequest>,
 }
 
@@ -63,7 +61,7 @@ struct WsCommand {
     payload: Option<String>,
 }
 
-// 统一遥测数据模型，与 WebUI 界面完全对应
+// 统一遥测数据模型
 #[derive(Serialize, Default, Debug)]
 struct TelemetryData {
     temperature: String,
@@ -102,15 +100,20 @@ async fn main() {
     let (tx, _rx) = broadcast::channel(100);
     let (actor_tx, actor_rx) = mpsc::channel(32);
 
-    // 尝试初始化串口，若失败则在日志警告并降级运行
-    let serial_stream = match SerialStream::open(&tokio_serial::new(SERIAL_PORT, BAUD_RATE)) {
-        Ok(stream) => {
-            println!("✅ 成功打开移远模块串口: {}", SERIAL_PORT);
-            Some(stream)
+    // 使用标准的文件读写方式打开虚拟通道，绕开串口波特率协商，彻底解决 "Not a typewriter" 冲突
+    let serial_stream = match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(SERIAL_PORT)
+    {
+        Ok(std_file) => {
+            println!("✅ 成功打开移远模块内置通道: {}", SERIAL_PORT);
+            // 转换为 tokio 异步文件接口
+            Some(tokio::fs::File::from_std(std_file))
         }
         Err(e) => {
             eprintln!(
-                "⚠️ 串口 {} 打开失败 ({})，系统将运行于模拟器模式下。",
+                "⚠️ 接口 {} 打开失败 ({})，系统将运行于模拟器模式下。",
                 SERIAL_PORT, e
             );
             None
@@ -146,8 +149,8 @@ async fn index_handler() -> impl IntoResponse {
     }
 }
 
-// 执行底层物理串口读写，带超时限制
-async fn send_at_command_raw(serial: &mut SerialStream, cmd: &str) -> Result<String, String> {
+// 模拟或真实执行文件流 AT 读写
+async fn send_at_command_raw(serial: &mut tokio::fs::File, cmd: &str) -> Result<String, String> {
     serial
         .write_all(format!("{}\r\n", cmd).as_bytes())
         .await
@@ -178,15 +181,13 @@ async fn send_at_command_raw(serial: &mut SerialStream, cmd: &str) -> Result<Str
     }
 }
 
-// 调度入口（集成物理通道和降级模拟数据）
-async fn execute_at_command(serial_opt: &mut Option<SerialStream>, cmd: &str) -> String {
+async fn execute_at_command(serial_opt: &mut Option<tokio::fs::File>, cmd: &str) -> String {
     if let Some(serial) = serial_opt {
         match send_at_command_raw(serial, cmd).await {
             Ok(res) => res,
             Err(e) => format!("ERROR: {}", e),
         }
     } else {
-        // 模拟器：返回与图示完美吻合的测试数据
         sleep(Duration::from_millis(50)).await;
         match cmd {
             "AT+CPIN?" => "+CPIN: READY\r\n\r\nOK\r\n".to_string(),
@@ -201,11 +202,10 @@ async fn execute_at_command(serial_opt: &mut Option<SerialStream>, cmd: &str) ->
 async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiver<AtRequest>) {
     let mut sys = System::new_all();
     let mut components = Components::new_with_refreshed_list();
-    let mut interval = tokio::time::interval(Duration::from_millis(3000)); // 对应 3s 刷新率
+    let mut interval = tokio::time::interval(Duration::from_millis(3000));
 
     loop {
         tokio::select! {
-            // 处理 WebSocket 手动发送的 AT 质询
             Some(req) = actor_rx.recv() => {
                 let mut serial_guard = state.serial_port.lock().await;
                 let response = if req.action == "manual_at" {
@@ -217,48 +217,41 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                 let _ = req.resp_tx.send(response);
             }
 
-            // 定期查询与界面更新
             _ = interval.tick() => {
                 if state.active_clients.load(Ordering::Relaxed) > 0 {
                     let mut serial_guard = state.serial_port.lock().await;
 
-                    // 1. 发送多组 AT 指令捕获核心硬件数据
                     let cpin_res = execute_at_command(&mut *serial_guard, "AT+CPIN?").await;
                     let qeng_res = execute_at_command(&mut *serial_guard, "AT+QENG=\"servingcell\"").await;
                     let gpad_res = execute_at_command(&mut *serial_guard, "AT+CGPADDR").await;
 
-                    // 2. 解析 SIM 卡状态
                     let sim_status = if cpin_res.contains("READY") { "Active" } else { "No Card / Locked" };
 
-                    // 3. 解析网络小区及信号质量参数
                     let mut telemetry = TelemetryData::default();
                     telemetry.sim_status = sim_status.to_string();
                     telemetry.active_sim = "SIM 1".to_string();
-                    telemetry.network_provider = "4E2D56FD79FB52A8".to_string(); // 对应图片中移动 Provider 的十六进制
+                    telemetry.network_provider = "4E2D56FD79FB52A8".to_string();
                     telemetry.apn = "apn-here-inside-of-quotes".to_string();
                     telemetry.traffic_stats = "244 MB DL / 60 MB UL".to_string();
 
-                    // 解析 AT+QENG="servingcell" 返回行
                     if let Some(line) = qeng_res.lines().find(|l| l.contains("+QENG: \"servingcell\"")) {
                         let cleaned = line.replace("\"", "");
                         let parts: Vec<&str> = cleaned.split(',').map(|s| s.trim()).collect();
                         if parts.len() >= 14 {
-                            telemetry.network_mode = format!("{} {}", parts[2], parts[3]); // 5G SA TDD
-                            telemetry.mccmnc = format!("{}{}", parts[4], parts[5]); // 46000
+                            telemetry.network_mode = format!("{} {}", parts[2], parts[3]);
+                            telemetry.mccmnc = format!("{}{}", parts[4], parts[5]);
                             telemetry.cell_id = format!("Short 01(1), Long {}(15308472321)", parts[6]);
                             telemetry.enb_id = parts[7].to_string();
                             telemetry.tac = format!("{} (72002F)", parts[8]);
-                            telemetry.bands = format!("NR5G BAND {}, NR5G BAND 28", parts[9]); // 示例多频段显示
+                            telemetry.bands = format!("NR5G BAND {}, NR5G BAND 28", parts[9]);
                             telemetry.bandwidth = format!("NR {} MHz", parts[10]);
                             telemetry.earfcn = "504990, 156490".to_string();
                             telemetry.pci = "751, 297".to_string();
 
-                            // 信号百分比转换换算
                             let rsrp: i32 = parts[11].parse().unwrap_or(-140);
                             let rsrq: i32 = parts[12].parse().unwrap_or(-40);
                             let sinr: i32 = parts[13].parse().unwrap_or(0);
 
-                            // 百分比计算
                             let rsrp_pct = ((rsrp + 140) as f32 / 100.0 * 100.0).clamp(0.0, 100.0) as i32;
                             let rsrq_pct = ((rsrq + 40) as f32 / 45.0 * 100.0).clamp(0.0, 100.0) as i32;
                             let sinr_pct = ((sinr + 20) as f32 / 55.0 * 100.0).clamp(0.0, 100.0) as i32;
@@ -271,7 +264,6 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                         }
                     }
 
-                    // 4. 解析 IP 地址
                     for line in gpad_res.lines() {
                         if line.contains("+CGPADDR:") {
                             let parts: Vec<&str> = line.split(',').collect();
@@ -284,23 +276,20 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                         }
                     }
 
-                    // 5. 补充宿主机系统监控项
                     sys.refresh_cpu_all();
                     components.refresh(false);
                     let cpu_temp = components.iter()
                         .find(|c| c.label().to_uppercase().contains("CPU") || c.label().to_uppercase().contains("PACKAGE"))
-
                         .map_or(46.0, |c| c.temperature().unwrap_or(46.0));
 
                     telemetry.temperature = format!("{:.0} °C", cpu_temp);
-
                     telemetry.internet_connection = if telemetry.ipv4.is_empty() { "Disconnected" } else { "Connected" }.to_string();
 
                     let uptime_sec = System::uptime();
                     telemetry.uptime = format!("{} minutes", uptime_sec / 60);
-                    // telemetry.updated = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) .map(|d| { let secs = d.as_secs(); format!("secs_since_epoch: {}", secs) }).unwrap_or_default();
 
-                    // 广播更新
+                    telemetry.updated = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
+
                     if let Ok(json_str) = serde_json::to_string(&telemetry) {
                         let _ = state.tx.send(json_str);
                     }

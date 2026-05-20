@@ -151,6 +151,8 @@ async fn index_handler() -> impl IntoResponse {
 
 // 模拟或真实执行文件流 AT 读写
 async fn send_at_command_raw(serial: &mut tokio::fs::File, cmd: &str) -> Result<String, String> {
+    let start = std::time::Instant::now();
+
     serial
         .write_all(format!("{}\r\n", cmd).as_bytes())
         .await
@@ -176,7 +178,20 @@ async fn send_at_command_raw(serial: &mut tokio::fs::File, cmd: &str) -> Result<
     };
 
     match tokio::time::timeout(Duration::from_millis(500), read_future).await {
-        Ok(res) => Ok(res),
+        Ok(res) => {
+            let duration = start.elapsed();
+            if res.contains("ERROR") {
+                println!(
+                    "⚠️  AT [{}] 响应异常 ({}ms): {}",
+                    cmd,
+                    duration.as_millis(),
+                    res.trim()
+                );
+            } else {
+                println!("⌨️  AT [{}] 响应成功 ({}ms)", cmd, duration.as_millis());
+            }
+            Ok(res)
+        }
         Err(_) => Err("Timeout".to_string()),
     }
 }
@@ -210,6 +225,7 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                 let mut serial_guard = state.serial_port.lock().await;
                 let response = if req.action == "manual_at" {
                     let cmd = req.payload.unwrap_or_default();
+                    println!("👨‍💻 用户手动执行 AT: {}", cmd);
                     execute_at_command(&mut *serial_guard, &cmd).await
                 } else {
                     "OK".to_string()
@@ -219,7 +235,9 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
 
             _ = interval.tick() => {
                 if state.active_clients.load(Ordering::Relaxed) > 0 {
+                    let start_poll = std::time::Instant::now();
                     let mut serial_guard = state.serial_port.lock().await;
+                    println!("📡 开始周期性硬件轮询 (当前在线客户端: {})", state.active_clients.load(Ordering::Relaxed));
 
                     let cpin_res = execute_at_command(&mut *serial_guard, "AT+CPIN?").await;
                     let qeng_res = execute_at_command(&mut *serial_guard, "AT+QENG=\"servingcell\"").await;
@@ -293,6 +311,8 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                     if let Ok(json_str) = serde_json::to_string(&telemetry) {
                         let _ = state.tx.send(json_str);
                     }
+
+                    println!("✅ 轮询任务完成，耗时: {}ms", start_poll.elapsed().as_millis());
                 }
             }
         }
@@ -304,7 +324,11 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) ->
 }
 
 async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
-    state.active_clients.fetch_add(1, Ordering::Relaxed);
+    let client_count = state.active_clients.fetch_add(1, Ordering::Relaxed) + 1;
+    println!(
+        "🔌 新的 WebSocket 客户端已连接 (ID: {:p}, 当前在线: {})",
+        &socket, client_count
+    );
 
     let mut broadcast_rx = state.tx.subscribe();
     let (local_tx, mut local_rx) = mpsc::channel::<String>(10);
@@ -355,7 +379,8 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
         _ = (&mut send_task) => recv_task.abort(),
         _ = (&mut recv_task) => send_task.abort(),
     };
-    state.active_clients.fetch_sub(1, Ordering::Relaxed);
+    let remaining = state.active_clients.fetch_sub(1, Ordering::Relaxed) - 1;
+    println!("👋 WebSocket 客户端已断开 (当前在线: {})", remaining);
 }
 
 async fn style_handler() -> impl IntoResponse {

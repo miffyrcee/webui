@@ -125,7 +125,6 @@ async fn index_handler() -> impl IntoResponse {
     }
 }
 
-/// 同步发送 AT 命令并读取响应（阻塞）
 fn send_at_command_sync(file: &mut File, cmd: &str) -> Result<String, String> {
     let start = std::time::Instant::now();
     let full_cmd = format!("{}\r\n", cmd);
@@ -165,7 +164,6 @@ fn send_at_command_sync(file: &mut File, cmd: &str) -> Result<String, String> {
     Ok(response)
 }
 
-/// 异步执行 AT 命令（通过 spawn_blocking 运行同步读写）
 async fn execute_at_command(path: &str, cmd: &str, timeout_ms: u64) -> String {
     let path = path.to_string();
     let cmd = cmd.to_string();
@@ -195,10 +193,9 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
     let mut components = Components::new_with_refreshed_list();
     let path = state.serial_path.clone();
 
-    // 当前轮询间隔（秒），默认 3 秒
     let mut interval_secs = 3;
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
-    interval.tick().await; // 第一次立即触发
+    interval.tick().await;
 
     loop {
         tokio::select! {
@@ -213,11 +210,11 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                     "set_interval" => {
                         if let Some(payload) = req.payload {
                             if let Ok(secs) = payload.parse::<u64>() {
-                                let new_secs = secs.max(3); // 最小 3 秒
+                                let new_secs = secs.max(3);
                                 if new_secs != interval_secs {
                                     interval_secs = new_secs;
                                     interval = tokio::time::interval(Duration::from_secs(interval_secs));
-                                    interval.tick().await; // 跳过立即触发，保持原有节奏
+                                    interval.tick().await;
                                     println!("🔄 轮询间隔已动态调整为 {} 秒", interval_secs);
                                 }
                             }
@@ -245,51 +242,65 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                     let mut telemetry = TelemetryData::default();
                     telemetry.sim_status = sim_status.to_string();
                     telemetry.active_sim = "SIM 1".to_string();
-                    telemetry.network_provider = "4E2D56FD79FB52A8".to_string();
-                    telemetry.apn = "apn-here-inside-of-quotes".to_string();
-                    telemetry.traffic_stats = "244 MB DL / 60 MB UL".to_string();
+                    telemetry.network_provider = "CHN-UNICOM".to_string(); // 可改为解析 CMCC/CT
+                    telemetry.apn = "3gnet".to_string(); // 默认 APN，可后续从 AT+CGDCONT 获取
+                    telemetry.traffic_stats = "N/A".to_string();
 
-                    // 解析 +QENG 响应
+                    // 解析 +QENG
                     if let Some(line) = qeng_res.lines().find(|l| l.contains("+QENG: \"servingcell\"")) {
-                        let cleaned = line.replace("\"", "");
-                        let parts: Vec<&str> = cleaned.split(',').map(|s| s.trim()).collect();
+                        let line = line.trim();
+                        let parts: Vec<String> = line
+                            .split(',')
+                            .map(|s| s.trim().trim_matches('"').to_string())
+                            .collect();
                         if parts.len() >= 14 {
                             telemetry.network_mode = format!("{} {}", parts[2], parts[3]);
                             telemetry.mccmnc = format!("{}{}", parts[4], parts[5]);
-                            telemetry.cell_id = format!("Short 01(1), Long {}(15308472321)", parts[6]);
-                            telemetry.enb_id = parts[7].to_string();
-                            telemetry.tac = format!("{} (72002F)", parts[8]);
-                            telemetry.bands = format!("NR5G BAND {}, NR5G BAND 28", parts[9]);
+                            telemetry.cell_id = parts[6].clone();
+                            telemetry.enb_id = parts[7].clone();
+                            telemetry.tac = parts[8].clone();
+                            telemetry.bands = format!("NR5G BAND {}", parts[9]);
                             telemetry.bandwidth = format!("NR {} MHz", parts[10]);
-                            telemetry.earfcn = "504990, 156490".to_string();
-                            telemetry.pci = "751, 297".to_string();
 
+                            // 关键修正：RSRP, RSRQ, SINR 必须正确取值
                             let rsrp: i32 = parts[11].parse().unwrap_or(-140);
-                            let rsrq: i32 = parts[12].parse().unwrap_or(-40);
-                            let sinr: i32 = parts[13].parse().unwrap_or(0);
+                            let rsrq: i32 = parts[12].parse().unwrap_or(-20);
+                            let sinr: i32 = parts[13].parse().unwrap_or(-20);
 
-                            let rsrp_pct = ((rsrp + 140) as f32 / 100.0 * 100.0).clamp(0.0, 100.0) as i32;
-                            let rsrq_pct = ((rsrq + 40) as f32 / 45.0 * 100.0).clamp(0.0, 100.0) as i32;
-                            let sinr_pct = ((sinr + 20) as f32 / 55.0 * 100.0).clamp(0.0, 100.0) as i32;
+                            // 修正百分比映射
+                            let rsrp_pct = ((rsrp + 140) as f32 / 96.0 * 100.0).clamp(0.0, 100.0) as i32;
+                            let rsrq_pct = ((rsrq + 20) as f32 / 17.0 * 100.0).clamp(0.0, 100.0) as i32;
+                            let sinr_pct = ((sinr + 20) as f32 / 50.0 * 100.0).clamp(0.0, 100.0) as i32;
 
                             telemetry.ss_rsrp = format!("{} / {}%", rsrp, rsrp_pct);
                             telemetry.ss_rsrq = format!("{} / {}%", rsrq, rsrq_pct);
                             telemetry.sinr = format!("{} / {}%", sinr, sinr_pct);
                             telemetry.signal_percentage = format!("{}%", rsrp_pct);
                             telemetry.assessment = if rsrp > -80 && sinr > 20 { "Excellent".to_string() } else { "Good".to_string() };
+                        } else {
+                            println!("⚠️ QENG 解析字段不足: {} fields", parts.len());
                         }
+                    } else {
+                        println!("⚠️ 未找到 +QENG 响应行");
                     }
 
-                    // 解析 +CGPADDR 获取 IP
+                    // 解析 +CGPADDR（修正 IPv6 提取）
                     for line in gpad_res.lines() {
                         if line.contains("+CGPADDR:") {
                             let parts: Vec<&str> = line.split(',').collect();
                             if parts.len() >= 2 {
-                                telemetry.ipv4 = parts[1].replace("\"", "").trim().to_string();
+                                let ipv4 = parts[1].trim_matches('"').trim();
+                                if !ipv4.is_empty() && ipv4 != "0.0.0.0" {
+                                    telemetry.ipv4 = ipv4.to_string();
+                                }
                             }
                             if parts.len() >= 3 {
-                                telemetry.ipv6 = parts[2].replace("\"", "").trim().to_string();
+                                let ipv6 = parts[2].trim_matches('"').trim();
+                                if !ipv6.is_empty() && ipv6 != "::" {
+                                    telemetry.ipv6 = ipv6.to_string();
+                                }
                             }
+                            break;
                         }
                     }
 
@@ -305,7 +316,6 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
 
                     let uptime_sec = System::uptime();
                     telemetry.uptime = format!("{} minutes", uptime_sec / 60);
-
                     telemetry.updated = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
                     if let Ok(json_str) = serde_json::to_string(&telemetry) {

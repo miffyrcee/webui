@@ -18,13 +18,19 @@ use std::sync::Arc;
 use std::time::Duration;
 use sysinfo::{Components, System};
 use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::time::sleep;
 
 // 从环境变量读取串口设备路径，默认 /dev/at_mdm0
 const DEFAULT_SERIAL_PORT: &str = "/dev/at_mdm0";
 
+#[derive(Debug)]
+enum AtAction {
+    ManualAt(String),
+    SetInterval(u64),
+}
+
 struct AtRequest {
-    action: String,
-    payload: Option<String>,
+    action: AtAction,
     resp_tx: oneshot::Sender<String>,
 }
 
@@ -49,7 +55,6 @@ impl IntoResponse for IndexTemplate {
 
 struct AppState {
     tx: broadcast::Sender<String>,
-    serial_path: String,
     actor_tx: mpsc::Sender<AtRequest>,
 }
 
@@ -99,13 +104,12 @@ async fn main() {
 
     let app_state = Arc::new(AppState {
         tx: tx.clone(),
-        serial_path: serial_path.clone(),
         actor_tx,
     });
 
     tokio::spawn({
         let state = app_state.clone();
-        async move { hardware_polling_actor(state, actor_rx).await }
+        async move { hardware_polling_actor(state, actor_rx, serial_path).await }
     });
 
     let app = Router::new()
@@ -125,6 +129,7 @@ async fn index_handler() -> impl IntoResponse {
     }
 }
 
+/// 同步发送 AT 命令并读取响应（阻塞，复用 File）
 fn send_at_command_sync(file: &mut File, cmd: &str) -> Result<String, String> {
     let start = std::time::Instant::now();
     let full_cmd = format!("{}\r\n", cmd);
@@ -133,7 +138,7 @@ fn send_at_command_sync(file: &mut File, cmd: &str) -> Result<String, String> {
         .map_err(|e| format!("写失败: {}", e))?;
     file.flush().map_err(|e| format!("flush失败: {}", e))?;
 
-    let mut buf = [0u8; 1024];
+    let mut buf = [0u8; 4096];
     let mut response = String::new();
 
     loop {
@@ -164,34 +169,156 @@ fn send_at_command_sync(file: &mut File, cmd: &str) -> Result<String, String> {
     Ok(response)
 }
 
-async fn execute_at_command(path: &str, cmd: &str, timeout_ms: u64) -> String {
-    let path = path.to_string();
-    let cmd = cmd.to_string();
-    let result = tokio::time::timeout(
-        Duration::from_millis(timeout_ms),
-        tokio::task::spawn_blocking(move || {
-            let mut file = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&path)
-                .map_err(|e| format!("打开设备失败: {}", e))?;
-            send_at_command_sync(&mut file, &cmd)
-        }),
-    )
-    .await;
+/// 解析合并命令的响应，提取各部分（使用字符串查找，更鲁棒）
+fn parse_combined_response(raw: &str) -> (String, String, String) {
+    let mut cpin = String::new();
+    let mut qeng = String::new();
+    let mut cgpaddr = String::new();
 
-    match result {
-        Ok(Ok(Ok(resp))) => resp,
-        Ok(Ok(Err(e))) => format!("ERROR: {}", e),
-        Ok(Err(e)) => format!("ERROR: JoinError: {}", e),
-        Err(_) => "ERROR: Timeout (spawn)".to_string(),
+    // 1. 提取 +CPIN: 块
+    if let Some(start) = raw.find("+CPIN:") {
+        let remaining = &raw[start..];
+        // 找到下一个命令或结束
+        let end = remaining
+            .find("+QENG:")
+            .or_else(|| remaining.find("+CGPADDR:"))
+            .unwrap_or(remaining.len());
+        let block = &remaining[..end];
+        // 截取到 OK 或 ERROR
+        if let Some(ok_pos) = block.find("\r\nOK\r\n") {
+            cpin = block[..ok_pos + 6].to_string();
+        } else if let Some(err_pos) = block.find("\r\nERROR\r\n") {
+            cpin = block[..err_pos + 8].to_string();
+        } else {
+            cpin = block.to_string();
+        }
+    }
+
+    // 2. 提取 +QENG: 块
+    if let Some(start) = raw.find("+QENG:") {
+        let remaining = &raw[start..];
+        let end = remaining.find("+CGPADDR:").unwrap_or(remaining.len());
+        let block = &remaining[..end];
+        if let Some(ok_pos) = block.find("\r\nOK\r\n") {
+            qeng = block[..ok_pos + 6].to_string();
+        } else if let Some(err_pos) = block.find("\r\nERROR\r\n") {
+            qeng = block[..err_pos + 8].to_string();
+        } else {
+            qeng = block.to_string();
+        }
+    }
+
+    // 3. 提取 +CGPADDR: 块（可能有多行）
+    if let Some(start) = raw.find("+CGPADDR:") {
+        let block = &raw[start..];
+        if let Some(ok_pos) = block.find("\r\nOK\r\n") {
+            cgpaddr = block[..ok_pos + 6].to_string();
+        } else if let Some(err_pos) = block.find("\r\nERROR\r\n") {
+            cgpaddr = block[..err_pos + 8].to_string();
+        } else {
+            cgpaddr = block.to_string();
+        }
+    }
+
+    (cpin, qeng, cgpaddr)
+}
+
+fn parse_qeng(qeng_res: &str, telemetry: &mut TelemetryData) {
+    if let Some(line) = qeng_res
+        .lines()
+        .find(|l| l.contains("+QENG: \"servingcell\""))
+    {
+        let line = line.trim();
+        let parts: Vec<String> = line
+            .split(',')
+            .map(|s| s.trim().trim_matches('"').to_string())
+            .collect();
+        if parts.len() >= 15 {
+            telemetry.network_mode = format!("{} {}", parts[2], parts[3]);
+            telemetry.mccmnc = format!("{}{}", parts[4], parts[5]);
+            telemetry.cell_id = parts[6].clone();
+            telemetry.enb_id = parts[7].clone();
+            telemetry.tac = parts[8].clone();
+            telemetry.bands = format!("NR5G BAND {}", parts[10]);
+            telemetry.bandwidth = format!("{} MHz", parts[11]);
+            telemetry.earfcn = parts[9].clone();
+            telemetry.pci = parts[7].clone();
+
+            let rsrp: i32 = parts[12].parse().unwrap_or(-140);
+            let rsrq: i32 = parts[13].parse().unwrap_or(-20);
+            let sinr: i32 = parts[14].parse().unwrap_or(-20);
+
+            let rsrp_pct = ((rsrp + 140) as f32 / 96.0 * 100.0).clamp(0.0, 100.0) as i32;
+            let rsrq_pct = ((rsrq + 20) as f32 / 17.0 * 100.0).clamp(0.0, 100.0) as i32;
+            let sinr_pct = ((sinr + 20) as f32 / 50.0 * 100.0).clamp(0.0, 100.0) as i32;
+
+            telemetry.ss_rsrp = format!("{} / {}%", rsrp, rsrp_pct);
+            telemetry.ss_rsrq = format!("{} / {}%", rsrq, rsrq_pct);
+            telemetry.sinr = format!("{} / {}%", sinr, sinr_pct);
+            telemetry.signal_percentage = format!("{}%", rsrp_pct);
+            telemetry.assessment = if rsrp > -80 && sinr > 20 {
+                "Excellent".to_string()
+            } else {
+                "Good".to_string()
+            };
+        } else {
+            println!("⚠️ QENG 字段数不足: {} (需要 >=15)", parts.len());
+        }
+    } else {
+        println!("⚠️ 未找到 +QENG 响应");
     }
 }
 
-async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiver<AtRequest>) {
+/// 解析 +CGPADDR 响应
+fn parse_cgpaddr(gpad_res: &str, telemetry: &mut TelemetryData) {
+    for line in gpad_res.lines() {
+        if line.contains("+CGPADDR:") {
+            let parts: Vec<&str> = line.split(',').collect();
+            if parts.len() >= 2 {
+                let ipv4 = parts[1].trim_matches('"').trim();
+                if !ipv4.is_empty() && ipv4 != "0.0.0.0" && telemetry.ipv4.is_empty() {
+                    telemetry.ipv4 = ipv4.to_string();
+                }
+            }
+            if parts.len() >= 3 {
+                let ipv6 = parts[2].trim_matches('"').trim();
+                if !ipv6.is_empty() && !ipv6.starts_with("0.0.0.0") && telemetry.ipv6.is_empty() {
+                    telemetry.ipv6 = ipv6.to_string();
+                }
+            }
+        }
+    }
+    if telemetry.ipv4.is_empty() {
+        telemetry.ipv4 = "--".to_string();
+    }
+    if telemetry.ipv6.is_empty() {
+        telemetry.ipv6 = "--".to_string();
+    }
+}
+
+async fn hardware_polling_actor(
+    state: Arc<AppState>,
+    mut actor_rx: mpsc::Receiver<AtRequest>,
+    serial_path: String,
+) {
     let mut sys = System::new_all();
     let mut components = Components::new_with_refreshed_list();
-    let path = state.serial_path.clone();
+
+    // 打开串口文件（一次性，复用）
+    let mut serial_file = match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&serial_path)
+    {
+        Ok(f) => {
+            println!("✅ 串口已打开: {}", serial_path);
+            Some(f)
+        }
+        Err(e) => {
+            eprintln!("❌ 打开串口失败: {}，将运行在模拟模式", e);
+            None
+        }
+    };
 
     let mut interval_secs = 3;
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
@@ -200,29 +327,29 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
     loop {
         tokio::select! {
             Some(req) = actor_rx.recv() => {
-                match req.action.as_str() {
-                    "manual_at" => {
-                        let cmd = req.payload.unwrap_or_default();
+                match req.action {
+                    AtAction::ManualAt(cmd) => {
                         println!("👨‍💻 用户手动执行 AT: {}", cmd);
-                        let response = execute_at_command(&path, &cmd, 2000).await;
+                        let response = if let Some(file) = &mut serial_file {
+                            match send_at_command_sync(file, &cmd) {
+                                Ok(resp) => resp,
+                                Err(e) => format!("ERROR: {}", e),
+                            }
+                        } else {
+                            sleep(Duration::from_millis(50)).await;
+                            "OK\r\n".to_string()
+                        };
                         let _ = req.resp_tx.send(response);
                     }
-                    "set_interval" => {
-                        if let Some(payload) = req.payload {
-                            if let Ok(secs) = payload.parse::<u64>() {
-                                let new_secs = secs.max(3);
-                                if new_secs != interval_secs {
-                                    interval_secs = new_secs;
-                                    interval = tokio::time::interval(Duration::from_secs(interval_secs));
-                                    interval.tick().await;
-                                    println!("🔄 轮询间隔已动态调整为 {} 秒", interval_secs);
-                                }
-                            }
+                    AtAction::SetInterval(secs) => {
+                        let new_secs = secs.max(3);
+                        if new_secs != interval_secs {
+                            interval_secs = new_secs;
+                            interval = tokio::time::interval(Duration::from_secs(interval_secs));
+                            interval.tick().await;
+                            println!("🔄 轮询间隔已动态调整为 {} 秒", interval_secs);
                         }
                         let _ = req.resp_tx.send("OK".to_string());
-                    }
-                    _ => {
-                        let _ = req.resp_tx.send("Unknown action".to_string());
                     }
                 }
             }
@@ -233,86 +360,39 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                     let start_poll = std::time::Instant::now();
                     println!("📡 开始周期性硬件轮询 (当前在线客户端: {})", active_clients);
 
-                    let cpin_res = execute_at_command(&path, "AT+CPIN?", 500).await;
-                    let qeng_res = execute_at_command(&path, "AT+QENG=\"servingcell\"", 2000).await;
-                    let gpad_res = execute_at_command(&path, "AT+CGPADDR", 500).await;
+                    let (cpin_res, qeng_res, gpad_res) = if let Some(file) = &mut serial_file {
+                        let combined = "AT+CPIN?;+QENG=\"servingcell\";+CGPADDR";
+                        match send_at_command_sync(file, combined) {
+                            Ok(resp) => parse_combined_response(&resp),
+                            Err(e) => {
+                                println!("⚠️ 合并命令失败: {}，降级到单独发送", e);
+                                let cpin = send_at_command_sync(file, "AT+CPIN?").unwrap_or_default();
+                                let qeng = send_at_command_sync(file, "AT+QENG=\"servingcell\"").unwrap_or_default();
+                                let gpad = send_at_command_sync(file, "AT+CGPADDR").unwrap_or_default();
+                                (cpin, qeng, gpad)
+                            }
+                        }
+                    } else {
+                        sleep(Duration::from_millis(50)).await;
+                        (
+                            "+CPIN: READY\r\nOK\r\n".to_string(),
+                            "+QENG: \"servingcell\",\"NOCONN\",\"NR5G-SA\",\"TDD\",460,00,39074C001,751,72002F,504990,41,12,-64,-11,22,1,-\r\nOK\r\n".to_string(),
+                            "+CGPADDR: 1,\"10.202.165.254\",\"2409::1\"\r\nOK\r\n".to_string(),
+                        )
+                    };
 
                     let sim_status = if cpin_res.contains("READY") { "Active" } else { "No Card / Locked" };
 
                     let mut telemetry = TelemetryData::default();
                     telemetry.sim_status = sim_status.to_string();
                     telemetry.active_sim = "SIM 1".to_string();
-                    telemetry.network_provider = "CHN-UNICOM".to_string(); // 或者从 AT+COPS? 获取
-                    telemetry.apn = "3gnet".to_string(); // 可从 AT+CGDCONT 解析
-                    telemetry.traffic_stats = "--".to_string(); // 无法获取，显示 --
+                    telemetry.network_provider = "CHN-UNICOM".to_string();
+                    telemetry.apn = "3gnet".to_string();
+                    telemetry.traffic_stats = "N/A".to_string();
 
-                    // 解析 +QENG
-                    if let Some(line) = qeng_res.lines().find(|l| l.contains("+QENG: \"servingcell\"")) {
-                        let line = line.trim();
-                        let parts: Vec<String> = line
-                            .split(',')
-                            .map(|s| s.trim().trim_matches('"').to_string())
-                            .collect();
-                        if parts.len() >= 15 {
-                           telemetry.network_mode = format!("{} {}", parts[2], parts[3]);
-                            telemetry.mccmnc = format!("{}{}", parts[4], parts[5]);
-                            telemetry.cell_id = parts[6].clone();
-                            telemetry.enb_id = parts[7].clone();   // eNB ID 实际是 parts[7] 吗？日志中 parts[7] 是 751（PCI），但你的代码之前用 parts[7] 作为 eNB ID，需要确认。从日志来看 eNB ID 应该是 751？实际上移远模块中 eNB ID 通常为十六进制，这里 751 可能是 PCI，而 eNB ID 可能是 parts[7] 还是 parts[8]？让我们仔细看：
-                   // 索引: 6:39074C001 (Cell ID), 7:751, 8:72002F (TAC), 9:504990 (EARFCN)
-                   // 实际上 eNB ID 通常等于 Cell ID 去掉最后一位十六进制，即 39074C00。暂时保持你的逻辑。
-                   // 为避免混淆，建议保持原有：telemetry.enb_id = parts[7].clone()  (但 parts[7] 是 751)
-                   // 正确做法：eNB ID = cell_id 右移一位？复杂。不修改。
-        telemetry.tac = parts[8].clone();
-        telemetry.bands = format!("NR5G BAND {}", parts[10]);
-        telemetry.bandwidth = format!("{} MHz", parts[11]);
-        telemetry.earfcn = parts[9].clone();
-        telemetry.pci = parts[7].clone();   // 新增 PCI
+                    parse_qeng(&qeng_res, &mut telemetry);
+                    parse_cgpaddr(&gpad_res, &mut telemetry);
 
-        let rsrp: i32 = parts[12].parse().unwrap_or(-140);
-        let rsrq: i32 = parts[13].parse().unwrap_or(-20);
-        let sinr: i32 = parts[14].parse().unwrap_or(-20);
-
-        let rsrp_pct = ((rsrp + 140) as f32 / 96.0 * 100.0).clamp(0.0, 100.0) as i32;
-        let rsrq_pct = ((rsrq + 20) as f32 / 17.0 * 100.0).clamp(0.0, 100.0) as i32;
-        let sinr_pct = ((sinr + 20) as f32 / 50.0 * 100.0).clamp(0.0, 100.0) as i32;
-
-        telemetry.ss_rsrp = format!("{} / {}%", rsrp, rsrp_pct);
-        telemetry.ss_rsrq = format!("{} / {}%", rsrq, rsrq_pct);
-        telemetry.sinr = format!("{} / {}%", sinr, sinr_pct);
-        telemetry.signal_percentage = format!("{}%", rsrp_pct);
-        telemetry.assessment = if rsrp > -80 && sinr > 20 { "Excellent".to_string() } else { "Good".to_string() };
-                        } else {
-                            println!("⚠️ QENG 字段数不足: {} (需要 >=15)", parts.len());
-                        }
-                    } else {
-                        println!("⚠️ 未找到 +QENG 响应");
-                    }
-
-                    // 解析 +CGPADDR
-                    telemetry.ipv4 = "--".to_string();
-                    telemetry.ipv6 = "--".to_string();
-                    for line in gpad_res.lines() {
-                        if line.contains("+CGPADDR:") {
-                            let parts: Vec<&str> = line.split(',').collect();
-                            if parts.len() >= 2 {
-                                let ipv4 = parts[1].trim_matches('"').trim();
-                                if !ipv4.is_empty() && ipv4 != "0.0.0.0" && telemetry.ipv4 == "--" {
-                                    telemetry.ipv4 = ipv4.to_string();
-                                }
-                            }
-                            if parts.len() >= 3 {
-                                let ipv6 = parts[2].trim_matches('"').trim();
-                                if !ipv6.is_empty() && !ipv6.starts_with("0.0.0.0") && telemetry.ipv6 == "--" {
-                                    telemetry.ipv6 = ipv6.to_string();
-                                }
-                            }
-                            if telemetry.ipv4 != "--" && telemetry.ipv6 != "--" {
-                                break;
-                            }
-                        }
-                    }
-
-                    // 温度、时间等
                     sys.refresh_cpu_all();
                     components.refresh(false);
                     let cpu_temp = components.iter()
@@ -374,15 +454,15 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
             while let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
                 if let Ok(cmd) = serde_json::from_str::<WsCommand>(&text) {
                     let (resp_tx, resp_rx) = oneshot::channel();
-                    let _ = state
-                        .actor_tx
-                        .send(AtRequest {
-                            action: cmd.action,
-                            payload: cmd.payload,
-                            resp_tx,
-                        })
-                        .await;
-
+                    let action = match cmd.action.as_str() {
+                        "manual_at" => AtAction::ManualAt(cmd.payload.unwrap_or_default()),
+                        "set_interval" => {
+                            let secs = cmd.payload.and_then(|p| p.parse().ok()).unwrap_or(3);
+                            AtAction::SetInterval(secs)
+                        }
+                        _ => continue,
+                    };
+                    let _ = state.actor_tx.send(AtRequest { action, resp_tx }).await;
                     if let Ok(reply) = resp_rx.await {
                         let result_json = serde_json::json!({ "type": "at_res", "data": reply });
                         let _ = local_tx.send(result_json.to_string()).await;

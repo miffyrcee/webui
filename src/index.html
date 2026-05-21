@@ -142,13 +142,13 @@
                 <div class="p-4 border-t border-brandBorder/60 bg-black/10 flex items-center justify-between">
                     <span class="text-xs text-brandMuted">Refresh Rate (min 3s)</span>
                     <div class="flex space-x-2">
-                        <select
+                        <select id="refreshRateSelect"
                             class="bg-[#12141a] border border-brandBorder text-xs rounded px-2 py-1 text-white focus:outline-none focus:border-emerald-500">
                             <option value="3">3s</option>
                             <option value="5">5s</option>
                             <option value="10">10s</option>
                         </select>
-                        <button
+                        <button id="setRefreshBtn"
                             class="bg-slate-800 border border-brandBorder px-3 py-1 text-xs rounded hover:bg-slate-700 transition">Set</button>
                     </div>
                 </div>
@@ -259,6 +259,12 @@
             };
         }
 
+        function extractPercent(valueWithPercent) {
+            if (!valueWithPercent) return "0%";
+            const match = valueWithPercent.match(/(\d+(?:\.\d+)?)%/);
+            return match ? match[1] + "%" : "0%";
+        }
+
         function updateUI(payload) {
             document.getElementById("temp").innerText = payload.temperature || "-- °C";
             document.getElementById("sim_status").innerText = payload.sim_status || "--";
@@ -296,27 +302,43 @@
 
             if (payload.ss_rsrq) {
                 const parts = payload.ss_rsrq.split('/');
-                const pct = parts[1] ? parts[1].trim() : "0%";
-                document.getElementById("rsrq_bar").style.width = pct;
+                const percent = extractPercent(parts[1]);
+                document.getElementById("rsrq_bar").style.width = percent;
                 document.getElementById("rsrq_val").innerText = payload.ss_rsrq;
             }
 
             if (payload.ss_rsrp) {
                 const parts = payload.ss_rsrp.split('/');
-                const pct = parts[1] ? parts[1].trim() : "0%";
-                document.getElementById("rsrp_bar").style.width = pct;
+                const percent = extractPercent(parts[1]);
+                document.getElementById("rsrp_bar").style.width = percent;
                 document.getElementById("rsrp_val").innerText = payload.ss_rsrp;
             }
 
             if (payload.sinr) {
                 const parts = payload.sinr.split('/');
-                const pct = parts[1] ? parts[1].trim() : "0%";
-                document.getElementById("sinr_bar").style.width = pct;
+                const percent = extractPercent(parts[1]);
+                document.getElementById("sinr_bar").style.width = percent;
                 document.getElementById("sinr_val").innerText = payload.sinr;
             }
         }
 
+        function initIntervalSetter() {
+            const select = document.getElementById('refreshRateSelect');
+            const btn = document.getElementById('setRefreshBtn');
+            if (!select || !btn) return;
+            btn.addEventListener('click', () => {
+                const seconds = parseInt(select.value, 10);
+                if (!isNaN(seconds) && socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ action: "set_interval", payload: seconds.toString() }));
+                    console.log(`设置刷新间隔为 ${seconds} 秒`);
+                } else {
+                    console.warn("WebSocket not ready, cannot set interval.");
+                }
+            });
+        }
+
         connectWs();
+        initIntervalSetter();
     </script>
 </body>
 

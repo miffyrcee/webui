@@ -125,6 +125,7 @@ async fn index_handler() -> impl IntoResponse {
     }
 }
 
+/// 同步发送 AT 命令并读取响应（阻塞）
 fn send_at_command_sync(file: &mut File, cmd: &str) -> Result<String, String> {
     let start = std::time::Instant::now();
     let full_cmd = format!("{}\r\n", cmd);
@@ -164,6 +165,7 @@ fn send_at_command_sync(file: &mut File, cmd: &str) -> Result<String, String> {
     Ok(response)
 }
 
+/// 异步执行 AT 命令（通过 spawn_blocking 运行同步读写）
 async fn execute_at_command(path: &str, cmd: &str, timeout_ms: u64) -> String {
     let path = path.to_string();
     let cmd = cmd.to_string();
@@ -175,35 +177,57 @@ async fn execute_at_command(path: &str, cmd: &str, timeout_ms: u64) -> String {
                 .write(true)
                 .open(&path)
                 .map_err(|e| format!("打开设备失败: {}", e))?;
-            send_at_command_sync(&mut file, &cmd) // 这里返回 Result<String, String>
+            send_at_command_sync(&mut file, &cmd)
         }),
     )
     .await;
 
     match result {
-        Ok(Ok(Ok(s))) => s,                               // 成功拿到 String
-        Ok(Ok(Err(e))) => format!("ERROR: {}", e),        // AT 命令执行错误
-        Ok(Err(e)) => format!("ERROR: JoinError: {}", e), // spawn_blocking  panic
+        Ok(Ok(Ok(resp))) => resp,
+        Ok(Ok(Err(e))) => format!("ERROR: {}", e),
+        Ok(Err(e)) => format!("ERROR: JoinError: {}", e),
         Err(_) => "ERROR: Timeout (spawn)".to_string(),
     }
 }
+
 async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiver<AtRequest>) {
     let mut sys = System::new_all();
     let mut components = Components::new_with_refreshed_list();
-    let mut interval = tokio::time::interval(Duration::from_millis(3000));
     let path = state.serial_path.clone();
+
+    // 当前轮询间隔（秒），默认 3 秒
+    let mut interval_secs = 3;
+    let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
+    interval.tick().await; // 第一次立即触发
 
     loop {
         tokio::select! {
             Some(req) = actor_rx.recv() => {
-                let response = if req.action == "manual_at" {
-                    let cmd = req.payload.unwrap_or_default();
-                    println!("👨‍💻 用户手动执行 AT: {}", cmd);
-                    execute_at_command(&path, &cmd, 2000).await
-                } else {
-                    "OK".to_string()
-                };
-                let _ = req.resp_tx.send(response);
+                match req.action.as_str() {
+                    "manual_at" => {
+                        let cmd = req.payload.unwrap_or_default();
+                        println!("👨‍💻 用户手动执行 AT: {}", cmd);
+                        let response = execute_at_command(&path, &cmd, 2000).await;
+                        let _ = req.resp_tx.send(response);
+                    }
+                    "set_interval" => {
+                        if let Some(payload) = req.payload {
+                            if let Ok(secs) = payload.parse::<u64>() {
+                                let new_secs = secs.max(3); // 最小 3 秒
+                                if new_secs != interval_secs {
+                                    interval_secs = new_secs;
+                                    interval = tokio::time::interval(Duration::from_secs(interval_secs));
+                                    interval.tick().await; // 跳过立即触发，保持原有节奏
+                                    println!("🔄 轮询间隔已动态调整为 {} 秒", interval_secs);
+                                }
+                            }
+                        }
+                        let _ = req.resp_tx.send("OK".to_string());
+                    }
+                    _ => {
+                        let _ = req.resp_tx.send("Unknown action".to_string());
+                    }
+                }
             }
 
             _ = interval.tick() => {
@@ -225,6 +249,7 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                     telemetry.apn = "apn-here-inside-of-quotes".to_string();
                     telemetry.traffic_stats = "244 MB DL / 60 MB UL".to_string();
 
+                    // 解析 +QENG 响应
                     if let Some(line) = qeng_res.lines().find(|l| l.contains("+QENG: \"servingcell\"")) {
                         let cleaned = line.replace("\"", "");
                         let parts: Vec<&str> = cleaned.split(',').map(|s| s.trim()).collect();
@@ -255,6 +280,7 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                         }
                     }
 
+                    // 解析 +CGPADDR 获取 IP
                     for line in gpad_res.lines() {
                         if line.contains("+CGPADDR:") {
                             let parts: Vec<&str> = line.split(',').collect();
@@ -267,6 +293,7 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                         }
                     }
 
+                    // 获取 CPU 温度
                     sys.refresh_cpu_all();
                     components.refresh(false);
                     let cpu_temp = components.iter()

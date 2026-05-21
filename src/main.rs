@@ -11,10 +11,7 @@ use axum::{
 };
 use futures::{sink::SinkExt, stream::StreamExt};
 use serde::{Deserialize, Serialize};
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
+use std::sync::Arc;
 use sysinfo::{Components, System};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
@@ -50,7 +47,6 @@ impl IntoResponse for IndexTemplate {
 
 struct AppState {
     tx: broadcast::Sender<String>,
-    active_clients: Arc<AtomicUsize>,
     serial_port: Arc<Mutex<Option<tokio::fs::File>>>, // 替换为安全的异步物理文件流
     actor_tx: mpsc::Sender<AtRequest>,
 }
@@ -97,7 +93,7 @@ struct TelemetryData {
 
 #[tokio::main]
 async fn main() {
-    let (tx, _rx) = broadcast::channel(100);
+    let (tx, _) = broadcast::channel(100);
     let (actor_tx, actor_rx) = mpsc::channel(32);
 
     // 使用标准的文件读写方式打开虚拟通道，绕开串口波特率协商，彻底解决 "Not a typewriter" 冲突
@@ -122,7 +118,6 @@ async fn main() {
 
     let app_state = Arc::new(AppState {
         tx: tx.clone(),
-        active_clients: Arc::new(AtomicUsize::new(0)),
         serial_port: Arc::new(Mutex::new(serial_stream)),
         actor_tx,
     });
@@ -234,10 +229,11 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
             }
 
             _ = interval.tick() => {
-                if state.active_clients.load(Ordering::Relaxed) > 0 {
+                let active_clients = state.tx.receiver_count();
+                if active_clients > 0 {
                     let start_poll = std::time::Instant::now();
                     let mut serial_guard = state.serial_port.lock().await;
-                    println!("📡 开始周期性硬件轮询 (当前在线客户端: {})", state.active_clients.load(Ordering::Relaxed));
+                    println!("📡 开始周期性硬件轮询 (当前在线客户端: {})", active_clients);
 
                     let cpin_res = execute_at_command(&mut *serial_guard, "AT+CPIN?").await;
                     let qeng_res = execute_at_command(&mut *serial_guard, "AT+QENG=\"servingcell\"").await;
@@ -324,13 +320,11 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) ->
 }
 
 async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
-    let client_count = state.active_clients.fetch_add(1, Ordering::Relaxed) + 1;
+    let mut broadcast_rx = state.tx.subscribe();
     println!(
         "🔌 新的 WebSocket 客户端已连接 (ID: {:p}, 当前在线: {})",
-        &socket, client_count
+        &socket, state.tx.receiver_count()
     );
-
-    let mut broadcast_rx = state.tx.subscribe();
     let (local_tx, mut local_rx) = mpsc::channel::<String>(10);
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
@@ -379,8 +373,10 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
         _ = (&mut send_task) => recv_task.abort(),
         _ = (&mut recv_task) => send_task.abort(),
     };
-    let remaining = state.active_clients.fetch_sub(1, Ordering::Relaxed) - 1;
-    println!("👋 WebSocket 客户端已断开 (当前在线: {})", remaining);
+
+    let _ = send_task.await;
+    let _ = recv_task.await;
+    println!("👋 WebSocket 客户端已断开 (当前在线: {})", state.tx.receiver_count());
 }
 
 async fn style_handler() -> impl IntoResponse {

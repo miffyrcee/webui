@@ -148,6 +148,7 @@ async fn index_handler() -> impl IntoResponse {
 async fn send_at_command_raw(serial: &mut tokio::fs::File, cmd: &str) -> Result<String, String> {
     let start = std::time::Instant::now();
 
+    println!("📤 [串口输出] -> 发送命令: {}", cmd);
     serial
         .write_all(format!("{}\r\n", cmd).as_bytes())
         .await
@@ -177,13 +178,17 @@ async fn send_at_command_raw(serial: &mut tokio::fs::File, cmd: &str) -> Result<
             let duration = start.elapsed();
             if res.contains("ERROR") {
                 println!(
-                    "⚠️  AT [{}] 响应异常 ({}ms): {}",
+                    "⚠️  [串口输入] <-命令: {}, 响应时间: {},返回值 {}.",
                     cmd,
                     duration.as_millis(),
                     res.trim()
                 );
             } else {
-                println!("⌨️  AT [{}] 响应成功 ({}ms)", cmd, duration.as_millis());
+                println!(
+                    "📥 [串口输入] <- 响应成功 ({}ms):\n{}",
+                    duration.as_millis(),
+                    res.trim()
+                );
             }
             Ok(res)
         }
@@ -296,6 +301,7 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                         .find(|c| c.label().to_uppercase().contains("CPU") || c.label().to_uppercase().contains("PACKAGE"))
                         .map_or(46.0, |c| c.temperature().unwrap_or(46.0));
 
+                    println!("🌡️ [温度输入] 硬件传感器采集: {:.1} °C", cpu_temp);
                     telemetry.temperature = format!("{:.0} °C", cpu_temp);
                     telemetry.internet_connection = if telemetry.ipv4.is_empty() { "Disconnected" } else { "Connected" }.to_string();
 
@@ -305,6 +311,7 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                     telemetry.updated = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
                     if let Ok(json_str) = serde_json::to_string(&telemetry) {
+                        println!("📡 [遥测输出] 广播最新状态 (在线人数: {}, 温度: {})", active_clients, telemetry.temperature);
                         let _ = state.tx.send(json_str);
                     }
 
@@ -323,7 +330,8 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     let mut broadcast_rx = state.tx.subscribe();
     println!(
         "🔌 新的 WebSocket 客户端已连接 (ID: {:p}, 当前在线: {})",
-        &socket, state.tx.receiver_count()
+        &socket,
+        state.tx.receiver_count()
     );
     let (local_tx, mut local_rx) = mpsc::channel::<String>(10);
     let (mut ws_sender, mut ws_receiver) = socket.split();
@@ -376,7 +384,10 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
 
     let _ = send_task.await;
     let _ = recv_task.await;
-    println!("👋 WebSocket 客户端已断开 (当前在线: {})", state.tx.receiver_count());
+    println!(
+        "👋 WebSocket 客户端已断开 (当前在线: {})",
+        state.tx.receiver_count()
+    );
 }
 
 async fn style_handler() -> impl IntoResponse {

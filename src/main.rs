@@ -12,14 +12,14 @@ use axum::{
 use futures::{sink::SinkExt, stream::StreamExt};
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::fs::File;
+use std::io::{Read, Write};
 use std::sync::Arc;
+use std::time::Duration;
 use sysinfo::{Components, System};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
-use tokio::time::{Duration, sleep};
-use tokio_serial::{SerialPortBuilderExt, SerialStream};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
-// 从环境变量读取串口路径，默认 /dev/at_mdm0
+// 从环境变量读取串口设备路径，默认 /dev/at_mdm0
 const DEFAULT_SERIAL_PORT: &str = "/dev/at_mdm0";
 
 struct AtRequest {
@@ -49,7 +49,7 @@ impl IntoResponse for IndexTemplate {
 
 struct AppState {
     tx: broadcast::Sender<String>,
-    serial_port: Arc<Mutex<Option<SerialStream>>>, // 真正的异步串口
+    serial_path: String,
     actor_tx: mpsc::Sender<AtRequest>,
 }
 
@@ -59,15 +59,12 @@ struct WsCommand {
     payload: Option<String>,
 }
 
-// 统一遥测数据模型
 #[derive(Serialize, Default, Debug)]
 struct TelemetryData {
     temperature: String,
     sim_status: String,
     signal_percentage: String,
     internet_connection: String,
-
-    // 网络信息
     active_sim: String,
     network_provider: String,
     mccmnc: String,
@@ -80,8 +77,6 @@ struct TelemetryData {
     ipv4: String,
     ipv6: String,
     uptime: String,
-
-    // 信号信息
     assessment: String,
     traffic_stats: String,
     cell_id: String,
@@ -95,23 +90,16 @@ struct TelemetryData {
 
 #[tokio::main]
 async fn main() {
-    // 读取串口路径（环境变量或默认值）
-    let serial_path = env::var("AT_SERIAL_PORT")
-        .unwrap_or_else(|_| DEFAULT_SERIAL_PORT.to_string());
+    let serial_path =
+        env::var("AT_SERIAL_PORT").unwrap_or_else(|_| DEFAULT_SERIAL_PORT.to_string());
     println!("🔌 使用串口设备: {}", serial_path);
 
     let (tx, _) = broadcast::channel(100);
     let (actor_tx, actor_rx) = mpsc::channel(32);
 
-    // 打开串口（如果失败则进入模拟模式）
-    let serial_stream = open_serial_port(&serial_path).await;
-    if serial_stream.is_none() {
-        eprintln!("⚠️ 串口打开失败，系统将以模拟模式运行（无实际硬件通信）");
-    }
-
     let app_state = Arc::new(AppState {
         tx: tx.clone(),
-        serial_port: Arc::new(Mutex::new(serial_stream)),
+        serial_path: serial_path.clone(),
         actor_tx,
     });
 
@@ -137,119 +125,81 @@ async fn index_handler() -> impl IntoResponse {
     }
 }
 
-/// 打开并配置串口（115200 8N1）
-async fn open_serial_port(path: &str) -> Option<SerialStream> {
-    match tokio_serial::new(path, 115200)
-        .data_bits(tokio_serial::DataBits::Eight)
-        .stop_bits(tokio_serial::StopBits::One)
-        .parity(tokio_serial::Parity::None)
-        .flow_control(tokio_serial::FlowControl::None)
-        .open_native_async()
-    {
-        Ok(port) => {
-            println!("✅ 成功打开串口: {}", path);
-            Some(port)
-        }
-        Err(e) => {
-            eprintln!("❌ 打开串口 {} 失败: {}", path, e);
-            None
-        }
-    }
-}
-
-/// 发送 AT 命令并读取响应（带超时）
-async fn send_at_command_raw(
-    port: &mut SerialStream,
-    cmd: &str,
-    timeout_ms: u64,
-) -> Result<String, String> {
+fn send_at_command_sync(file: &mut File, cmd: &str) -> Result<String, String> {
+    let start = std::time::Instant::now();
     let full_cmd = format!("{}\r\n", cmd);
-    println!("📤 [AT] 发送: {}", cmd);
 
-    port.write_all(full_cmd.as_bytes())
-        .await
+    file.write_all(full_cmd.as_bytes())
         .map_err(|e| format!("写失败: {}", e))?;
-    port.flush().await.map_err(|e| format!("flush失败: {}", e))?;
+    file.flush().map_err(|e| format!("flush失败: {}", e))?;
 
-    let mut buf = vec![0u8; 1024];
+    let mut buf = [0u8; 1024];
     let mut response = String::new();
 
-    let read_future = async {
-        loop {
-            match port.read(&mut buf).await {
-                Ok(0) => break,
-                Ok(n) => {
-                    let chunk = String::from_utf8_lossy(&buf[..n]);
-                    response.push_str(&chunk);
-                    if response.contains("\r\nOK\r\n") || response.contains("\r\nERROR\r\n") {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    eprintln!("读错误: {}", e);
+    loop {
+        match file.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                let chunk = String::from_utf8_lossy(&buf[..n]);
+                response.push_str(&chunk);
+                if response.contains("\r\nOK\r\n") || response.contains("\r\nERROR\r\n") {
                     break;
                 }
             }
-        }
-        response
-    };
-
-    match tokio::time::timeout(Duration::from_millis(timeout_ms), read_future).await {
-        Ok(resp) => {
-            if resp.contains("ERROR") {
-                println!("⚠️ [AT] {} 返回 ERROR", cmd);
-            } else {
-                println!("✅ [AT] {} 成功:\n{}", cmd, resp);
-            }
-            Ok(resp)
-        }
-        Err(_) => {
-            println!("❌ [AT] {} 超时 ({}ms)", cmd, timeout_ms);
-            Err("Timeout".to_string())
+            Err(e) => return Err(format!("读错误: {}", e)),
         }
     }
-}
 
-/// 执行 AT 命令（根据串口是否存在选择真实通信或模拟）
-async fn execute_at_command(
-    port_opt: &mut Option<SerialStream>,
-    cmd: &str,
-    timeout_ms: u64,
-) -> String {
-    if let Some(port) = port_opt {
-        match send_at_command_raw(port, cmd, timeout_ms).await {
-            Ok(resp) => resp,
-            Err(e) => format!("ERROR: {}", e),
-        }
+    let elapsed = start.elapsed();
+    if response.contains("ERROR") {
+        println!("⚠️ [AT] {} 返回 ERROR ({}ms)", cmd, elapsed.as_millis());
     } else {
-        // 模拟模式：返回预定义数据
-        sleep(Duration::from_millis(50)).await;
-        match cmd {
-            "AT+CPIN?" => "+CPIN: READY\r\n\r\nOK\r\n".to_string(),
-            "AT+QENG=\"servingcell\"" => {
-                "+QENG: \"servingcell\",\"NOCONN\",\"5G-SA\",\"TDD\",460,00,39074C001,59798720,7471151,41,100,-62,-11,22\r\n\r\nOK\r\n".to_string()
-            }
-            "AT+CGPADDR" => {
-                "+CGPADDR: 1,\"10.15.13.9\",\"2409:8970:a05:c21:bc94:7cd8:1735:604f\"\r\n\r\nOK\r\n".to_string()
-            }
-            _ => "OK\r\n".to_string(),
-        }
+        println!(
+            "✅ [AT] {} 成功 ({}ms):\n{}",
+            cmd,
+            elapsed.as_millis(),
+            response
+        );
     }
+    Ok(response)
 }
 
+async fn execute_at_command(path: &str, cmd: &str, timeout_ms: u64) -> String {
+    let path = path.to_string();
+    let cmd = cmd.to_string();
+    let result = tokio::time::timeout(
+        Duration::from_millis(timeout_ms),
+        tokio::task::spawn_blocking(move || {
+            let mut file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&path)
+                .map_err(|e| format!("打开设备失败: {}", e))?;
+            send_at_command_sync(&mut file, &cmd) // 这里返回 Result<String, String>
+        }),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(Ok(s))) => s,                               // 成功拿到 String
+        Ok(Ok(Err(e))) => format!("ERROR: {}", e),        // AT 命令执行错误
+        Ok(Err(e)) => format!("ERROR: JoinError: {}", e), // spawn_blocking  panic
+        Err(_) => "ERROR: Timeout (spawn)".to_string(),
+    }
+}
 async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiver<AtRequest>) {
     let mut sys = System::new_all();
     let mut components = Components::new_with_refreshed_list();
     let mut interval = tokio::time::interval(Duration::from_millis(3000));
+    let path = state.serial_path.clone();
 
     loop {
         tokio::select! {
             Some(req) = actor_rx.recv() => {
-                let mut serial_guard = state.serial_port.lock().await;
                 let response = if req.action == "manual_at" {
                     let cmd = req.payload.unwrap_or_default();
                     println!("👨‍💻 用户手动执行 AT: {}", cmd);
-                    execute_at_command(&mut *serial_guard, &cmd, 2000).await
+                    execute_at_command(&path, &cmd, 2000).await
                 } else {
                     "OK".to_string()
                 };
@@ -260,12 +210,11 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                 let active_clients = state.tx.receiver_count();
                 if active_clients > 0 {
                     let start_poll = std::time::Instant::now();
-                    let mut serial_guard = state.serial_port.lock().await;
                     println!("📡 开始周期性硬件轮询 (当前在线客户端: {})", active_clients);
 
-                    let cpin_res = execute_at_command(&mut *serial_guard, "AT+CPIN?", 500).await;
-                    let qeng_res = execute_at_command(&mut *serial_guard, "AT+QENG=\"servingcell\"", 2000).await;
-                    let gpad_res = execute_at_command(&mut *serial_guard, "AT+CGPADDR", 500).await;
+                    let cpin_res = execute_at_command(&path, "AT+CPIN?", 500).await;
+                    let qeng_res = execute_at_command(&path, "AT+QENG=\"servingcell\"", 2000).await;
+                    let gpad_res = execute_at_command(&path, "AT+CGPADDR", 500).await;
 
                     let sim_status = if cpin_res.contains("READY") { "Active" } else { "No Card / Locked" };
 
@@ -276,7 +225,6 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                     telemetry.apn = "apn-here-inside-of-quotes".to_string();
                     telemetry.traffic_stats = "244 MB DL / 60 MB UL".to_string();
 
-                    // 解析 +QENG 响应
                     if let Some(line) = qeng_res.lines().find(|l| l.contains("+QENG: \"servingcell\"")) {
                         let cleaned = line.replace("\"", "");
                         let parts: Vec<&str> = cleaned.split(',').map(|s| s.trim()).collect();
@@ -307,7 +255,6 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                         }
                     }
 
-                    // 解析 +CGPADDR 获取 IP
                     for line in gpad_res.lines() {
                         if line.contains("+CGPADDR:") {
                             let parts: Vec<&str> = line.split(',').collect();
@@ -320,7 +267,6 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                         }
                     }
 
-                    // 获取 CPU 温度（模拟或真实）
                     sys.refresh_cpu_all();
                     components.refresh(false);
                     let cpu_temp = components.iter()
@@ -408,7 +354,10 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
 
     let _ = send_task.await;
     let _ = recv_task.await;
-    println!("👋 WebSocket 客户端已断开 (当前在线: {})", state.tx.receiver_count());
+    println!(
+        "👋 WebSocket 客户端已断开 (当前在线: {})",
+        state.tx.receiver_count()
+    );
 }
 
 async fn style_handler() -> impl IntoResponse {

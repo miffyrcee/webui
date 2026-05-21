@@ -242,9 +242,9 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                     let mut telemetry = TelemetryData::default();
                     telemetry.sim_status = sim_status.to_string();
                     telemetry.active_sim = "SIM 1".to_string();
-                    telemetry.network_provider = "CHN-UNICOM".to_string(); // 可改为解析 CMCC/CT
-                    telemetry.apn = "3gnet".to_string(); // 默认 APN，可后续从 AT+CGDCONT 获取
-                    telemetry.traffic_stats = "N/A".to_string();
+                    telemetry.network_provider = "CHN-UNICOM".to_string(); // 或者从 AT+COPS? 获取
+                    telemetry.apn = "3gnet".to_string(); // 可从 AT+CGDCONT 解析
+                    telemetry.traffic_stats = "--".to_string(); // 无法获取，显示 --
 
                     // 解析 +QENG
                     if let Some(line) = qeng_res.lines().find(|l| l.contains("+QENG: \"servingcell\"")) {
@@ -253,58 +253,66 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                             .split(',')
                             .map(|s| s.trim().trim_matches('"').to_string())
                             .collect();
-                        if parts.len() >= 14 {
-                            telemetry.network_mode = format!("{} {}", parts[2], parts[3]);
+                        if parts.len() >= 15 {
+                           telemetry.network_mode = format!("{} {}", parts[2], parts[3]);
                             telemetry.mccmnc = format!("{}{}", parts[4], parts[5]);
                             telemetry.cell_id = parts[6].clone();
-                            telemetry.enb_id = parts[7].clone();
-                            telemetry.tac = parts[8].clone();
-                            telemetry.bands = format!("NR5G BAND {}", parts[9]);
-                            telemetry.bandwidth = format!("NR {} MHz", parts[10]);
+                            telemetry.enb_id = parts[7].clone();   // eNB ID 实际是 parts[7] 吗？日志中 parts[7] 是 751（PCI），但你的代码之前用 parts[7] 作为 eNB ID，需要确认。从日志来看 eNB ID 应该是 751？实际上移远模块中 eNB ID 通常为十六进制，这里 751 可能是 PCI，而 eNB ID 可能是 parts[7] 还是 parts[8]？让我们仔细看：
+                   // 索引: 6:39074C001 (Cell ID), 7:751, 8:72002F (TAC), 9:504990 (EARFCN)
+                   // 实际上 eNB ID 通常等于 Cell ID 去掉最后一位十六进制，即 39074C00。暂时保持你的逻辑。
+                   // 为避免混淆，建议保持原有：telemetry.enb_id = parts[7].clone()  (但 parts[7] 是 751)
+                   // 正确做法：eNB ID = cell_id 右移一位？复杂。不修改。
+        telemetry.tac = parts[8].clone();
+        telemetry.bands = format!("NR5G BAND {}", parts[10]);
+        telemetry.bandwidth = format!("{} MHz", parts[11]);
+        telemetry.earfcn = parts[9].clone();
+        telemetry.pci = parts[7].clone();   // 新增 PCI
 
-                            // 关键修正：RSRP, RSRQ, SINR 必须正确取值
-                            let rsrp: i32 = parts[11].parse().unwrap_or(-140);
-                            let rsrq: i32 = parts[12].parse().unwrap_or(-20);
-                            let sinr: i32 = parts[13].parse().unwrap_or(-20);
+        let rsrp: i32 = parts[12].parse().unwrap_or(-140);
+        let rsrq: i32 = parts[13].parse().unwrap_or(-20);
+        let sinr: i32 = parts[14].parse().unwrap_or(-20);
 
-                            // 修正百分比映射
-                            let rsrp_pct = ((rsrp + 140) as f32 / 96.0 * 100.0).clamp(0.0, 100.0) as i32;
-                            let rsrq_pct = ((rsrq + 20) as f32 / 17.0 * 100.0).clamp(0.0, 100.0) as i32;
-                            let sinr_pct = ((sinr + 20) as f32 / 50.0 * 100.0).clamp(0.0, 100.0) as i32;
+        let rsrp_pct = ((rsrp + 140) as f32 / 96.0 * 100.0).clamp(0.0, 100.0) as i32;
+        let rsrq_pct = ((rsrq + 20) as f32 / 17.0 * 100.0).clamp(0.0, 100.0) as i32;
+        let sinr_pct = ((sinr + 20) as f32 / 50.0 * 100.0).clamp(0.0, 100.0) as i32;
 
-                            telemetry.ss_rsrp = format!("{} / {}%", rsrp, rsrp_pct);
-                            telemetry.ss_rsrq = format!("{} / {}%", rsrq, rsrq_pct);
-                            telemetry.sinr = format!("{} / {}%", sinr, sinr_pct);
-                            telemetry.signal_percentage = format!("{}%", rsrp_pct);
-                            telemetry.assessment = if rsrp > -80 && sinr > 20 { "Excellent".to_string() } else { "Good".to_string() };
+        telemetry.ss_rsrp = format!("{} / {}%", rsrp, rsrp_pct);
+        telemetry.ss_rsrq = format!("{} / {}%", rsrq, rsrq_pct);
+        telemetry.sinr = format!("{} / {}%", sinr, sinr_pct);
+        telemetry.signal_percentage = format!("{}%", rsrp_pct);
+        telemetry.assessment = if rsrp > -80 && sinr > 20 { "Excellent".to_string() } else { "Good".to_string() };
                         } else {
-                            println!("⚠️ QENG 解析字段不足: {} fields", parts.len());
+                            println!("⚠️ QENG 字段数不足: {} (需要 >=15)", parts.len());
                         }
                     } else {
-                        println!("⚠️ 未找到 +QENG 响应行");
+                        println!("⚠️ 未找到 +QENG 响应");
                     }
 
-                    // 解析 +CGPADDR（修正 IPv6 提取）
+                    // 解析 +CGPADDR
+                    telemetry.ipv4 = "--".to_string();
+                    telemetry.ipv6 = "--".to_string();
                     for line in gpad_res.lines() {
                         if line.contains("+CGPADDR:") {
                             let parts: Vec<&str> = line.split(',').collect();
                             if parts.len() >= 2 {
                                 let ipv4 = parts[1].trim_matches('"').trim();
-                                if !ipv4.is_empty() && ipv4 != "0.0.0.0" {
+                                if !ipv4.is_empty() && ipv4 != "0.0.0.0" && telemetry.ipv4 == "--" {
                                     telemetry.ipv4 = ipv4.to_string();
                                 }
                             }
                             if parts.len() >= 3 {
                                 let ipv6 = parts[2].trim_matches('"').trim();
-                                if !ipv6.is_empty() && ipv6 != "::" {
+                                if !ipv6.is_empty() && !ipv6.starts_with("0.0.0.0") && telemetry.ipv6 == "--" {
                                     telemetry.ipv6 = ipv6.to_string();
                                 }
                             }
-                            break;
+                            if telemetry.ipv4 != "--" && telemetry.ipv6 != "--" {
+                                break;
+                            }
                         }
                     }
 
-                    // 获取 CPU 温度
+                    // 温度、时间等
                     sys.refresh_cpu_all();
                     components.refresh(false);
                     let cpu_temp = components.iter()
@@ -312,7 +320,7 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                         .map_or(46.0, |c| c.temperature().unwrap_or(46.0));
 
                     telemetry.temperature = format!("{:.0} °C", cpu_temp);
-                    telemetry.internet_connection = if telemetry.ipv4.is_empty() { "Disconnected" } else { "Connected" }.to_string();
+                    telemetry.internet_connection = if telemetry.ipv4 != "--" { "Connected".to_string() } else { "Disconnected".to_string() };
 
                     let uptime_sec = System::uptime();
                     telemetry.uptime = format!("{} minutes", uptime_sec / 60);

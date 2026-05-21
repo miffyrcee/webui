@@ -139,7 +139,7 @@ async fn main() {
         .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    println!("⚡ 移远 5G 终端 WebUI 服务端已就绪: http://127.0.0.1:3000");
+    println!("⚡ 移远 5G 终端 WebUI 服务端已就绪: http://0.0.0.0:3000");
     axum::serve(listener, app).await.unwrap();
 }
 

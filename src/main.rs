@@ -11,14 +11,16 @@ use axum::{
 };
 use futures::{sink::SinkExt, stream::StreamExt};
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::sync::Arc;
 use sysinfo::{Components, System};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio::time::{Duration, sleep};
+use tokio_serial::{SerialPortBuilderExt, SerialStream};
 
-// 配置内置共享内存接口
-const SERIAL_PORT: &str = "/dev/smd11";
+// 从环境变量读取串口路径，默认 /dev/at_mdm0
+const DEFAULT_SERIAL_PORT: &str = "/dev/at_mdm0";
 
 struct AtRequest {
     action: String,
@@ -47,7 +49,7 @@ impl IntoResponse for IndexTemplate {
 
 struct AppState {
     tx: broadcast::Sender<String>,
-    serial_port: Arc<Mutex<Option<tokio::fs::File>>>, // 替换为安全的异步物理文件流
+    serial_port: Arc<Mutex<Option<SerialStream>>>, // 真正的异步串口
     actor_tx: mpsc::Sender<AtRequest>,
 }
 
@@ -93,28 +95,19 @@ struct TelemetryData {
 
 #[tokio::main]
 async fn main() {
+    // 读取串口路径（环境变量或默认值）
+    let serial_path = env::var("AT_SERIAL_PORT")
+        .unwrap_or_else(|_| DEFAULT_SERIAL_PORT.to_string());
+    println!("🔌 使用串口设备: {}", serial_path);
+
     let (tx, _) = broadcast::channel(100);
     let (actor_tx, actor_rx) = mpsc::channel(32);
 
-    // 使用标准的文件读写方式打开虚拟通道，绕开串口波特率协商，彻底解决 "Not a typewriter" 冲突
-    let serial_stream = match std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(SERIAL_PORT)
-    {
-        Ok(std_file) => {
-            println!("✅ 成功打开移远模块内置通道: {}", SERIAL_PORT);
-            // 转换为 tokio 异步文件接口
-            Some(tokio::fs::File::from_std(std_file))
-        }
-        Err(e) => {
-            eprintln!(
-                "⚠️ 接口 {} 打开失败 ({})，系统将运行于模拟器模式下。",
-                SERIAL_PORT, e
-            );
-            None
-        }
-    };
+    // 打开串口（如果失败则进入模拟模式）
+    let serial_stream = open_serial_port(&serial_path).await;
+    if serial_stream.is_none() {
+        eprintln!("⚠️ 串口打开失败，系统将以模拟模式运行（无实际硬件通信）");
+    }
 
     let app_state = Arc::new(AppState {
         tx: tx.clone(),
@@ -144,71 +137,101 @@ async fn index_handler() -> impl IntoResponse {
     }
 }
 
-// 模拟或真实执行文件流 AT 读写
-async fn send_at_command_raw(serial: &mut tokio::fs::File, cmd: &str) -> Result<String, String> {
-    let start = std::time::Instant::now();
+/// 打开并配置串口（115200 8N1）
+async fn open_serial_port(path: &str) -> Option<SerialStream> {
+    match tokio_serial::new(path, 115200)
+        .data_bits(tokio_serial::DataBits::Eight)
+        .stop_bits(tokio_serial::StopBits::One)
+        .parity(tokio_serial::Parity::None)
+        .flow_control(tokio_serial::FlowControl::None)
+        .open_native_async()
+    {
+        Ok(port) => {
+            println!("✅ 成功打开串口: {}", path);
+            Some(port)
+        }
+        Err(e) => {
+            eprintln!("❌ 打开串口 {} 失败: {}", path, e);
+            None
+        }
+    }
+}
 
-    println!("📤 [串口输出] -> 发送命令: {}", cmd);
-    serial
-        .write_all(format!("{}\r\n", cmd).as_bytes())
+/// 发送 AT 命令并读取响应（带超时）
+async fn send_at_command_raw(
+    port: &mut SerialStream,
+    cmd: &str,
+    timeout_ms: u64,
+) -> Result<String, String> {
+    let full_cmd = format!("{}\r\n", cmd);
+    println!("📤 [AT] 发送: {}", cmd);
+
+    port.write_all(full_cmd.as_bytes())
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("写失败: {}", e))?;
+    port.flush().await.map_err(|e| format!("flush失败: {}", e))?;
 
-    let mut buffer = vec![0; 1024];
+    let mut buf = vec![0u8; 1024];
     let mut response = String::new();
 
-    // 设定 500ms 超时等待响应
     let read_future = async {
         loop {
-            match serial.read(&mut buffer).await {
-                Ok(0) | Err(_) => break,
+            match port.read(&mut buf).await {
+                Ok(0) => break,
                 Ok(n) => {
-                    response.push_str(&String::from_utf8_lossy(&buffer[..n]));
-                    if response.contains("OK\r\n") || response.contains("ERROR\r\n") {
+                    let chunk = String::from_utf8_lossy(&buf[..n]);
+                    response.push_str(&chunk);
+                    if response.contains("\r\nOK\r\n") || response.contains("\r\nERROR\r\n") {
                         break;
                     }
+                }
+                Err(e) => {
+                    eprintln!("读错误: {}", e);
+                    break;
                 }
             }
         }
         response
     };
 
-    match tokio::time::timeout(Duration::from_millis(500), read_future).await {
-        Ok(res) => {
-            let duration = start.elapsed();
-            if res.contains("ERROR") {
-                println!(
-                    "⚠️  [串口输入] <-命令: {}, 响应时间: {},返回值 {}.",
-                    cmd,
-                    duration.as_millis(),
-                    res.trim()
-                );
+    match tokio::time::timeout(Duration::from_millis(timeout_ms), read_future).await {
+        Ok(resp) => {
+            if resp.contains("ERROR") {
+                println!("⚠️ [AT] {} 返回 ERROR", cmd);
             } else {
-                println!(
-                    "📥 [串口输入] <- 响应成功 ({}ms):\n{}",
-                    duration.as_millis(),
-                    res.trim()
-                );
+                println!("✅ [AT] {} 成功:\n{}", cmd, resp);
             }
-            Ok(res)
+            Ok(resp)
         }
-        Err(_) => Err("Timeout".to_string()),
+        Err(_) => {
+            println!("❌ [AT] {} 超时 ({}ms)", cmd, timeout_ms);
+            Err("Timeout".to_string())
+        }
     }
 }
 
-async fn execute_at_command(serial_opt: &mut Option<tokio::fs::File>, cmd: &str) -> String {
-    if let Some(serial) = serial_opt {
-        match send_at_command_raw(serial, cmd).await {
-            Ok(res) => res,
+/// 执行 AT 命令（根据串口是否存在选择真实通信或模拟）
+async fn execute_at_command(
+    port_opt: &mut Option<SerialStream>,
+    cmd: &str,
+    timeout_ms: u64,
+) -> String {
+    if let Some(port) = port_opt {
+        match send_at_command_raw(port, cmd, timeout_ms).await {
+            Ok(resp) => resp,
             Err(e) => format!("ERROR: {}", e),
         }
     } else {
+        // 模拟模式：返回预定义数据
         sleep(Duration::from_millis(50)).await;
         match cmd {
             "AT+CPIN?" => "+CPIN: READY\r\n\r\nOK\r\n".to_string(),
-            "AT+QENG=\"servingcell\"" => "+QENG: \"servingcell\",\"NOCONN\",\"5G-SA\",\"TDD\",460,00,39074C001,59798720,7471151,41,100,-62,-11,22\r\n\r\nOK\r\n".to_string(),
-            "AT+CGPADDR" => "+CGPADDR: 1,\"10.15.13.9\",\"2409:8970:a05:c21:bc94:7cd8:1735:604f\"\r\n\r\nOK\r\n".to_string(),
-            "AT+QNWINFO" => "+QNWINFO: \"FDD LTE\",\"46000\",\"LTE BAND 3\",1500\r\n+QNWINFO: \"5G NR\",\"46000\",\"NR5G BAND 41\",504990\r\n\r\nOK\r\n".to_string(),
+            "AT+QENG=\"servingcell\"" => {
+                "+QENG: \"servingcell\",\"NOCONN\",\"5G-SA\",\"TDD\",460,00,39074C001,59798720,7471151,41,100,-62,-11,22\r\n\r\nOK\r\n".to_string()
+            }
+            "AT+CGPADDR" => {
+                "+CGPADDR: 1,\"10.15.13.9\",\"2409:8970:a05:c21:bc94:7cd8:1735:604f\"\r\n\r\nOK\r\n".to_string()
+            }
             _ => "OK\r\n".to_string(),
         }
     }
@@ -226,7 +249,7 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                 let response = if req.action == "manual_at" {
                     let cmd = req.payload.unwrap_or_default();
                     println!("👨‍💻 用户手动执行 AT: {}", cmd);
-                    execute_at_command(&mut *serial_guard, &cmd).await
+                    execute_at_command(&mut *serial_guard, &cmd, 2000).await
                 } else {
                     "OK".to_string()
                 };
@@ -240,9 +263,9 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                     let mut serial_guard = state.serial_port.lock().await;
                     println!("📡 开始周期性硬件轮询 (当前在线客户端: {})", active_clients);
 
-                    let cpin_res = execute_at_command(&mut *serial_guard, "AT+CPIN?").await;
-                    let qeng_res = execute_at_command(&mut *serial_guard, "AT+QENG=\"servingcell\"").await;
-                    let gpad_res = execute_at_command(&mut *serial_guard, "AT+CGPADDR").await;
+                    let cpin_res = execute_at_command(&mut *serial_guard, "AT+CPIN?", 500).await;
+                    let qeng_res = execute_at_command(&mut *serial_guard, "AT+QENG=\"servingcell\"", 2000).await;
+                    let gpad_res = execute_at_command(&mut *serial_guard, "AT+CGPADDR", 500).await;
 
                     let sim_status = if cpin_res.contains("READY") { "Active" } else { "No Card / Locked" };
 
@@ -253,6 +276,7 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                     telemetry.apn = "apn-here-inside-of-quotes".to_string();
                     telemetry.traffic_stats = "244 MB DL / 60 MB UL".to_string();
 
+                    // 解析 +QENG 响应
                     if let Some(line) = qeng_res.lines().find(|l| l.contains("+QENG: \"servingcell\"")) {
                         let cleaned = line.replace("\"", "");
                         let parts: Vec<&str> = cleaned.split(',').map(|s| s.trim()).collect();
@@ -283,6 +307,7 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                         }
                     }
 
+                    // 解析 +CGPADDR 获取 IP
                     for line in gpad_res.lines() {
                         if line.contains("+CGPADDR:") {
                             let parts: Vec<&str> = line.split(',').collect();
@@ -295,13 +320,13 @@ async fn hardware_polling_actor(state: Arc<AppState>, mut actor_rx: mpsc::Receiv
                         }
                     }
 
+                    // 获取 CPU 温度（模拟或真实）
                     sys.refresh_cpu_all();
                     components.refresh(false);
                     let cpu_temp = components.iter()
                         .find(|c| c.label().to_uppercase().contains("CPU") || c.label().to_uppercase().contains("PACKAGE"))
                         .map_or(46.0, |c| c.temperature().unwrap_or(46.0));
 
-                    println!("🌡️ [温度输入] 硬件传感器采集: {:.1} °C", cpu_temp);
                     telemetry.temperature = format!("{:.0} °C", cpu_temp);
                     telemetry.internet_connection = if telemetry.ipv4.is_empty() { "Disconnected" } else { "Connected" }.to_string();
 
@@ -329,8 +354,7 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) ->
 async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     let mut broadcast_rx = state.tx.subscribe();
     println!(
-        "🔌 新的 WebSocket 客户端已连接 (ID: {:p}, 当前在线: {})",
-        &socket,
+        "🔌 新的 WebSocket 客户端已连接 (当前在线: {})",
         state.tx.receiver_count()
     );
     let (local_tx, mut local_rx) = mpsc::channel::<String>(10);
@@ -384,10 +408,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
 
     let _ = send_task.await;
     let _ = recv_task.await;
-    println!(
-        "👋 WebSocket 客户端已断开 (当前在线: {})",
-        state.tx.receiver_count()
-    );
+    println!("👋 WebSocket 客户端已断开 (当前在线: {})", state.tx.receiver_count());
 }
 
 async fn style_handler() -> impl IntoResponse {

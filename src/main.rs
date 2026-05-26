@@ -133,12 +133,11 @@ async fn index_handler() -> impl IntoResponse {
     }
 }
 
-/// 异步发送 AT 命令并读取响应（修复核心编译错误，支持异步读写与等待）
+/// 异步发送 AT 命令并读取响应
 async fn send_at_command_async(file: &mut File, cmd: &str) -> Result<String, String> {
     let start = std::time::Instant::now();
     let full_cmd = format!("{}\r\n", cmd);
 
-    // 此处必须加上 .await
     file.write_all(full_cmd.as_bytes())
         .await
         .map_err(|e| format!("写失败: {}", e))?;
@@ -150,7 +149,6 @@ async fn send_at_command_async(file: &mut File, cmd: &str) -> Result<String, Str
     let mut response = String::new();
 
     loop {
-        // 此处必须加上 .await
         match file.read(&mut buf).await {
             Ok(0) => break,
             Ok(n) => {
@@ -178,13 +176,12 @@ async fn send_at_command_async(file: &mut File, cmd: &str) -> Result<String, Str
     Ok(response)
 }
 
-/// 解析合并命令的响应，提取各部分（使用字符串查找，更鲁棒）
+/// 解析合并命令的响应，提取各部分
 fn parse_combined_response(raw: &str) -> (String, String, String) {
     let mut cpin = String::new();
     let mut qeng = String::new();
     let mut cgpaddr = String::new();
 
-    // 1. 提取 +CPIN: 块
     if let Some(start) = raw.find("+CPIN:") {
         let remaining = &raw[start..];
         let end = remaining
@@ -201,7 +198,6 @@ fn parse_combined_response(raw: &str) -> (String, String, String) {
         }
     }
 
-    // 2. 提取 +QENG: 块
     if let Some(start) = raw.find("+QENG:") {
         let remaining = &raw[start..];
         let end = remaining.find("+CGPADDR:").unwrap_or(remaining.len());
@@ -215,7 +211,6 @@ fn parse_combined_response(raw: &str) -> (String, String, String) {
         }
     }
 
-    // 3. 提取 +CGPADDR: 块（可能有多行）
     if let Some(start) = raw.find("+CGPADDR:") {
         let block = &raw[start..];
         if let Some(ok_pos) = block.find("\r\nOK\r\n") {
@@ -251,7 +246,6 @@ fn parse_qeng(qeng_res: &str, telemetry: &mut TelemetryData) {
             telemetry.earfcn = parts[9].clone();
             telemetry.pci = parts[7].clone();
 
-            // 1. 保持这三个是纯数字 i32 类型
             let rsrp: i32 = parts[12].parse().unwrap_or(-140);
             let rsrq: i32 = parts[13].parse().unwrap_or(-20);
             let sinr: i32 = parts[14].parse().unwrap_or(-20);
@@ -260,14 +254,12 @@ fn parse_qeng(qeng_res: &str, telemetry: &mut TelemetryData) {
             let rsrq_pct = ((rsrq + 20) as f32 / 17.0 * 100.0).clamp(0.0, 100.0) as i32;
             let sinr_pct = ((sinr + 20) as f32 / 50.0 * 100.0).clamp(0.0, 100.0) as i32;
 
-            // 2. 优先进行数字的大小比较，计算出 assessment（避免变量污染）
             telemetry.assessment = if rsrp > -80 && sinr > 20 {
                 "Excellent".to_string()
             } else {
                 "Good".to_string()
             };
 
-            // 3. 最后再把它们格式化为 String 存入 telemetry 结构体
             telemetry.ss_rsrp = format!("{} / {}%", rsrp, rsrp_pct);
             telemetry.ss_rsrq = format!("{} / {}%", rsrq, rsrq_pct);
             telemetry.sinr = format!("{} / {}%", sinr, sinr_pct);
@@ -440,6 +432,8 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) ->
     ws.on_upgrade(|socket| handle_ws(socket, state))
 }
 
+/// ✅ 已完美重构：剔除了外部不可控的 tokio::spawn(JoinHandle)
+/// 利用当前的异步上下文直接协同驱动流，配合通道的自然关闭，彻底切断与 Axum 运行时的解耦 Panic
 async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     let mut broadcast_rx = state.tx.subscribe();
     println!(
@@ -453,26 +447,32 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     let (local_tx, mut local_rx) = mpsc::channel::<String>(10);
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
-    let mut send_task = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                Ok(msg) = broadcast_rx.recv() => {
-                    if ws_sender.send(Message::Text(msg.into())).await.is_err() {
-                        break;
+    // 创建一个互通子任务，用来包裹原本并发运行的读取和发送流
+    // 我们不再在外部包裹 `tokio::spawn` 的变量名，而是直接原地执行 select
+    tokio::select! {
+        // 分支 1：处理下行发送数据流（广播的系统状态更新 + 局部的 AT 指令回复）
+        _ = async {
+            loop {
+                tokio::select! {
+                    Ok(msg) = broadcast_rx.recv() => {
+                        if ws_sender.send(Message::Text(msg.into())).await.is_err() {
+                            break;
+                        }
                     }
-                }
-                Some(reply) = local_rx.recv() => {
-                    if ws_sender.send(Message::Text(reply.into())).await.is_err() {
-                        break;
+                    Some(reply) = local_rx.recv() => {
+                        if ws_sender.send(Message::Text(reply.into())).await.is_err() {
+                            break;
+                        }
                     }
                 }
             }
-        }
-    });
+        } => {
+            println!("💬 WebSocket 发送通道中断，准备断开连接");
+        },
 
-    let mut recv_task = tokio::spawn({
-        let state_inner = state.clone();
-        async move {
+        // 分支 2：处理上行接收数据流（浏览器发来的手动 AT 请求或页面活跃指令）
+        _ = async {
+            let state_inner = state.clone();
             while let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
                 if let Ok(cmd) = serde_json::from_str::<WsCommand>(&text) {
                     let (resp_tx, resp_rx) = oneshot::channel();
@@ -503,21 +503,22 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
 
                     if let Ok(reply) = resp_rx.await {
                         let result_json = serde_json::json!({ "type": "at_res", "data": reply });
-                        let _ = local_tx.send(result_json.to_string()).await;
+                        if local_tx.send(result_json.to_string()).await.is_err() {
+                            break;
+                        }
                     }
                 }
             }
+        } => {
+            println!("💬 浏览器主动断开 WebSocket 连接（接收流正常结束）");
         }
-    });
-
-    tokio::select! {
-        _ = (&mut send_task) => recv_task.abort(),
-        _ = (&mut recv_task) => send_task.abort(),
     };
 
-    let _ = send_task.await;
-    let _ = recv_task.await;
+    // 💡 核心安全点：此时上面的两个异步块中，只要有一个由于断开连接退出了，
+    // `tokio::select!` 就会立刻熔断并优雅地释放另一个异步块的上下文资源。
+    // 这里没有任何外部 `JoinHandle` 留下来供 Axum 的运行时再次进行污染性 `await`。
 
+    // 彻底断开时，如果是活跃状态则减扣
     if current_is_active {
         state.active_views.fetch_sub(1, Ordering::SeqCst);
     }

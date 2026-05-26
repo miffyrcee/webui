@@ -12,12 +12,15 @@
 <body class="bg-brandBg text-white font-sans min-h-full p-4 md:p-8">
 
     <div class="max-w-7xl mx-auto space-y-6">
-
+ 
         <!-- 头部标题区 -->
         <header class="flex justify-between items-center pb-4 border-b border-brandBorder">
             <div class="flex items-center space-x-3">
-                <span class="text-xl font-bold tracking-wider text-emerald-500">QUECTEL RM520N</span>
-                <span class="text-xs bg-slate-800 text-slate-400 px-2 py-1 rounded">5G NR SA/NSA</span>
+                <div class="relative">
+                    <span class="text-xl font-bold tracking-wider text-emerald-500">QUECTEL RM520N</span>
+                    <div id="ws_status_dot" class="absolute -top-1 -right-2 w-2 h-2 bg-red-500 rounded-full border border-brandBg transition-colors duration-300"></div>
+                </div>
+                <span class="hidden sm:inline-block text-xs bg-slate-800 text-slate-400 px-2 py-1 rounded uppercase tracking-tighter">5G NR SA/NSA</span>
             </div>
             <div class="text-xs text-brandMuted">
                 固件版本: <span class="text-white font-mono">{{ firmware_version }}</span>
@@ -29,7 +32,7 @@
 
             <!-- 温度卡片 -->
             <div
-                class="bg-brandCard border border-brandBorder rounded-md p-6 flex flex-col justify-between min-h-[160px]">
+                class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
                 <div class="flex justify-center items-center">
                     <svg class="w-12 h-12 text-amber-500" fill="none" stroke="currentColor" stroke-width="2"
                         viewBox="0 0 24 24">
@@ -39,7 +42,7 @@
                     </svg>
                 </div>
                 <div class="text-center mt-2">
-                    <span id="temp" class="text-3xl font-semibold font-mono">-- °C</span>
+                    <span id="temp" class="text-3xl font-semibold font-mono group-hover:text-amber-400 transition-colors">-- °C</span>
                 </div>
                 <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">Temperature
                 </div>
@@ -47,7 +50,7 @@
 
             <!-- SIM卡状态卡片 -->
             <div
-                class="bg-brandCard border border-brandBorder rounded-md p-6 flex flex-col justify-between min-h-[160px]">
+                class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
                 <div class="flex justify-center items-center">
                     <svg class="w-12 h-12 text-purple-500" fill="none" stroke="currentColor" stroke-width="2"
                         viewBox="0 0 24 24">
@@ -56,7 +59,7 @@
                     </svg>
                 </div>
                 <div class="text-center mt-2">
-                    <span id="sim_status" class="text-3xl font-semibold">--</span>
+                    <span id="sim_status" class="text-3xl font-semibold group-hover:text-purple-400 transition-colors">--</span>
                 </div>
                 <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">SIM Status
                 </div>
@@ -64,7 +67,7 @@
 
             <!-- 信号百分比卡片 -->
             <div
-                class="bg-brandCard border border-brandBorder rounded-md p-6 flex flex-col justify-between min-h-[160px]">
+                class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
                 <div class="flex justify-center items-center">
                     <svg class="w-12 h-12 text-blue-500" fill="none" stroke="currentColor" stroke-width="2"
                         viewBox="0 0 24 24">
@@ -74,7 +77,7 @@
                     </svg>
                 </div>
                 <div class="text-center mt-2">
-                    <span id="signal_pct" class="text-3xl font-semibold font-mono">--%</span>
+                    <span id="signal_pct" class="text-3xl font-semibold font-mono group-hover:text-blue-400 transition-colors">--%</span>
                 </div>
                 <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">Signal
                     Percentage</div>
@@ -82,7 +85,7 @@
 
             <!-- 网络连接状态卡片 -->
             <div
-                class="bg-brandCard border border-brandBorder rounded-md p-6 flex flex-col justify-between min-h-[160px]">
+              class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
                 <div class="flex justify-center items-center">
                     <svg class="w-12 h-12 text-teal-400" fill="none" stroke="currentColor" stroke-width="2"
                         viewBox="0 0 24 24">
@@ -92,7 +95,7 @@
                     </svg>
                 </div>
                 <div class="text-center mt-2">
-                    <span id="conn_status" class="text-3xl font-semibold">--</span>
+                    <span id="conn_status" class="text-3xl font-semibold group-hover:text-teal-400 transition-colors">--</span>
                 </div>
                 <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">Internet
                     Connection</div>
@@ -104,7 +107,7 @@
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
             <!-- 左栏: Network Information -->
-            <div class="bg-brandCard border border-brandBorder rounded-md flex flex-col justify-between">
+            <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col justify-between shadow-md overflow-hidden">
                 <div>
                     <div class="p-4 border-b border-brandBorder">
                         <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Network Information
@@ -148,14 +151,13 @@
                             <option value="5">5s</option>
                             <option value="10">10s</option>
                         </select>
-                        <button id="setRefreshBtn"
-                            class="bg-slate-800 border border-brandBorder px-3 py-1 text-xs rounded hover:bg-slate-700 transition">Set</button>
+                        <button id="setRefreshBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-1 text-xs rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Set</button>
                     </div>
                 </div>
             </div>
 
             <!-- 右栏: Signal Information & 进度条 -->
-            <div class="bg-brandCard border border-brandBorder rounded-md flex flex-col justify-between">
+            <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col justify-between shadow-md overflow-hidden">
                 <div>
                     <div class="p-4 border-b border-brandBorder">
                         <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Signal Information
@@ -177,7 +179,7 @@
                         <div class="p-3 space-y-1.5">
                             <span class="text-brandMuted block text-xs">SS_RSRQ <sup>5G</sup></span>
                             <div
-                                class="relative w-full bg-slate-900 h-6 rounded border border-brandBorder/30 overflow-hidden">
+                                class="relative w-full h-6 rounded-lg bg-black/40 border border-brandBorder/30 overflow-hidden shadow-inner">
                                 <div id="rsrq_bar" class="bg-emerald-600 h-full transition-all duration-500"
                                     style="width: 0%"></div>
                                 <span id="rsrq_val"
@@ -190,7 +192,7 @@
                         <div class="p-3 space-y-1.5">
                             <span class="text-brandMuted block text-xs">SS_RSRP <sup>5G</sup></span>
                             <div
-                                class="relative w-full bg-slate-900 h-6 rounded border border-brandBorder/30 overflow-hidden">
+                                class="relative w-full h-6 rounded-lg bg-black/40 border border-brandBorder/30 overflow-hidden shadow-inner">
                                 <div id="rsrp_bar" class="bg-emerald-600 h-full transition-all duration-500"
                                     style="width: 0%"></div>
                                 <span id="rsrp_val"
@@ -203,7 +205,7 @@
                         <div class="p-3 space-y-1.5">
                             <span class="text-brandMuted block text-xs">SINR <sup>5G</sup></span>
                             <div
-                                class="relative w-full bg-slate-900 h-6 rounded border border-brandBorder/30 overflow-hidden">
+                                class="relative w-full h-6 rounded-lg bg-black/40 border border-brandBorder/30 overflow-hidden shadow-inner">
                                 <div id="sinr_bar" class="bg-emerald-600 h-full transition-all duration-500"
                                     style="width: 0%"></div>
                                 <span id="sinr_val"
@@ -229,12 +231,16 @@
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws`;
         let socket;
+        let isVisible = true;
 
         function connectWs() {
             socket = new WebSocket(wsUrl);
+            const dot = document.getElementById("ws_status_dot");
 
             socket.onopen = () => {
                 console.log("WebSocket connected successfully.");
+                dot.classList.replace('bg-red-500', 'bg-emerald-500');
+                dot.classList.add('animate-pulse');
             };
 
             socket.onmessage = (event) => {
@@ -250,19 +256,17 @@
 
             socket.onclose = () => {
                 console.warn("WebSocket disconnected. Retrying in 3 seconds...");
+                dot.classList.replace('bg-emerald-500', 'bg-red-500');
+                dot.classList.remove('animate-pulse');
                 setTimeout(connectWs, 3000);
             };
 
             socket.onerror = (err) => {
                 console.error("WebSocket error observed:", err);
+                dot.classList.replace('bg-emerald-500', 'bg-red-500');
+                dot.classList.remove('animate-pulse');
                 socket.close();
             };
-        }
-
-        function extractPercent(valueWithPercent) {
-            if (!valueWithPercent) return "0%";
-            const match = valueWithPercent.match(/(\d+(?:\.\d+)?)%/);
-            return match ? match[1] + "%" : "0%";
         }
 
         function updateUI(payload) {
@@ -300,28 +304,40 @@
                     `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
             }
 
-            if (payload.ss_rsrq) {
-                const parts = payload.ss_rsrq.split('/');
-                const percent = extractPercent(parts[1]);
-                document.getElementById("rsrq_bar").style.width = percent;
-                document.getElementById("rsrq_val").innerText = payload.ss_rsrq;
-            }
-
-            if (payload.ss_rsrp) {
-                const parts = payload.ss_rsrp.split('/');
-                const percent = extractPercent(parts[1]);
-                document.getElementById("rsrp_bar").style.width = percent;
-                document.getElementById("rsrp_val").innerText = payload.ss_rsrp;
-            }
-
-            if (payload.sinr) {
-                const parts = payload.sinr.split('/');
-                const percent = extractPercent(parts[1]);
-                document.getElementById("sinr_bar").style.width = percent;
-                document.getElementById("sinr_val").innerText = payload.sinr;
-            }
+            updateProgressBar("rsrq", payload.ss_rsrq);
+            updateProgressBar("rsrp", payload.ss_rsrp);
+            updateProgressBar("sinr", payload.sinr);
         }
 
+        function updateProgressBar(idPrefix, valueString) {
+            const barElement = document.getElementById(`${idPrefix}_bar`);
+            const valElement = document.getElementById(`${idPrefix}_val`);
+
+            if (!barElement || !valElement) {
+                console.warn(`Elements for ${idPrefix} not found.`);
+                return;
+            }
+
+            if (!valueString) {
+                valElement.innerText = "-- / --%";
+                barElement.style.width = "0%";
+                barElement.classList.remove('bg-red-600', 'bg-yellow-500', 'bg-emerald-600');
+                return;
+            }
+
+            const parts = valueString.split('/');
+            const rawPercent = parts[1] ? parseFloat(parts[1].replace('%', '')) : 0;
+            const percentWidth = `${rawPercent}%`;
+
+            barElement.style.width = percentWidth;
+            valElement.innerText = valueString;
+
+            barElement.classList.remove('bg-red-600', 'bg-yellow-500', 'bg-emerald-600');
+            if (rawPercent < 30) { barElement.classList.add('bg-red-600'); }
+            else if (rawPercent < 70) { barElement.classList.add('bg-yellow-500'); }
+            else { barElement.classList.add('bg-emerald-600'); }
+        }
+        
         function initIntervalSetter() {
             const select = document.getElementById('refreshRateSelect');
             const btn = document.getElementById('setRefreshBtn');
@@ -337,8 +353,28 @@
             });
         }
 
+        // Detect if the user is currently viewing the page
+        function initVisibilityHandler() {
+            document.addEventListener('visibilitychange', () => {
+                isVisible = !document.hidden;
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    // Inform backend to enter power-saving mode if tab is hidden
+                    socket.send(JSON.stringify({ 
+                        action: "set_view_state",
+                        payload: isVisible ? "active" : "idle" 
+                    }));
+                }
+                if (isVisible) {
+                    console.log("UI Active: Normal polling");
+                } else {
+                    console.log("UI Idle: Hardware polling can be reduced");
+                }
+            });
+        }
+
         connectWs();
         initIntervalSetter();
+        initVisibilityHandler();
     </script>
 </body>
 

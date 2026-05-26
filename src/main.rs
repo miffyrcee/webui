@@ -9,14 +9,15 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use futures::{sink::SinkExt, stream::StreamExt};
+use futures::sink::SinkExt;
+use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::env;
-use std::fs::File;
-use std::io::{Read, Write};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use std::{env, sync::Arc};
 use sysinfo::{Components, System};
+use tokio::fs::{File, OpenOptions};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::sleep;
 
@@ -27,6 +28,7 @@ const DEFAULT_SERIAL_PORT: &str = "/dev/at_mdm0";
 enum AtAction {
     ManualAt(String),
     SetInterval(u64),
+    SetViewState(bool), // true = active, false = idle
 }
 
 struct AtRequest {
@@ -56,6 +58,7 @@ impl IntoResponse for IndexTemplate {
 struct AppState {
     tx: broadcast::Sender<String>,
     actor_tx: mpsc::Sender<AtRequest>,
+    active_views: AtomicUsize,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -105,6 +108,7 @@ async fn main() {
     let app_state = Arc::new(AppState {
         tx: tx.clone(),
         actor_tx,
+        active_views: AtomicUsize::new(0),
     });
 
     tokio::spawn({
@@ -129,20 +133,25 @@ async fn index_handler() -> impl IntoResponse {
     }
 }
 
-/// 同步发送 AT 命令并读取响应（阻塞，复用 File）
-fn send_at_command_sync(file: &mut File, cmd: &str) -> Result<String, String> {
+/// 异步发送 AT 命令并读取响应（修复核心编译错误，支持异步读写与等待）
+async fn send_at_command_async(file: &mut File, cmd: &str) -> Result<String, String> {
     let start = std::time::Instant::now();
     let full_cmd = format!("{}\r\n", cmd);
 
+    // 此处必须加上 .await
     file.write_all(full_cmd.as_bytes())
+        .await
         .map_err(|e| format!("写失败: {}", e))?;
-    file.flush().map_err(|e| format!("flush失败: {}", e))?;
+    file.flush()
+        .await
+        .map_err(|e| format!("flush失败: {}", e))?;
 
     let mut buf = [0u8; 4096];
     let mut response = String::new();
 
     loop {
-        match file.read(&mut buf) {
+        // 此处必须加上 .await
+        match file.read(&mut buf).await {
             Ok(0) => break,
             Ok(n) => {
                 let chunk = String::from_utf8_lossy(&buf[..n]);
@@ -178,13 +187,11 @@ fn parse_combined_response(raw: &str) -> (String, String, String) {
     // 1. 提取 +CPIN: 块
     if let Some(start) = raw.find("+CPIN:") {
         let remaining = &raw[start..];
-        // 找到下一个命令或结束
         let end = remaining
             .find("+QENG:")
             .or_else(|| remaining.find("+CGPADDR:"))
             .unwrap_or(remaining.len());
         let block = &remaining[..end];
-        // 截取到 OK 或 ERROR
         if let Some(ok_pos) = block.find("\r\nOK\r\n") {
             cpin = block[..ok_pos + 6].to_string();
         } else if let Some(err_pos) = block.find("\r\nERROR\r\n") {
@@ -244,6 +251,7 @@ fn parse_qeng(qeng_res: &str, telemetry: &mut TelemetryData) {
             telemetry.earfcn = parts[9].clone();
             telemetry.pci = parts[7].clone();
 
+            // 1. 保持这三个是纯数字 i32 类型
             let rsrp: i32 = parts[12].parse().unwrap_or(-140);
             let rsrq: i32 = parts[13].parse().unwrap_or(-20);
             let sinr: i32 = parts[14].parse().unwrap_or(-20);
@@ -252,15 +260,18 @@ fn parse_qeng(qeng_res: &str, telemetry: &mut TelemetryData) {
             let rsrq_pct = ((rsrq + 20) as f32 / 17.0 * 100.0).clamp(0.0, 100.0) as i32;
             let sinr_pct = ((sinr + 20) as f32 / 50.0 * 100.0).clamp(0.0, 100.0) as i32;
 
-            telemetry.ss_rsrp = format!("{} / {}%", rsrp, rsrp_pct);
-            telemetry.ss_rsrq = format!("{} / {}%", rsrq, rsrq_pct);
-            telemetry.sinr = format!("{} / {}%", sinr, sinr_pct);
-            telemetry.signal_percentage = format!("{}%", rsrp_pct);
+            // 2. 优先进行数字的大小比较，计算出 assessment（避免变量污染）
             telemetry.assessment = if rsrp > -80 && sinr > 20 {
                 "Excellent".to_string()
             } else {
                 "Good".to_string()
             };
+
+            // 3. 最后再把它们格式化为 String 存入 telemetry 结构体
+            telemetry.ss_rsrp = format!("{} / {}%", rsrp, rsrp_pct);
+            telemetry.ss_rsrq = format!("{} / {}%", rsrq, rsrq_pct);
+            telemetry.sinr = format!("{} / {}%", sinr, sinr_pct);
+            telemetry.signal_percentage = format!("{}%", rsrp_pct);
         } else {
             println!("⚠️ QENG 字段数不足: {} (需要 >=15)", parts.len());
         }
@@ -269,7 +280,6 @@ fn parse_qeng(qeng_res: &str, telemetry: &mut TelemetryData) {
     }
 }
 
-/// 解析 +CGPADDR 响应
 fn parse_cgpaddr(gpad_res: &str, telemetry: &mut TelemetryData) {
     for line in gpad_res.lines() {
         if line.contains("+CGPADDR:") {
@@ -304,11 +314,11 @@ async fn hardware_polling_actor(
     let mut sys = System::new_all();
     let mut components = Components::new_with_refreshed_list();
 
-    // 打开串口文件（一次性，复用）
-    let mut serial_file = match std::fs::OpenOptions::new()
+    let mut serial_file = match OpenOptions::new()
         .read(true)
         .write(true)
         .open(&serial_path)
+        .await
     {
         Ok(f) => {
             println!("✅ 串口已打开: {}", serial_path);
@@ -331,7 +341,7 @@ async fn hardware_polling_actor(
                     AtAction::ManualAt(cmd) => {
                         println!("👨‍💻 用户手动执行 AT: {}", cmd);
                         let response = if let Some(file) = &mut serial_file {
-                            match send_at_command_sync(file, &cmd) {
+                            match send_at_command_async(file, &cmd).await {
                                 Ok(resp) => resp,
                                 Err(e) => format!("ERROR: {}", e),
                             }
@@ -351,24 +361,31 @@ async fn hardware_polling_actor(
                         }
                         let _ = req.resp_tx.send("OK".to_string());
                     }
+                    AtAction::SetViewState(is_active) => {
+                        if is_active {
+                            state.active_views.fetch_add(1, Ordering::SeqCst);
+                        } else {
+                            state.active_views.fetch_sub(1, Ordering::SeqCst);
+                        }
+                    }
                 }
             }
 
             _ = interval.tick() => {
-                let active_clients = state.tx.receiver_count();
-                if active_clients > 0 {
+                let active_count = state.active_views.load(Ordering::SeqCst);
+                if active_count > 0 {
                     let start_poll = std::time::Instant::now();
-                    println!("📡 开始周期性硬件轮询 (当前在线客户端: {})", active_clients);
+                    println!("📡 开始周期性硬件轮询 (活跃视图: {})", active_count);
 
                     let (cpin_res, qeng_res, gpad_res) = if let Some(file) = &mut serial_file {
                         let combined = "AT+CPIN?;+QENG=\"servingcell\";+CGPADDR";
-                        match send_at_command_sync(file, combined) {
+                        match send_at_command_async(file, combined).await {
                             Ok(resp) => parse_combined_response(&resp),
                             Err(e) => {
                                 println!("⚠️ 合并命令失败: {}，降级到单独发送", e);
-                                let cpin = send_at_command_sync(file, "AT+CPIN?").unwrap_or_default();
-                                let qeng = send_at_command_sync(file, "AT+QENG=\"servingcell\"").unwrap_or_default();
-                                let gpad = send_at_command_sync(file, "AT+CGPADDR").unwrap_or_default();
+                                let cpin = send_at_command_async(file, "AT+CPIN?").await.unwrap_or_default();
+                                let qeng = send_at_command_async(file, "AT+QENG=\"servingcell\"").await.unwrap_or_default();
+                                let gpad = send_at_command_async(file, "AT+CGPADDR").await.unwrap_or_default();
                                 (cpin, qeng, gpad)
                             }
                         }
@@ -407,11 +424,12 @@ async fn hardware_polling_actor(
                     telemetry.updated = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
                     if let Ok(json_str) = serde_json::to_string(&telemetry) {
-                        println!("📡 [遥测输出] 广播最新状态 (在线人数: {}, 温度: {})", active_clients, telemetry.temperature);
                         let _ = state.tx.send(json_str);
                     }
 
                     println!("✅ 轮询任务完成，耗时: {}ms", start_poll.elapsed().as_millis());
+                } else {
+                    println!("💤 硬件轮询处于空闲模式 (无活跃视图)");
                 }
             }
         }
@@ -428,6 +446,10 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
         "🔌 新的 WebSocket 客户端已连接 (当前在线: {})",
         state.tx.receiver_count()
     );
+
+    state.active_views.fetch_add(1, Ordering::SeqCst);
+    let mut current_is_active = true;
+
     let (local_tx, mut local_rx) = mpsc::channel::<String>(10);
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
@@ -449,7 +471,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     });
 
     let mut recv_task = tokio::spawn({
-        let state = state.clone();
+        let state_inner = state.clone();
         async move {
             while let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
                 if let Ok(cmd) = serde_json::from_str::<WsCommand>(&text) {
@@ -460,9 +482,25 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             let secs = cmd.payload.and_then(|p| p.parse().ok()).unwrap_or(3);
                             AtAction::SetInterval(secs)
                         }
+                        "set_view_state" => {
+                            let is_active = cmd.payload.as_deref() == Some("active");
+                            if is_active != current_is_active {
+                                if is_active {
+                                    state_inner.active_views.fetch_add(1, Ordering::SeqCst);
+                                } else {
+                                    state_inner.active_views.fetch_sub(1, Ordering::SeqCst);
+                                }
+                                current_is_active = is_active;
+                            }
+                            continue;
+                        }
                         _ => continue,
                     };
-                    let _ = state.actor_tx.send(AtRequest { action, resp_tx }).await;
+                    let _ = state_inner
+                        .actor_tx
+                        .send(AtRequest { action, resp_tx })
+                        .await;
+
                     if let Ok(reply) = resp_rx.await {
                         let result_json = serde_json::json!({ "type": "at_res", "data": reply });
                         let _ = local_tx.send(result_json.to_string()).await;
@@ -479,6 +517,11 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
 
     let _ = send_task.await;
     let _ = recv_task.await;
+
+    if current_is_active {
+        state.active_views.fetch_sub(1, Ordering::SeqCst);
+    }
+
     println!(
         "👋 WebSocket 客户端已断开 (当前在线: {})",
         state.tx.receiver_count()

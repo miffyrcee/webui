@@ -3,18 +3,17 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RM520N 5G WebUI</title>
-    <!-- 引入由 build.rs 离线编译生成的本地 style.css -->
     <link rel="stylesheet" href="/style.css">
 </head>
 
 <body class="bg-brandBg text-white font-sans min-h-full p-4 md:p-8">
 
     <div class="max-w-7xl mx-auto space-y-6">
- 
-        <!-- 头部标题区 -->
-        <header class="flex justify-between items-center pb-4 border-b border-brandBorder">
+
+        <!-- 头部标题区（不再使用模板变量） -->
+        <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-brandBorder gap-2">
             <div class="flex items-center space-x-3">
                 <div class="relative">
                     <span class="text-xl font-bold tracking-wider text-emerald-500">QUECTEL RM520N</span>
@@ -23,206 +22,196 @@
                 <span class="hidden sm:inline-block text-xs bg-slate-800 text-slate-400 px-2 py-1 rounded uppercase tracking-tighter">5G NR SA/NSA</span>
             </div>
             <div class="text-xs text-brandMuted">
-                固件版本: <span class="text-white font-mono">{{ firmware_version }}</span>
+                固件版本: <span id="firmware_ver" class="text-white font-mono">--</span>
             </div>
         </header>
 
-        <!-- 1. 顶部四大指标卡片 -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-
-            <!-- 温度卡片 -->
-            <div
-                class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
-                <div class="flex justify-center items-center">
-                    <svg class="w-12 h-12 text-amber-500" fill="none" stroke="currentColor" stroke-width="2"
-                        viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round"
-                            d="M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2V5a3 3 0 116 0v14zm0 0h6m-6-4h6m-6-4h4m-4-4h4">
-                        </path>
-                    </svg>
-                </div>
-                <div class="text-center mt-2">
-                    <span id="temp" class="text-3xl font-semibold font-mono group-hover:text-amber-400 transition-colors">-- °C</span>
-                </div>
-                <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">Temperature
-                </div>
-            </div>
-
-            <!-- SIM卡状态卡片 -->
-            <div
-                class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
-                <div class="flex justify-center items-center">
-                    <svg class="w-12 h-12 text-purple-500" fill="none" stroke="currentColor" stroke-width="2"
-                        viewBox="0 0 24 24">
-                        <rect x="5" y="3" width="14" height="18" rx="2" stroke-linejoin="round"></rect>
-                        <path d="M12 9h4m-4 4h4m-4 4h4M8 7v10" stroke-linecap="round"></path>
-                    </svg>
-                </div>
-                <div class="text-center mt-2">
-                    <span id="sim_status" class="text-3xl font-semibold group-hover:text-purple-400 transition-colors">--</span>
-                </div>
-                <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">SIM Status
-                </div>
-            </div>
-
-            <!-- 信号百分比卡片 -->
-            <div
-                class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
-                <div class="flex justify-center items-center">
-                    <svg class="w-12 h-12 text-blue-500" fill="none" stroke="currentColor" stroke-width="2"
-                        viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round"
-                            d="M18 10h.01M15 13h.01M12 16h.01M9 19h.01M21 6h.01"></path>
-                        <path stroke-linecap="round" d="M12 18v2m3-5v5m3-8v8M9 20v-1"></path>
-                    </svg>
-                </div>
-                <div class="text-center mt-2">
-                    <span id="signal_pct" class="text-3xl font-semibold font-mono group-hover:text-blue-400 transition-colors">--%</span>
-                </div>
-                <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">Signal
-                    Percentage</div>
-            </div>
-
-            <!-- 网络连接状态卡片 -->
-            <div
-              class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
-                <div class="flex justify-center items-center">
-                    <svg class="w-12 h-12 text-teal-400" fill="none" stroke="currentColor" stroke-width="2"
-                        viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round"
-                            d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z">
-                        </path>
-                    </svg>
-                </div>
-                <div class="text-center mt-2">
-                    <span id="conn_status" class="text-3xl font-semibold group-hover:text-teal-400 transition-colors">--</span>
-                </div>
-                <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">Internet
-                    Connection</div>
-            </div>
-
+        <!-- Tab 导航 -->
+        <div class="flex space-x-1 bg-brandCard/40 rounded-lg p-1 border border-brandBorder w-fit">
+            <button id="tab_dashboard" onclick="switchTab('dashboard')"
+                class="px-4 py-2 text-sm rounded-md font-medium transition-all bg-emerald-600 text-white shadow-lg">Dashboard</button>
+            <button id="tab_at" onclick="switchTab('at')"
+                class="px-4 py-2 text-sm rounded-md font-medium transition-all text-brandMuted hover:text-white hover:bg-brandCard/60">AT Terminal</button>
         </div>
 
-        <!-- 2. 主体双栏配置表区 -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Dashboard 面板 -->
+        <div id="panel_dashboard" class="space-y-6">
 
-            <!-- 左栏: Network Information -->
-            <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col justify-between shadow-md overflow-hidden">
-                <div>
-                    <div class="p-4 border-b border-brandBorder">
-                        <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Network Information
-                        </h2>
-                    </div>
-                    <div class="divide-y divide-brandBorder/50 font-mono text-sm">
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">Active Sim</span><span
-                                id="info_sim">--</span></div>
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">Network Provider</span><span
-                                id="info_provider" class="text-xs break-all text-right max-w-[220px]">--</span></div>
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">MCCMNC</span><span
-                                id="info_mccmnc">--</span></div>
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">APN</span><span
-                                id="info_apn" class="text-slate-300">--</span></div>
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">Network Mode</span><span
-                                id="info_mode">--</span></div>
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">Bands</span><span
-                                id="info_bands" class="text-right text-xs">--</span></div>
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">Bandwidth</span><span
-                                id="info_bandwidth">--</span></div>
-                        <div class="flex justify-between p-3"><span
-                                class="text-brandMuted">E/ARFCN<sup>4G/5G</sup></span><span id="info_earfcn">--</span>
-                        </div>
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">PCI</span><span
-                                id="info_pci">--</span></div>
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">IPv4</span><span
-                                id="info_ipv4" class="text-emerald-400">--</span></div>
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">IPv6</span><span
-                                id="info_ipv6"
-                                class="text-emerald-400 text-xs break-all text-right max-w-[220px]">--</span></div>
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">Uptime</span><span
-                                id="info_uptime">--</span></div>
-                    </div>
-                </div>
-                <div class="p-4 border-t border-brandBorder/60 bg-black/10 flex items-center justify-between">
-                    <span class="text-xs text-brandMuted">Refresh Rate (min 3s)</span>
-                    <div class="flex space-x-2">
-                        <select id="refreshRateSelect"
-                            class="bg-[#12141a] border border-brandBorder text-xs rounded px-2 py-1 text-white focus:outline-none focus:border-emerald-500">
-                            <option value="3">3s</option>
-                            <option value="5">5s</option>
-                            <option value="10">10s</option>
-                        </select>
-                        <button id="setRefreshBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-1 text-xs rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Set</button>
-                    </div>
-                </div>
-            </div>
+            <!-- 1. 顶部四大指标卡片 -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
-            <!-- 右栏: Signal Information & 进度条 -->
-            <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col justify-between shadow-md overflow-hidden">
-                <div>
-                    <div class="p-4 border-b border-brandBorder">
-                        <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Signal Information
-                        </h2>
-                    </div>
-                    <div class="divide-y divide-brandBorder/50 font-mono text-sm">
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">Assessment</span><span
-                                id="sig_assessment" class="text-emerald-400 font-bold">--</span></div>
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">Traffic Stats</span><span
-                                id="sig_traffic">--</span></div>
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">CELL ID</span><span
-                                id="sig_cell_id" class="text-right text-xs">--</span></div>
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">eNB ID
-                                <sup>4G/5G</sup></span><span id="sig_enb">--</span></div>
-                        <div class="flex justify-between p-3"><span class="text-brandMuted">TAC
-                                <sup>4G/5G</sup></span><span id="sig_tac">--</span></div>
-
-                        <!-- RSRQ 进度条 -->
-                        <div class="p-3 space-y-1.5">
-                            <span class="text-brandMuted block text-xs">SS_RSRQ <sup>5G</sup></span>
-                            <div
-                                class="relative w-full h-6 rounded-lg bg-black/40 border border-brandBorder/30 overflow-hidden shadow-inner">
-                                <div id="rsrq_bar" class="bg-emerald-600 h-full transition-all duration-500"
-                                    style="width: 0%"></div>
-                                <span id="rsrq_val"
-                                    class="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white drop-shadow-md">--
-                                    / --%</span>
-                            </div>
-                        </div>
-
-                        <!-- RSRP 进度条 -->
-                        <div class="p-3 space-y-1.5">
-                            <span class="text-brandMuted block text-xs">SS_RSRP <sup>5G</sup></span>
-                            <div
-                                class="relative w-full h-6 rounded-lg bg-black/40 border border-brandBorder/30 overflow-hidden shadow-inner">
-                                <div id="rsrp_bar" class="bg-emerald-600 h-full transition-all duration-500"
-                                    style="width: 0%"></div>
-                                <span id="rsrp_val"
-                                    class="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white drop-shadow-md">--
-                                    / --%</span>
-                            </div>
-                        </div>
-
-                        <!-- SINR 进度条 -->
-                        <div class="p-3 space-y-1.5">
-                            <span class="text-brandMuted block text-xs">SINR <sup>5G</sup></span>
-                            <div
-                                class="relative w-full h-6 rounded-lg bg-black/40 border border-brandBorder/30 overflow-hidden shadow-inner">
-                                <div id="sinr_bar" class="bg-emerald-600 h-full transition-all duration-500"
-                                    style="width: 0%"></div>
-                                <span id="sinr_val"
-                                    class="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white drop-shadow-md">--
-                                    / --%</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <!-- 底部数据更新时间 -->
                 <div
-                    class="p-4 border-t border-brandBorder/60 bg-black/10 flex justify-between items-center text-xs text-brandMuted">
-                    <span>Date Updated</span>
-                    <span id="last_updated" class="text-white font-mono">--</span>
+                    class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
+                    <div class="flex justify-center items-center">
+                        <svg class="w-12 h-12 text-amber-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2V5a3 3 0 116 0v14zm0 0h6m-6-4h6m-6-4h4m-4-4h4"></path>
+                        </svg>
+                    </div>
+                    <div class="text-center mt-2">
+                        <span id="temp" class="text-3xl font-semibold font-mono group-hover:text-amber-400 transition-colors">-- °C</span>
+                    </div>
+                    <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">Temperature</div>
                 </div>
+
+                <div
+                    class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
+                    <div class="flex justify-center items-center">
+                        <svg class="w-12 h-12 text-purple-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <rect x="5" y="3" width="14" height="18" rx="2" stroke-linejoin="round"></rect>
+                            <path d="M12 9h4m-4 4h4m-4 4h4M8 7v10" stroke-linecap="round"></path>
+                        </svg>
+                    </div>
+                    <div class="text-center mt-2">
+                        <span id="sim_status" class="text-3xl font-semibold group-hover:text-purple-400 transition-colors">--</span>
+                    </div>
+                    <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">SIM Status</div>
+                </div>
+
+                <div
+                    class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
+                    <div class="flex justify-center items-center">
+                        <svg class="w-12 h-12 text-blue-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M18 10h.01M15 13h.01M12 16h.01M9 19h.01M21 6h.01"></path>
+                            <path stroke-linecap="round" d="M12 18v2m3-5v5m3-8v8M9 20v-1"></path>
+                        </svg>
+                    </div>
+                    <div class="text-center mt-2">
+                        <span id="signal_pct" class="text-3xl font-semibold font-mono group-hover:text-blue-400 transition-colors">--%</span>
+                    </div>
+                    <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">Signal Percentage</div>
+                </div>
+
+                <div
+                    class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
+                    <div class="flex justify-center items-center">
+                        <svg class="w-12 h-12 text-teal-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path>
+                        </svg>
+                    </div>
+                    <div class="text-center mt-2">
+                        <span id="conn_status" class="text-3xl font-semibold group-hover:text-teal-400 transition-colors">--</span>
+                    </div>
+                    <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">Internet Connection</div>
+                </div>
+
             </div>
 
+            <!-- 2. 主体双栏配置表区 -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                <!-- 左栏: Network Information -->
+                <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col justify-between shadow-md overflow-hidden">
+                    <div>
+                        <div class="p-4 border-b border-brandBorder">
+                            <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Network Information</h2>
+                        </div>
+                        <div class="divide-y divide-brandBorder/50 font-mono text-sm">
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">Active Sim</span><span id="info_sim">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">Network Provider</span><span id="info_provider" class="text-xs break-all text-right max-w-[220px]">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">MCCMNC</span><span id="info_mccmnc">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">APN</span><span id="info_apn" class="text-slate-300">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">Network Mode</span><span id="info_mode">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">Bands</span><span id="info_bands" class="text-right text-xs">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">Bandwidth</span><span id="info_bandwidth">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">E/ARFCN<sup>4G/5G</sup></span><span id="info_earfcn">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">PCI</span><span id="info_pci">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">IPv4</span><span id="info_ipv4" class="text-emerald-400">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">IPv6</span><span id="info_ipv6" class="text-emerald-400 text-xs break-all text-right max-w-[220px]">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">Uptime</span><span id="info_uptime">--</span></div>
+                        </div>
+                    </div>
+                    <div class="p-4 border-t border-brandBorder/60 bg-black/10 flex items-center justify-between">
+                        <span class="text-xs text-brandMuted">Refresh Rate (min 3s)</span>
+                        <div class="flex space-x-2">
+                            <select id="refreshRateSelect"
+                                class="bg-[#12141a] border border-brandBorder text-xs rounded px-2 py-1 text-white focus:outline-none focus:border-emerald-500">
+                                <option value="3">3s</option>
+                                <option value="5">5s</option>
+                                <option value="10">10s</option>
+                            </select>
+                            <button id="setRefreshBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-1 text-xs rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Set</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右栏: Signal Information -->
+                <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col justify-between shadow-md overflow-hidden">
+                    <div>
+                        <div class="p-4 border-b border-brandBorder">
+                            <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Signal Information</h2>
+                        </div>
+                        <div class="divide-y divide-brandBorder/50 font-mono text-sm">
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">Assessment</span><span id="sig_assessment" class="text-emerald-400 font-bold">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">Traffic Stats</span><span id="sig_traffic">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">CELL ID</span><span id="sig_cell_id" class="text-right text-xs">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">eNB ID <sup>4G/5G</sup></span><span id="sig_enb">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">TAC <sup>4G/5G</sup></span><span id="sig_tac">--</span></div>
+
+                            <div class="p-3 space-y-1.5">
+                                <span class="text-brandMuted block text-xs">SS_RSRQ <sup>5G</sup></span>
+                                <div class="relative w-full h-6 rounded-lg bg-black/40 border border-brandBorder/30 overflow-hidden shadow-inner">
+                                    <div id="rsrq_bar" class="bg-emerald-600 h-full transition-all duration-500" style="width: 0%"></div>
+                                    <span id="rsrq_val" class="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white drop-shadow-md">-- / --%</span>
+                                </div>
+                            </div>
+
+                            <div class="p-3 space-y-1.5">
+                                <span class="text-brandMuted block text-xs">SS_RSRP <sup>5G</sup></span>
+                                <div class="relative w-full h-6 rounded-lg bg-black/40 border border-brandBorder/30 overflow-hidden shadow-inner">
+                                    <div id="rsrp_bar" class="bg-emerald-600 h-full transition-all duration-500" style="width: 0%"></div>
+                                    <span id="rsrp_val" class="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white drop-shadow-md">-- / --%</span>
+                                </div>
+                            </div>
+
+                            <div class="p-3 space-y-1.5">
+                                <span class="text-brandMuted block text-xs">SINR <sup>5G</sup></span>
+                                <div class="relative w-full h-6 rounded-lg bg-black/40 border border-brandBorder/30 overflow-hidden shadow-inner">
+                                    <div id="sinr_bar" class="bg-emerald-600 h-full transition-all duration-500" style="width: 0%"></div>
+                                    <span id="sinr_val" class="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white drop-shadow-md">-- / --%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-4 border-t border-brandBorder/60 bg-black/10 flex justify-between items-center text-xs text-brandMuted">
+                        <span>Date Updated</span>
+                        <span id="last_updated" class="text-white font-mono">--</span>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- AT Terminal 面板 -->
+        <div id="panel_at" class="hidden space-y-4">
+            <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden min-h-[500px]">
+                <div class="p-4 border-b border-brandBorder">
+                    <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">AT Command Terminal</h2>
+                </div>
+                <!-- 输出区域 -->
+                <div id="at_output" class="flex-1 p-4 font-mono text-xs text-green-400 bg-black/30 overflow-y-auto max-h-[500px] space-y-1 whitespace-pre-wrap">
+                    <div class="text-brandMuted">┌─ AT Terminal Ready ─────────────────────────────┐</div>
+                    <div class="text-brandMuted">│ Type AT commands below and press Send or Enter. │</div>
+                    <div class="text-brandMuted">└─────────────────────────────────────────────────┘</div>
+                </div>
+                <!-- 输入区域 -->
+                <div class="p-4 border-t border-brandBorder/60 bg-black/10 flex space-x-2">
+                    <input id="at_input" type="text" placeholder="AT+CGMI"
+                        class="flex-1 bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500"
+                        autocomplete="off" spellcheck="false">
+                    <button id="at_send_btn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Send</button>
+                </div>
+                <!-- 快捷命令 -->
+                <div id="at_quick_btns" class="px-4 pb-4 pt-2 flex flex-wrap gap-2">
+                    <span class="text-xs text-brandMuted self-center mr-1">Quick:</span>
+                    <button class="at-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+CGMI</button>
+                    <button class="at-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+CGSN</button>
+                    <button class="at-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+CSQ</button>
+                    <button class="at-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+COPS?</button>
+                    <button class="at-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+CGPADDR</button>
+                    <button class="at-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+QENG</button>
+                    <button class="at-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+CGDCONT?</button>
+                </div>
+            </div>
         </div>
 
     </div>
@@ -232,8 +221,9 @@
         const wsUrl = `${protocol}//${window.location.host}/ws`;
         let socket;
         let isVisible = true;
+        let currentTab = 'dashboard';
 
-        // Cache DOM elements to prevent repetitive expensive DOM lookups
+        // DOM cache
         const domElements = {};
         function getDomElement(id) {
             if (!domElements[id]) {
@@ -242,7 +232,6 @@
             return domElements[id];
         }
 
-        // Optimized text update helper that prevents layout thrashing by only writing if value changes
         function updateText(id, value) {
             const el = getDomElement(id);
             if (el && el.innerText !== value) {
@@ -250,22 +239,53 @@
             }
         }
 
+        // Tab switching
+        function switchTab(tab) {
+            currentTab = tab;
+            const dashBtn = getDomElement('tab_dashboard');
+            const atBtn = getDomElement('tab_at');
+            const dashPanel = getDomElement('panel_dashboard');
+            const atPanel = getDomElement('panel_at');
+
+            if (tab === 'dashboard') {
+                dashBtn.classList.add('bg-emerald-600', 'text-white', 'shadow-lg');
+                dashBtn.classList.remove('text-brandMuted', 'hover:text-white', 'hover:bg-brandCard/60');
+                atBtn.classList.remove('bg-emerald-600', 'text-white', 'shadow-lg');
+                atBtn.classList.add('text-brandMuted', 'hover:text-white', 'hover:bg-brandCard/60');
+                dashPanel.classList.remove('hidden');
+                atPanel.classList.add('hidden');
+            } else {
+                atBtn.classList.add('bg-emerald-600', 'text-white', 'shadow-lg');
+                atBtn.classList.remove('text-brandMuted', 'hover:text-white', 'hover:bg-brandCard/60');
+                dashBtn.classList.remove('bg-emerald-600', 'text-white', 'shadow-lg');
+                dashBtn.classList.add('text-brandMuted', 'hover:text-white', 'hover:bg-brandCard/60');
+                dashPanel.classList.add('hidden');
+                atPanel.classList.remove('hidden');
+            }
+        }
+
         function connectWs() {
             socket = new WebSocket(wsUrl);
 
             socket.onopen = () => {
-                console.log("WebSocket connected successfully.");
+                console.log("WebSocket connected.");
                 const dot = getDomElement("ws_status_dot");
                 if (dot) {
                     dot.classList.remove('bg-red-500');
                     dot.classList.add('bg-emerald-500', 'animate-pulse');
                 }
+                // Request static info on connect
+                socket.send(JSON.stringify({ action: "get_static_info" }));
             };
 
             socket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    if (data.type === "realtime" || !data.type) {
+                    if (data.type === "static_info") {
+                        handleStaticInfo(data.data);
+                    } else if (data.type === "at_res") {
+                        handleAtResponse(data.data);
+                    } else if (data.type === "realtime" || !data.type) {
                         updateUI(data);
                     }
                 } catch (e) {
@@ -283,8 +303,7 @@
                 setTimeout(connectWs, 3000);
             };
 
-            socket.onerror = (err) => {
-                console.error("WebSocket error observed:", err);
+            socket.onerror = () => {
                 const dot = getDomElement("ws_status_dot");
                 if (dot) {
                     dot.classList.remove('bg-emerald-500', 'animate-pulse');
@@ -292,6 +311,26 @@
                 }
                 socket.close();
             };
+        }
+
+        function handleStaticInfo(data) {
+            updateText("firmware_ver", data.firmware_version || "--");
+            updateText("info_sim", data.active_sim || "--");
+            updateText("info_provider", data.network_provider || "--");
+            updateText("info_apn", data.apn || "--");
+            updateText("sig_traffic", data.traffic_stats || "--");
+        }
+
+        function handleAtResponse(raw) {
+            const output = getDomElement('at_output');
+            if (!output) return;
+            const escaped = raw
+                .replace(/&/g, '&')
+                .replace(/</g, '<')
+                .replace(/>/g, '>')
+                .replace(/\n/g, '<br>');
+            output.innerHTML += `<div class="text-emerald-300 mt-1">${escaped}</div>`;
+            output.scrollTop = output.scrollHeight;
         }
 
         function updateUI(payload) {
@@ -319,7 +358,6 @@
             updateText("sig_enb", payload.enb_id || "--");
             updateText("sig_tac", payload.tac || "--");
 
-            // Client-side date update logic
             if (payload.updated && payload.updated.trim() !== "") {
                 updateText("last_updated", payload.updated);
             } else {
@@ -337,19 +375,11 @@
         function updateProgressBar(idPrefix, valueString) {
             const barElement = getDomElement(`${idPrefix}_bar`);
             const valElement = getDomElement(`${idPrefix}_val`);
-
-            if (!barElement || !valElement) {
-                console.warn(`Elements for ${idPrefix} not found.`);
-                return;
-            }
+            if (!barElement || !valElement) return;
 
             if (!valueString) {
-                if (valElement.innerText !== "-- / --%") {
-                    valElement.innerText = "-- / --%";
-                }
-                if (barElement.style.width !== "0%") {
-                    barElement.style.width = "0%";
-                }
+                if (valElement.innerText !== "-- / --%") valElement.innerText = "-- / --%";
+                if (barElement.style.width !== "0%") barElement.style.width = "0%";
                 barElement.classList.remove('bg-red-600', 'bg-yellow-500', 'bg-emerald-600');
                 return;
             }
@@ -357,27 +387,76 @@
             const parts = valueString.split('/');
             const rawPercent = parts[1] ? parseFloat(parts[1].replace('%', '')) : 0;
             const percentWidth = `${rawPercent}%`;
-
-            if (barElement.style.width !== percentWidth) {
-                barElement.style.width = percentWidth;
-            }
-            if (valElement.innerText !== valueString) {
-                valElement.innerText = valueString;
-            }
+            if (barElement.style.width !== percentWidth) barElement.style.width = percentWidth;
+            if (valElement.innerText !== valueString) valElement.innerText = valueString;
 
             let targetClass = 'bg-emerald-600';
-            if (rawPercent < 30) {
-                targetClass = 'bg-red-600';
-            } else if (rawPercent < 70) {
-                targetClass = 'bg-yellow-500';
-            }
+            if (rawPercent < 30) targetClass = 'bg-red-600';
+            else if (rawPercent < 70) targetClass = 'bg-yellow-500';
 
             if (!barElement.classList.contains(targetClass)) {
                 barElement.classList.remove('bg-red-600', 'bg-yellow-500', 'bg-emerald-600');
                 barElement.classList.add(targetClass);
             }
         }
-        
+
+        // AT Terminal functions
+        function sendAtCommand(cmd) {
+            if (!cmd || !cmd.trim()) return;
+            const output = getDomElement('at_output');
+            if (output) {
+                output.innerHTML += `<div class="text-amber-400 mt-2">▶ ${cmd}</div>`;
+                output.scrollTop = output.scrollHeight;
+            }
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ action: "manual_at", payload: cmd }));
+            }
+        }
+
+        function initAtTerminal() {
+            const input = getDomElement('at_input');
+            const btn = getDomElement('at_send_btn');
+            const quickContainer = getDomElement('at_quick_btns');
+
+            if (input && btn) {
+                btn.addEventListener('click', () => {
+                    const cmd = input.value.trim();
+                    sendAtCommand(cmd);
+                    input.value = '';
+                });
+
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        const cmd = input.value.trim();
+                        sendAtCommand(cmd);
+                        input.value = '';
+                    }
+                });
+            }
+
+            // Event delegation for quick buttons: use button text as command
+            if (quickContainer) {
+                quickContainer.addEventListener('click', (e) => {
+                    const btnEl = e.target.closest('.at-quick-btn');
+                    if (!btnEl) return;
+                    const label = btnEl.textContent.trim();
+                    // Map known labels to full AT commands
+                    const cmdMap = {
+                        'AT+CGMI': 'AT+CGMI',
+                        'AT+CGSN': 'AT+CGSN',
+                        'AT+CSQ': 'AT+CSQ',
+                        'AT+COPS?': 'AT+COPS?',
+                        'AT+CGPADDR': 'AT+CGPADDR',
+                        'AT+QENG': 'AT+QENG="servingcell"',
+                        'AT+CGDCONT?': 'AT+CGDCONT?',
+                    };
+                    const cmd = cmdMap[label] || label;
+                    if (input) input.value = cmd;
+                    sendAtCommand(cmd);
+                });
+            }
+        }
+
         function initIntervalSetter() {
             const select = getDomElement('refreshRateSelect');
             const btn = getDomElement('setRefreshBtn');
@@ -387,27 +466,18 @@
                 if (!isNaN(seconds) && socket && socket.readyState === WebSocket.OPEN) {
                     socket.send(JSON.stringify({ action: "set_interval", payload: seconds.toString() }));
                     console.log(`设置刷新间隔为 ${seconds} 秒`);
-                } else {
-                    console.warn("WebSocket not ready, cannot set interval.");
                 }
             });
         }
 
-        // Detect if the user is currently viewing the page
         function initVisibilityHandler() {
             document.addEventListener('visibilitychange', () => {
                 isVisible = !document.hidden;
                 if (socket && socket.readyState === WebSocket.OPEN) {
-                    // Inform backend to enter power-saving mode if tab is hidden
-                    socket.send(JSON.stringify({ 
+                    socket.send(JSON.stringify({
                         action: "set_view_state",
-                        payload: isVisible ? "active" : "idle" 
+                        payload: isVisible ? "active" : "idle"
                     }));
-                }
-                if (isVisible) {
-                    console.log("UI Active: Normal polling");
-                } else {
-                    console.log("UI Idle: Hardware polling can be reduced");
                 }
             });
         }
@@ -415,6 +485,7 @@
         connectWs();
         initIntervalSetter();
         initVisibilityHandler();
+        initAtTerminal();
     </script>
 </body>
 

@@ -1,11 +1,10 @@
-use askama::Template;
 use axum::{
     Router,
     extract::{
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{StatusCode, header},
+    http::{header},
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -26,10 +25,9 @@ use nom::{
 };
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio::time::sleep;
 
-// 从环境变量读取串口设备路径，默认 /dev/at_mdm0
 const DEFAULT_SERIAL_PORT: &str = "/dev/at_mdm0";
 
 #[derive(Debug)]
@@ -43,29 +41,21 @@ struct AtRequest {
     resp_tx: oneshot::Sender<String>,
 }
 
-#[derive(Template)]
-#[template(path = "dist_index.html")]
-struct IndexTemplate {
-    firmware_version: &'static str,
-}
-
-impl IntoResponse for IndexTemplate {
-    fn into_response(self) -> Response {
-        match self.render() {
-            Ok(html) => axum::response::Html(html).into_response(),
-            Err(err) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Template error: {}", err),
-            )
-                .into_response(),
-        }
-    }
-}
-
 struct AppState {
     tx: broadcast::Sender<String>,
     actor_tx: mpsc::Sender<AtRequest>,
     active_views: AtomicUsize,
+    /// 启动时一次性获取的静态信息（在线程安全下共享）
+    static_info: Mutex<StaticInfo>,
+}
+
+#[derive(Clone, Serialize, Default, Debug)]
+struct StaticInfo {
+    firmware_version: String,
+    active_sim: String,
+    network_provider: String,
+    apn: String,
+    traffic_stats: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -116,7 +106,11 @@ async fn main() {
         tx: tx.clone(),
         actor_tx,
         active_views: AtomicUsize::new(0),
+        static_info: Mutex::new(StaticInfo::default()),
     });
+
+    // 先获取一次静态信息
+    fetch_static_info(&app_state, &serial_path).await;
 
     tokio::spawn({
         let state = app_state.clone();
@@ -134,10 +128,139 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn index_handler() -> impl IntoResponse {
-    IndexTemplate {
-        firmware_version: "RM520NGLAAR03A03M4G_BETA",
+/// 启动时一次性获取静态信息：固件版本、SIM槽位、运营商、APN
+async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
+    let mut info = StaticInfo::default();
+
+    let mut serial_file = match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(serial_path)
+        .await
+    {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("❌ 打开串口失败: {}，使用模拟静态数据", e);
+            info.firmware_version = "RM520NGLAAR03A03M4G_BETA".to_string();
+            info.active_sim = "SIM 1".to_string();
+            info.network_provider = "CHN-UNICOM".to_string();
+            info.apn = "3gnet".to_string();
+            info.traffic_stats = "N/A".to_string();
+            let mut guard = state.static_info.lock().await;
+            *guard = info;
+            return;
+        }
+    };
+
+    // 固件版本
+    match send_at_command_async(&mut serial_file, "AT+CGMR").await {
+        Ok(resp) => {
+            for line in resp.lines() {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() && !trimmed.contains("OK") && !trimmed.contains("ERROR") && !trimmed.starts_with("AT+") {
+                    info.firmware_version = trimmed.to_string();
+                    break;
+                }
+            }
+        }
+        Err(e) => eprintln!("⚠️ 获取固件版本失败: {}", e),
     }
+    if info.firmware_version.is_empty() {
+        info.firmware_version = "Unknown".to_string();
+    }
+
+    // SIM 槽位
+    match send_at_command_async(&mut serial_file, "AT+QUIMSLOT?").await {
+        Ok(resp) => {
+            for line in resp.lines() {
+                if line.contains("+QUIMSLOT:") {
+                    let parts: Vec<&str> = line.split(':').collect();
+                    if parts.len() >= 2 {
+                        info.active_sim = format!("SIM {}", parts[1].trim());
+                    }
+                }
+            }
+        }
+        Err(e) => eprintln!("⚠️ 获取SIM槽位失败: {}", e),
+    }
+    if info.active_sim.is_empty() {
+        info.active_sim = "SIM 1".to_string();
+    }
+
+    // 运营商
+    match send_at_command_async(&mut serial_file, "AT+COPS?").await {
+        Ok(resp) => {
+            for line in resp.lines() {
+                if line.contains("+COPS:") {
+                    // +COPS: <mode>[,<format>,<oper>[,<Act>]]
+                    let parts: Vec<&str> = line.split(',').collect();
+                    if parts.len() >= 3 {
+                        info.network_provider = parts[2].trim().trim_matches('"').to_string();
+                    }
+                }
+            }
+        }
+        Err(e) => eprintln!("⚠️ 获取运营商失败: {}", e),
+    }
+    if info.network_provider.is_empty() {
+        // fallback to AT+QSPN
+        match send_at_command_async(&mut serial_file, "AT+QSPN").await {
+            Ok(resp) => {
+                for line in resp.lines() {
+                    if line.contains("+QSPN:") {
+                        let parts: Vec<&str> = line.split(',').collect();
+                        if parts.len() >= 1 {
+                            let fsn = parts[0].trim().trim_matches('"');
+                            if !fsn.is_empty() {
+                                info.network_provider = fsn.to_string();
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => eprintln!("⚠️ QSPN 获取失败: {}", e),
+        }
+    }
+    if info.network_provider.is_empty() {
+        info.network_provider = "Unknown".to_string();
+    }
+
+    // APN (CGDCONT 第一个上下文)
+    match send_at_command_async(&mut serial_file, "AT+CGDCONT?").await {
+        Ok(resp) => {
+            for line in resp.lines() {
+                if line.contains("+CGDCONT: 1,") {
+                    let parts: Vec<&str> = line.split(',').collect();
+                    if parts.len() >= 3 {
+                        info.apn = parts[2].trim().trim_matches('"').to_string();
+                    }
+                    break;
+                }
+            }
+        }
+        Err(e) => eprintln!("⚠️ 获取APN失败: {}", e),
+    }
+    if info.apn.is_empty() {
+        info.apn = "N/A".to_string();
+    }
+
+    info.traffic_stats = "N/A".to_string();
+
+    println!(
+        "📋 静态信息已获取: FW={}, SIM={}, Provider={}, APN={}",
+        info.firmware_version, info.active_sim, info.network_provider, info.apn
+    );
+
+    let mut guard = state.static_info.lock().await;
+    *guard = info;
+}
+
+async fn index_handler() -> impl IntoResponse {
+    let html = include_str!("index.html");
+    Response::builder()
+        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .body(axum::body::Body::from(html))
+        .unwrap()
 }
 
 /// 异步发送 AT 命令并读取响应
@@ -167,10 +290,11 @@ async fn send_at_command_async(file: &mut File, cmd: &str) -> Result<String, Str
                 if len >= 9 && response_bytes[len - 9..] == *b"\r\nERROR\r\n" {
                     break;
                 }
-                // Fallback for cases where OK/ERROR is followed by extra whitespace/newlines
                 if len >= 15 {
                     let tail = &response_bytes[len - 15..];
-                    if tail.windows(6).any(|w| w == b"\r\nOK\r\n") || tail.windows(9).any(|w| w == b"\r\nERROR\r\n") {
+                    if tail.windows(6).any(|w| w == b"\r\nOK\r\n")
+                        || tail.windows(9).any(|w| w == b"\r\nERROR\r\n")
+                    {
                         break;
                     }
                 }
@@ -257,14 +381,13 @@ fn parse_qeng(qeng_res: &str, telemetry: &mut TelemetryData) {
             telemetry.network_mode = format!("{} {}", parts[2], parts[3]);
             telemetry.mccmnc = format!("{}{}", parts[4], parts[5]);
             telemetry.cell_id = parts[6].to_string();
-            
-            // Extract eNB/gNodeB ID from 36-bit cell ID (first 6 hex characters)
+
             if parts[6].len() >= 6 {
                 telemetry.enb_id = parts[6][..parts[6].len() - 3].to_string();
             } else {
                 telemetry.enb_id = parts[6].to_string();
             }
-            
+
             telemetry.tac = parts[8].to_string();
             telemetry.bands = format!("NR5G BAND {}", parts[10]);
             telemetry.bandwidth = format!("{} MHz", parts[11]);
@@ -309,10 +432,12 @@ fn parse_cgpaddr(gpad_res: &str, telemetry: &mut TelemetryData) {
             }
             if !ipv6.is_empty()
                 && ipv6 != "0.0.0.0"
-                && is_valid_ipv6(ipv6)
-                && telemetry.ipv6.is_empty()
             {
-                telemetry.ipv6 = ipv6.to_string();
+                // 尝试转换为标准IPv6格式（处理点分十进制16字节格式）
+                let normalized = convert_dotted_ipv6_to_standard(ipv6);
+                if is_valid_ipv6(&normalized) && telemetry.ipv6.is_empty() {
+                    telemetry.ipv6 = normalized;
+                }
             }
         }
     }
@@ -324,24 +449,42 @@ fn parse_cgpaddr(gpad_res: &str, telemetry: &mut TelemetryData) {
     }
 }
 
-/// 使用 nom 解析单行 +CGPADDR 响应，例如：
-///   +CGPADDR: 1,"10.202.165.254","2409::1"
-/// 返回 (cid, ipv4_addr, ipv6_addr)
+/// 将16字节点分十进制格式的IPv6转换为标准冒号十六进制格式
+/// 例如: "36.9.137.112.10.181.36.74.24.179.107.247.91.255.29.48"
+///    => "2409:8970:ab5:244a:18b3:6bf7:5bff:1d30"
+fn convert_dotted_ipv6_to_standard(raw: &str) -> String {
+    let bytes: Vec<u8> = raw
+        .split('.')
+        .filter_map(|s| s.parse::<u8>().ok())
+        .collect();
+
+    if bytes.len() != 16 {
+        // 不是16字节的点分十进制，直接返回原值（可能是标准格式）
+        return raw.to_string();
+    }
+
+    let mut groups = Vec::with_capacity(8);
+    for i in 0..8 {
+        let hi = bytes[i * 2];
+        let lo = bytes[i * 2 + 1];
+        groups.push(format!("{:x}", (hi as u16) << 8 | lo as u16));
+    }
+    groups.join(":")
+}
+
+/// 使用 nom 解析单行 +CGPADDR 响应
 fn parse_cgpaddr_line(input: &str) -> IResult<&str, (u32, &str, &str)> {
     let (input, _) = tag("+CGPADDR:")(input)?;
     let (input, _) = take_while(|c: char| c == ' ' || c == '\t')(input)?;
-    // 解析 CID（数字）
     let (input, cid_str) = digit1(input)?;
     let cid: u32 = cid_str.parse().unwrap_or(0);
     let (input, _) = take_while(|c: char| c == ' ' || c == '\t')(input)?;
     let (input, _) = char(',')(input)?;
     let (input, _) = take_while(|c: char| c == ' ' || c == '\t')(input)?;
-    // 解析第一个 IP 地址（带引号或不带引号）
     let (input, ipv4) = parse_ip_value(input)?;
     let (input, _) = take_while(|c: char| c == ' ' || c == '\t')(input)?;
     let (input, _) = char(',')(input)?;
     let (input, _) = take_while(|c: char| c == ' ' || c == '\t')(input)?;
-    // 解析第二个 IP 地址（带引号或不带引号）
     let (input, ipv6) = parse_ip_value(input)?;
     Ok((input, (cid, ipv4, ipv6)))
 }
@@ -349,13 +492,11 @@ fn parse_cgpaddr_line(input: &str) -> IResult<&str, (u32, &str, &str)> {
 /// 解析一个 IP 值：可能是带双引号的 "1.2.3.4" 或不带引号的 1.2.3.4
 fn parse_ip_value(input: &str) -> IResult<&str, &str> {
     alt((
-        // 带引号的值
         delimited(
             char('"'),
             take_while(|c: char| c != '"' && c != '\r' && c != '\n'),
             char('"'),
         ),
-        // 不带引号的值
         take_while(|c: char| c != ',' && c != '\r' && c != '\n' && c != ' ' && c != '\t'),
     ))
     .parse(input)
@@ -377,38 +518,32 @@ fn is_valid_ipv4(s: &str) -> bool {
 
 /// 校验是否为合法的 IPv6 地址（冒号十六进制格式）
 fn is_valid_ipv6(s: &str) -> bool {
-    // 空字符串不算有效 IPv6
     if s.is_empty() {
         return false;
     }
-    // IPv6 合法字符：十六进制数字、冒号
     if !s.chars().all(|c| c.is_ascii_hexdigit() || c == ':') {
         return false;
     }
-    // :: 缩写最多出现一次
     let double_colon_count = s.as_bytes().windows(2).filter(|w| *w == b"::").count();
     if double_colon_count > 1 {
         return false;
     }
-    // 不能以单个冒号开头（除非是 :: 这种缩写）
     if s.starts_with(':') && !s.starts_with("::") {
         return false;
     }
-    // 不能以单个冒号结尾（除非是 :: 这种缩写）
     if s.ends_with(':') && !s.ends_with("::") {
         return false;
     }
-    // 按冒号分割，每段最多4位十六进制
     let segments: Vec<&str> = s.split(':').filter(|seg| !seg.is_empty()).collect();
     if segments.is_empty() {
-        // 全是 ::: 但已经被上面的规则排除，这里只有 "::" 这种
         return double_colon_count == 1;
     }
-    // 最多 8 段（完整的 IPv6）
     if segments.len() > 8 {
         return false;
     }
-    segments.iter().all(|seg| seg.len() <= 4 && u16::from_str_radix(seg, 16).is_ok())
+    segments
+        .iter()
+        .all(|seg| seg.len() <= 4 && u16::from_str_radix(seg, 16).is_ok())
 }
 
 async fn hardware_polling_actor(
@@ -500,10 +635,15 @@ async fn hardware_polling_actor(
 
                     let mut telemetry = TelemetryData::default();
                     telemetry.sim_status = sim_status.to_string();
-                    telemetry.active_sim = "SIM 1".to_string();
-                    telemetry.network_provider = "CHN-UNICOM".to_string();
-                    telemetry.apn = "3gnet".to_string();
-                    telemetry.traffic_stats = "N/A".to_string();
+
+                    // 从静态信息中读取（只获取一次的数据）
+                    {
+                        let guard = state.static_info.lock().await;
+                        telemetry.active_sim = guard.active_sim.clone();
+                        telemetry.network_provider = guard.network_provider.clone();
+                        telemetry.apn = guard.apn.clone();
+                        telemetry.traffic_stats = guard.traffic_stats.clone();
+                    }
 
                     parse_qeng(&qeng_res, &mut telemetry);
                     parse_cgpaddr(&gpad_res, &mut telemetry);
@@ -537,12 +677,13 @@ async fn hardware_polling_actor(
     }
 }
 
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
     ws.on_upgrade(|socket| handle_ws(socket, state))
 }
 
-/// ✅ 已完美重构：剔除了外部不可控的 tokio::spawn(JoinHandle)
-/// 利用当前的异步上下文直接协同驱动流，配合通道的自然关闭，彻底切断与 Axum 运行时的解耦 Panic
 async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     let mut broadcast_rx = state.tx.subscribe();
     println!(
@@ -556,10 +697,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     let (local_tx, mut local_rx) = mpsc::channel::<String>(10);
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
-    // 创建一个互通子任务，用来包裹原本并发运行的读取和发送流
-    // 我们不再在外部包裹 `tokio::spawn` 的变量名，而是直接原地执行 select
     tokio::select! {
-        // 分支 1：处理下行发送数据流（广播的系统状态更新 + 局部的 AT 指令回复）
         _ = async {
             loop {
                 tokio::select! {
@@ -579,7 +717,6 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
             println!("💬 WebSocket 发送通道中断，准备断开连接");
         },
 
-        // 分支 2：处理上行接收数据流（浏览器发来的手动 AT 请求或页面活跃指令）
         _ = async {
             let state_inner = state.clone();
             while let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
@@ -603,6 +740,22 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             }
                             continue;
                         }
+                        "get_static_info" => {
+                            // 返回静态信息给前端
+                            let guard = state_inner.static_info.lock().await;
+                            let info_json = serde_json::json!({
+                                "type": "static_info",
+                                "data": {
+                                    "firmware_version": guard.firmware_version,
+                                    "active_sim": guard.active_sim,
+                                    "network_provider": guard.network_provider,
+                                    "apn": guard.apn,
+                                    "traffic_stats": guard.traffic_stats,
+                                }
+                            });
+                            let _ = local_tx.send(info_json.to_string()).await;
+                            continue;
+                        }
                         _ => continue,
                     };
                     let _ = state_inner
@@ -623,11 +776,6 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
         }
     };
 
-    // 💡 核心安全点：此时上面的两个异步块中，只要有一个由于断开连接退出了，
-    // `tokio::select!` 就会立刻熔断并优雅地释放另一个异步块的上下文资源。
-    // 这里没有任何外部 `JoinHandle` 留下来供 Axum 的运行时再次进行污染性 `await`。
-
-    // 彻底断开时，如果是活跃状态则减扣
     if current_is_active {
         state.active_views.fetch_sub(1, Ordering::SeqCst);
     }

@@ -517,10 +517,19 @@ fn parse_qeng(qeng_res: &str, telemetry: &mut TelemetryData) {
         }
         telemetry.bands = bands.join(", ");
 
-        // Bandwidth: 提取主载波带宽，标注类型
-        if serving_lines[0].len() >= 12 {
-            let bw: i32 = serving_lines[0][11].parse().unwrap_or(0);
-            telemetry.bandwidth = format!("NR {} MHz", bw);
+        // Bandwidth: 载波聚合时求和所有分量载波带宽，并显示明细
+        let mut total_bw = 0i32;
+        let mut bw_parts: Vec<String> = Vec::new();
+        for line in &serving_lines {
+            if line.len() >= 12 {
+                if let Ok(bw) = line[11].parse::<i32>() {
+                    total_bw += bw;
+                    bw_parts.push(bw.to_string());
+                }
+            }
+        }
+        if !bw_parts.is_empty() {
+            telemetry.bandwidth = format!("NR {} MHz ({})", total_bw, bw_parts.join("+"));
         }
 
         // EARFCN / PCI: 逗号连接
@@ -560,17 +569,23 @@ fn parse_qcainfo(qca_res: &str, telemetry: &mut TelemetryData) {
 
     if lines.is_empty() { return; }
 
-    // 收集 bands/earfcn/pci（去重 bands）
+    // 收集 bands/earfcn/pci（去重 bands）和带宽
     let mut bands: Vec<String> = Vec::new();
     let mut earfcns = Vec::new();
     let mut pcis = Vec::new();
-    let mut bw_mhz = String::new();
+    let mut total_bw = 0i32;
+    let mut bw_parts: Vec<String> = Vec::new();
 
-    for (i, line) in lines.iter().enumerate() {
+    for line in lines.iter() {
         if line.len() < 4 { continue; }
         // PCC: "PCC",earfcn,bw,"NR5G BAND XX",pci                       (5 fields)
         // SCC: "SCC",earfcn,bw,"NR5G BAND XX",scc_idx,pci,rsrp,rsrq,sinr (9 fields)
-        if i == 0 && line.len() >= 3 { bw_mhz = format!("{} MHz", line[2]); }
+        if let Some(bw_str) = line.get(2) {
+            if let Ok(bw) = bw_str.parse::<i32>() {
+                total_bw += bw;
+                bw_parts.push(bw.to_string());
+            }
+        }
         if let Some(earfcn) = line.get(1) { earfcns.push(*earfcn); }
         let pci_idx = if line.len() >= 6 { 5 } else { 4 };
         if let Some(pci) = line.get(pci_idx) { pcis.push(*pci); }
@@ -580,7 +595,9 @@ fn parse_qcainfo(qca_res: &str, telemetry: &mut TelemetryData) {
     }
 
     if !bands.is_empty() { telemetry.bands = bands.join(", "); }
-    if !bw_mhz.is_empty() { telemetry.bandwidth = bw_mhz; }
+    if !bw_parts.is_empty() {
+        telemetry.bandwidth = format!("NR {} MHz ({})", total_bw, bw_parts.join("+"));
+    }
     if !earfcns.is_empty() { telemetry.earfcn = earfcns.join(", "); }
     if !pcis.is_empty() { telemetry.pci = pcis.join(", "); }
 

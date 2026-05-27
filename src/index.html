@@ -233,14 +233,33 @@
         let socket;
         let isVisible = true;
 
+        // Cache DOM elements to prevent repetitive expensive DOM lookups
+        const domElements = {};
+        function getDomElement(id) {
+            if (!domElements[id]) {
+                domElements[id] = document.getElementById(id);
+            }
+            return domElements[id];
+        }
+
+        // Optimized text update helper that prevents layout thrashing by only writing if value changes
+        function updateText(id, value) {
+            const el = getDomElement(id);
+            if (el && el.innerText !== value) {
+                el.innerText = value;
+            }
+        }
+
         function connectWs() {
             socket = new WebSocket(wsUrl);
-            const dot = document.getElementById("ws_status_dot");
 
             socket.onopen = () => {
                 console.log("WebSocket connected successfully.");
-                dot.classList.replace('bg-red-500', 'bg-emerald-500');
-                dot.classList.add('animate-pulse');
+                const dot = getDomElement("ws_status_dot");
+                if (dot) {
+                    dot.classList.remove('bg-red-500');
+                    dot.classList.add('bg-emerald-500', 'animate-pulse');
+                }
             };
 
             socket.onmessage = (event) => {
@@ -256,52 +275,58 @@
 
             socket.onclose = () => {
                 console.warn("WebSocket disconnected. Retrying in 3 seconds...");
-                dot.classList.replace('bg-emerald-500', 'bg-red-500');
-                dot.classList.remove('animate-pulse');
+                const dot = getDomElement("ws_status_dot");
+                if (dot) {
+                    dot.classList.remove('bg-emerald-500', 'animate-pulse');
+                    dot.classList.add('bg-red-500');
+                }
                 setTimeout(connectWs, 3000);
             };
 
             socket.onerror = (err) => {
                 console.error("WebSocket error observed:", err);
-                dot.classList.replace('bg-emerald-500', 'bg-red-500');
-                dot.classList.remove('animate-pulse');
+                const dot = getDomElement("ws_status_dot");
+                if (dot) {
+                    dot.classList.remove('bg-emerald-500', 'animate-pulse');
+                    dot.classList.add('bg-red-500');
+                }
                 socket.close();
             };
         }
 
         function updateUI(payload) {
-            document.getElementById("temp").innerText = payload.temperature || "-- °C";
-            document.getElementById("sim_status").innerText = payload.sim_status || "--";
-            document.getElementById("signal_pct").innerText = payload.signal_percentage || "--%";
-            document.getElementById("conn_status").innerText = payload.internet_connection || "--";
+            updateText("temp", payload.temperature || "-- °C");
+            updateText("sim_status", payload.sim_status || "--");
+            updateText("signal_pct", payload.signal_percentage || "--%");
+            updateText("conn_status", payload.internet_connection || "--");
 
-            document.getElementById("info_sim").innerText = payload.active_sim || "--";
-            document.getElementById("info_provider").innerText = payload.network_provider || "--";
-            document.getElementById("info_mccmnc").innerText = payload.mccmnc || "--";
-            document.getElementById("info_apn").innerText = payload.apn || "--";
-            document.getElementById("info_mode").innerText = payload.network_mode || "--";
-            document.getElementById("info_bands").innerText = payload.bands || "--";
-            document.getElementById("info_bandwidth").innerText = payload.bandwidth || "--";
-            document.getElementById("info_earfcn").innerText = payload.earfcn || "--";
-            document.getElementById("info_pci").innerText = payload.pci || "--";
-            document.getElementById("info_ipv4").innerText = payload.ipv4 || "--";
-            document.getElementById("info_ipv6").innerText = payload.ipv6 || "--";
-            document.getElementById("info_uptime").innerText = payload.uptime || "--";
+            updateText("info_sim", payload.active_sim || "--");
+            updateText("info_provider", payload.network_provider || "--");
+            updateText("info_mccmnc", payload.mccmnc || "--");
+            updateText("info_apn", payload.apn || "--");
+            updateText("info_mode", payload.network_mode || "--");
+            updateText("info_bands", payload.bands || "--");
+            updateText("info_bandwidth", payload.bandwidth || "--");
+            updateText("info_earfcn", payload.earfcn || "--");
+            updateText("info_pci", payload.pci || "--");
+            updateText("info_ipv4", payload.ipv4 || "--");
+            updateText("info_ipv6", payload.ipv6 || "--");
+            updateText("info_uptime", payload.uptime || "--");
 
-            document.getElementById("sig_assessment").innerText = payload.assessment || "--";
-            document.getElementById("sig_traffic").innerText = payload.traffic_stats || "--";
-            document.getElementById("sig_cell_id").innerText = payload.cell_id || "--";
-            document.getElementById("sig_enb").innerText = payload.enb_id || "--";
-            document.getElementById("sig_tac").innerText = payload.tac || "--";
+            updateText("sig_assessment", payload.assessment || "--");
+            updateText("sig_traffic", payload.traffic_stats || "--");
+            updateText("sig_cell_id", payload.cell_id || "--");
+            updateText("sig_enb", payload.enb_id || "--");
+            updateText("sig_tac", payload.tac || "--");
 
-            // 前端更新时间逻辑（后台若无输出则自动产生客户端时间，不依赖 chrono）
+            // Client-side date update logic
             if (payload.updated && payload.updated.trim() !== "") {
-                document.getElementById("last_updated").innerText = payload.updated;
+                updateText("last_updated", payload.updated);
             } else {
                 const now = new Date();
                 const pad = (n) => n.toString().padStart(2, '0');
-                document.getElementById("last_updated").innerText =
-                    `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+                const timeStr = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+                updateText("last_updated", timeStr);
             }
 
             updateProgressBar("rsrq", payload.ss_rsrq);
@@ -310,8 +335,8 @@
         }
 
         function updateProgressBar(idPrefix, valueString) {
-            const barElement = document.getElementById(`${idPrefix}_bar`);
-            const valElement = document.getElementById(`${idPrefix}_val`);
+            const barElement = getDomElement(`${idPrefix}_bar`);
+            const valElement = getDomElement(`${idPrefix}_val`);
 
             if (!barElement || !valElement) {
                 console.warn(`Elements for ${idPrefix} not found.`);
@@ -319,8 +344,12 @@
             }
 
             if (!valueString) {
-                valElement.innerText = "-- / --%";
-                barElement.style.width = "0%";
+                if (valElement.innerText !== "-- / --%") {
+                    valElement.innerText = "-- / --%";
+                }
+                if (barElement.style.width !== "0%") {
+                    barElement.style.width = "0%";
+                }
                 barElement.classList.remove('bg-red-600', 'bg-yellow-500', 'bg-emerald-600');
                 return;
             }
@@ -329,18 +358,29 @@
             const rawPercent = parts[1] ? parseFloat(parts[1].replace('%', '')) : 0;
             const percentWidth = `${rawPercent}%`;
 
-            barElement.style.width = percentWidth;
-            valElement.innerText = valueString;
+            if (barElement.style.width !== percentWidth) {
+                barElement.style.width = percentWidth;
+            }
+            if (valElement.innerText !== valueString) {
+                valElement.innerText = valueString;
+            }
 
-            barElement.classList.remove('bg-red-600', 'bg-yellow-500', 'bg-emerald-600');
-            if (rawPercent < 30) { barElement.classList.add('bg-red-600'); }
-            else if (rawPercent < 70) { barElement.classList.add('bg-yellow-500'); }
-            else { barElement.classList.add('bg-emerald-600'); }
+            let targetClass = 'bg-emerald-600';
+            if (rawPercent < 30) {
+                targetClass = 'bg-red-600';
+            } else if (rawPercent < 70) {
+                targetClass = 'bg-yellow-500';
+            }
+
+            if (!barElement.classList.contains(targetClass)) {
+                barElement.classList.remove('bg-red-600', 'bg-yellow-500', 'bg-emerald-600');
+                barElement.classList.add(targetClass);
+            }
         }
         
         function initIntervalSetter() {
-            const select = document.getElementById('refreshRateSelect');
-            const btn = document.getElementById('setRefreshBtn');
+            const select = getDomElement('refreshRateSelect');
+            const btn = getDomElement('setRefreshBtn');
             if (!select || !btn) return;
             btn.addEventListener('click', () => {
                 const seconds = parseInt(select.value, 10);

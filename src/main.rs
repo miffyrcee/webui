@@ -28,7 +28,6 @@ const DEFAULT_SERIAL_PORT: &str = "/dev/at_mdm0";
 enum AtAction {
     ManualAt(String),
     SetInterval(u64),
-    SetViewState(bool), // true = active, false = idle
 }
 
 struct AtRequest {
@@ -145,23 +144,34 @@ async fn send_at_command_async(file: &mut File, cmd: &str) -> Result<String, Str
         .await
         .map_err(|e| format!("flush失败: {}", e))?;
 
-    let mut buf = [0u8; 4096];
-    let mut response = String::new();
+    let mut buf = [0u8; 1024];
+    let mut response_bytes = Vec::with_capacity(4096);
 
     loop {
         match file.read(&mut buf).await {
             Ok(0) => break,
             Ok(n) => {
-                let chunk = String::from_utf8_lossy(&buf[..n]);
-                response.push_str(&chunk);
-                if response.contains("\r\nOK\r\n") || response.contains("\r\nERROR\r\n") {
+                response_bytes.extend_from_slice(&buf[..n]);
+                let len = response_bytes.len();
+                if len >= 6 && response_bytes[len - 6..] == *b"\r\nOK\r\n" {
                     break;
+                }
+                if len >= 9 && response_bytes[len - 9..] == *b"\r\nERROR\r\n" {
+                    break;
+                }
+                // Fallback for cases where OK/ERROR is followed by extra whitespace/newlines
+                if len >= 15 {
+                    let tail = &response_bytes[len - 15..];
+                    if tail.windows(6).any(|w| w == b"\r\nOK\r\n") || tail.windows(9).any(|w| w == b"\r\nERROR\r\n") {
+                        break;
+                    }
                 }
             }
             Err(e) => return Err(format!("读错误: {}", e)),
         }
     }
 
+    let response = String::from_utf8_lossy(&response_bytes).into_owned();
     let elapsed = start.elapsed();
     if response.contains("ERROR") {
         println!("⚠️ [AT] {} 返回 ERROR ({}ms)", cmd, elapsed.as_millis());
@@ -231,20 +241,27 @@ fn parse_qeng(qeng_res: &str, telemetry: &mut TelemetryData) {
         .find(|l| l.contains("+QENG: \"servingcell\""))
     {
         let line = line.trim();
-        let parts: Vec<String> = line
+        let parts: Vec<&str> = line
             .split(',')
-            .map(|s| s.trim().trim_matches('"').to_string())
+            .map(|s| s.trim().trim_matches('"'))
             .collect();
         if parts.len() >= 15 {
             telemetry.network_mode = format!("{} {}", parts[2], parts[3]);
             telemetry.mccmnc = format!("{}{}", parts[4], parts[5]);
-            telemetry.cell_id = parts[6].clone();
-            telemetry.enb_id = parts[7].clone();
-            telemetry.tac = parts[8].clone();
+            telemetry.cell_id = parts[6].to_string();
+            
+            // Extract eNB/gNodeB ID from 36-bit cell ID (first 6 hex characters)
+            if parts[6].len() >= 6 {
+                telemetry.enb_id = parts[6][..parts[6].len() - 3].to_string();
+            } else {
+                telemetry.enb_id = parts[6].to_string();
+            }
+            
+            telemetry.tac = parts[8].to_string();
             telemetry.bands = format!("NR5G BAND {}", parts[10]);
             telemetry.bandwidth = format!("{} MHz", parts[11]);
-            telemetry.earfcn = parts[9].clone();
-            telemetry.pci = parts[7].clone();
+            telemetry.earfcn = parts[9].to_string();
+            telemetry.pci = parts[7].to_string();
 
             let rsrp: i32 = parts[12].parse().unwrap_or(-140);
             let rsrq: i32 = parts[13].parse().unwrap_or(-20);
@@ -275,15 +292,14 @@ fn parse_qeng(qeng_res: &str, telemetry: &mut TelemetryData) {
 fn parse_cgpaddr(gpad_res: &str, telemetry: &mut TelemetryData) {
     for line in gpad_res.lines() {
         if line.contains("+CGPADDR:") {
-            let parts: Vec<&str> = line.split(',').collect();
-            if parts.len() >= 2 {
-                let ipv4 = parts[1].trim_matches('"').trim();
+            let mut parts = line.split(',').map(|s| s.trim_matches('"').trim());
+            let _cmd_part = parts.next();
+            if let Some(ipv4) = parts.next() {
                 if !ipv4.is_empty() && ipv4 != "0.0.0.0" && telemetry.ipv4.is_empty() {
                     telemetry.ipv4 = ipv4.to_string();
                 }
             }
-            if parts.len() >= 3 {
-                let ipv6 = parts[2].trim_matches('"').trim();
+            if let Some(ipv6) = parts.next() {
                 if !ipv6.is_empty() && !ipv6.starts_with("0.0.0.0") && telemetry.ipv6.is_empty() {
                     telemetry.ipv6 = ipv6.to_string();
                 }
@@ -353,13 +369,6 @@ async fn hardware_polling_actor(
                         }
                         let _ = req.resp_tx.send("OK".to_string());
                     }
-                    AtAction::SetViewState(is_active) => {
-                        if is_active {
-                            state.active_views.fetch_add(1, Ordering::SeqCst);
-                        } else {
-                            state.active_views.fetch_sub(1, Ordering::SeqCst);
-                        }
-                    }
                 }
             }
 
@@ -405,7 +414,10 @@ async fn hardware_polling_actor(
                     sys.refresh_cpu_all();
                     components.refresh(false);
                     let cpu_temp = components.iter()
-                        .find(|c| c.label().to_uppercase().contains("CPU") || c.label().to_uppercase().contains("PACKAGE"))
+                        .find(|c| {
+                            let label = c.label();
+                            label.contains("CPU") || label.contains("cpu") || label.contains("Package") || label.contains("package")
+                        })
                         .map_or(46.0, |c| c.temperature().unwrap_or(46.0));
 
                     telemetry.temperature = format!("{:.0} °C", cpu_temp);

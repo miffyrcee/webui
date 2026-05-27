@@ -430,15 +430,14 @@ async fn send_at_command_async(file: &mut File, cmd: &str) -> Result<String, Str
 
 /// 解析合并命令的响应，提取各部分
 fn parse_combined_response(raw: &str) -> (String, String, String, String) {
+    // 提取从 key 开始到下一个不同 key 之前的所有内容
     let extract = |key: &str| -> String {
         raw.find(key).map_or(String::new(), |pos| {
             let rem = &raw[pos..];
-            let end = ["+CPIN:", "+QENG:", "+QCAINFO:", "+CGPADDR:"].iter()
-                .filter_map(|k| {
-                    let start = rem[k.len()..].find(k)?;
-                    if start == 0 { None } // 跳过自身
-                    else { Some(start + k.len()) }
-                })
+            let delim_keys = ["+CPIN:", "+QENG:", "+QCAINFO:", "+CGPADDR:"];
+            let end = delim_keys.iter()
+                .filter(|&&other| other != key) // 不用自身作为分割点（支持多行同 key）
+                .filter_map(|&other| rem[other.len()..].find(other).map(|p| p + other.len()))
                 .min()
                 .unwrap_or(rem.len());
             rem[..end.min(rem.len())].to_string()
@@ -541,6 +540,51 @@ fn parse_qeng(qeng_res: &str, telemetry: &mut TelemetryData) {
         telemetry.earfcn = pcc[9].to_string();
         telemetry.pci = pcc[7].to_string();
     }
+}
+
+/// 解析 +QCAINFO 获取准确的载波聚合数据（替代 QENG 的多行 parsing）
+/// +QCAINFO: "PCC",504990,12,"NR5G BAND 41",751
+/// +QCAINFO: "SCC",156490,3,"NR5G BAND 28",1,250,0,-,-
+fn parse_qcainfo(qca_res: &str, telemetry: &mut TelemetryData) {
+    let lines: Vec<Vec<&str>> = qca_res
+        .lines()
+        .filter(|l| l.contains("+QCAINFO:"))
+        .map(|line| {
+            line.trim()
+                .strip_prefix("+QCAINFO:").unwrap_or(line).trim()
+                .split(',')
+                .map(|s| s.trim().trim_matches('"'))
+                .collect()
+        })
+        .collect();
+
+    if lines.is_empty() { return; }
+
+    // 收集 bands/earfcn/pci（去重 bands）
+    let mut bands: Vec<String> = Vec::new();
+    let mut earfcns = Vec::new();
+    let mut pcis = Vec::new();
+    let mut bw_mhz = String::new();
+
+    for (i, line) in lines.iter().enumerate() {
+        if line.len() < 4 { continue; }
+        // PCC: "PCC",earfcn,bw,"NR5G BAND XX",pci                       (5 fields)
+        // SCC: "SCC",earfcn,bw,"NR5G BAND XX",scc_idx,pci,rsrp,rsrq,sinr (9 fields)
+        if i == 0 && line.len() >= 3 { bw_mhz = format!("{} MHz", line[2]); }
+        if let Some(earfcn) = line.get(1) { earfcns.push(*earfcn); }
+        let pci_idx = if line.len() >= 6 { 5 } else { 4 };
+        if let Some(pci) = line.get(pci_idx) { pcis.push(*pci); }
+        let band = format!("NR5G BAND {}", line[3].trim_start_matches("NR5G BAND "));
+        let full_band = if band.contains("NR5G BAND") { band } else { format!("NR5G BAND {}", line[3]) };
+        if !bands.contains(&full_band) { bands.push(full_band); }
+    }
+
+    if !bands.is_empty() { telemetry.bands = bands.join(", "); }
+    if !bw_mhz.is_empty() { telemetry.bandwidth = bw_mhz; }
+    if !earfcns.is_empty() { telemetry.earfcn = earfcns.join(", "); }
+    if !pcis.is_empty() { telemetry.pci = pcis.join(", "); }
+
+    eprintln!("🔍 QCAINFO parsed: bands={} bw={} earfcn={} pci={}", telemetry.bands, telemetry.bandwidth, telemetry.earfcn, telemetry.pci);
 }
 
 fn parse_cgpaddr(gpad_res: &str, telemetry: &mut TelemetryData) {
@@ -770,7 +814,12 @@ async fn hardware_polling_actor(
                         telemetry.traffic_stats = guard.traffic_stats.clone();
                     }
 
+                    eprintln!("🔍 RAW QENG:\n{}", qeng_res);
+                    eprintln!("🔍 RAW QCAINFO:\n{}", _qca_res);
+                    eprintln!("🔍 RAW CGPADDR:\n{}", gpad_res);
+
                     parse_qeng(&qeng_res, &mut telemetry);
+                    parse_qcainfo(&_qca_res, &mut telemetry);
                     parse_cgpaddr(&gpad_res, &mut telemetry);
 
                     sys.refresh_cpu_all();
@@ -790,6 +839,7 @@ async fn hardware_polling_actor(
                     telemetry.updated = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
                     if let Ok(json_str) = serde_json::to_string(&telemetry) {
+                        eprintln!("📤 WS SEND: {}", json_str);
                         let _ = state.tx.send(json_str);
                     }
 

@@ -4,7 +4,7 @@ use axum::{
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{header},
+    http::header,
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -25,7 +25,7 @@ use nom::{
 };
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
+use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tokio::time::sleep;
 
 const DEFAULT_SERIAL_PORT: &str = "/dev/at_mdm0";
@@ -46,7 +46,7 @@ struct AppState {
     actor_tx: mpsc::Sender<AtRequest>,
     active_views: AtomicUsize,
     /// 启动时一次性获取的静态信息（在线程安全下共享）
-    static_info: Mutex<StaticInfo>,
+    static_info: RwLock<StaticInfo>,
 }
 
 #[derive(Clone, Serialize, Default, Debug)]
@@ -106,7 +106,7 @@ async fn main() {
         tx: tx.clone(),
         actor_tx,
         active_views: AtomicUsize::new(0),
-        static_info: Mutex::new(StaticInfo::default()),
+        static_info: RwLock::new(StaticInfo::default()),
     });
 
     // 先获取一次静态信息
@@ -146,7 +146,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
             info.network_provider = "CHN-UNICOM".to_string();
             info.apn = "3gnet".to_string();
             info.traffic_stats = "N/A".to_string();
-            let mut guard = state.static_info.lock().await;
+            let mut guard = state.static_info.write().await;
             *guard = info;
             return;
         }
@@ -305,7 +305,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         info.firmware_version, info.active_sim, info.network_provider, info.apn
     );
 
-    let mut guard = state.static_info.lock().await;
+    let mut guard = state.static_info.write().await;
     *guard = info;
 }
 
@@ -731,7 +731,7 @@ async fn hardware_polling_actor(
 
                     // 从静态信息中读取（只获取一次的数据）
                     {
-                        let guard = state.static_info.lock().await;
+                        let guard = state.static_info.read().await;
                         telemetry.active_sim = guard.active_sim.clone();
                         telemetry.network_provider = guard.network_provider.clone();
                         telemetry.apn = guard.apn.clone();
@@ -835,7 +835,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                         }
                         "get_static_info" => {
                             // 返回静态信息给前端
-                            let guard = state_inner.static_info.lock().await;
+                            let guard = state_inner.static_info.read().await;
                             let info_json = serde_json::json!({
                                 "type": "static_info",
                                 "data": {

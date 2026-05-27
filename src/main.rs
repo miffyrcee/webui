@@ -187,41 +187,70 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         info.active_sim = "SIM 1".to_string();
     }
 
-    // 运营商
-    match send_at_command_async(&mut serial_file, "AT+COPS?").await {
+    // 运营商 — 先尝试 QSPN（中文名），再 fallback COPS
+    match send_at_command_async(&mut serial_file, "AT+QSPN").await {
         Ok(resp) => {
             for line in resp.lines() {
-                if line.contains("+COPS:") {
-                    // +COPS: <mode>[,<format>,<oper>[,<Act>]]
+                if line.contains("+QSPN:") {
+                    // +QSPN: <FNN>,<SNN>,<SPN>,<Alphabet>
                     let parts: Vec<&str> = line.split(',').collect();
-                    if parts.len() >= 3 {
-                        info.network_provider = parts[2].trim().trim_matches('"').to_string();
+                    if parts.len() >= 1 {
+                        let cleaned = parts[0]
+                            .trim()
+                            .trim_matches('"')
+                            .trim();
+                        if !cleaned.is_empty() && cleaned != "????" {
+                            info.network_provider = cleaned.to_string();
+                        }
                     }
                 }
             }
         }
-        Err(e) => eprintln!("⚠️ 获取运营商失败: {}", e),
+        Err(e) => eprintln!("⚠️ QSPN 获取失败: {}", e),
     }
     if info.network_provider.is_empty() {
-        // fallback to AT+QSPN
-        match send_at_command_async(&mut serial_file, "AT+QSPN").await {
+        match send_at_command_async(&mut serial_file, "AT+COPS?").await {
             Ok(resp) => {
                 for line in resp.lines() {
-                    if line.contains("+QSPN:") {
+                    if line.contains("+COPS:") {
+                        // +COPS: <mode>[,<format>,<oper>[,<Act>]]
                         let parts: Vec<&str> = line.split(',').collect();
-                        if parts.len() >= 1 {
-                            let fsn = parts[0].trim().trim_matches('"');
-                            if !fsn.is_empty() {
-                                info.network_provider = fsn.to_string();
+                        if parts.len() >= 3 {
+                            let cleaned = parts[2].trim().trim_matches('"').trim();
+                            if !cleaned.is_empty() && cleaned != "????" {
+                                info.network_provider = cleaned.to_string();
                             }
                         }
                     }
                 }
             }
-            Err(e) => eprintln!("⚠️ QSPN 获取失败: {}", e),
+            Err(e) => eprintln!("⚠️ COPS 获取失败: {}", e),
         }
     }
     if info.network_provider.is_empty() {
+        // 最后尝试从 MCCMNC 映射（46000/46001 = 中国联通）
+        match send_at_command_async(&mut serial_file, "AT+QENG=\"servingcell\"").await {
+            Ok(resp) => {
+                for line in resp.lines() {
+                    if line.contains("+QENG: \"servingcell\"") {
+                        let parts: Vec<&str> = line.split(',').map(|s| s.trim().trim_matches('"')).collect();
+                        if parts.len() >= 6 {
+                                let mccmnc = format!("{}{}", parts[4], parts[5]);
+                            info.network_provider = match mccmnc.as_str() {
+                                "46000" | "46002" | "46007" => "中国移动".to_string(),
+                                "46001" => "中国联通".to_string(),
+                                "46003" | "46011" => "中国电信".to_string(),
+                                _ => "Unknown".to_string(),
+                            };
+                        }
+                        break;
+                    }
+                }
+            }
+            Err(e) => eprintln!("⚠️ MCCMNC 回退获取失败: {}", e),
+        }
+    }
+    if info.network_provider.is_empty() || info.network_provider == "????" {
         info.network_provider = "Unknown".to_string();
     }
 

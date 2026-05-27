@@ -277,24 +277,41 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         info.apn = "N/A".to_string();
     }
 
-    // 流量统计 — AT+QGDAT? (或 QGDCNT)
-    match send_at_command_async(&mut serial_file, "AT+QGDAT?").await {
-        Ok(resp) => {
-            for line in resp.lines() {
-                if line.contains("+QGDAT:") {
-                    // +QGDAT: <tx_bytes>,<rx_bytes>,<tx_packets>,<rx_packets>
-                    let after_prefix = line.trim().strip_prefix("+QGDAT:").unwrap_or(line).trim();
-                    let parts: Vec<&str> = after_prefix.split(',').collect();
+    // 流量统计 — 尝试 QGDNRCNT 或 QGDAT
+    info.traffic_stats = send_at_command_async(&mut serial_file, "AT+QGDNRCNT?").await
+        .ok().and_then(|r| {
+            r.lines().find(|l| l.contains("+QGDNRCNT:"))
+                .and_then(|line| {
+                    let parts: Vec<&str> = line.trim()
+                        .strip_prefix("+QGDNRCNT:")?.trim()
+                        .split(',').collect();
                     if parts.len() >= 2 {
-                        let tx: u64 = parts[0].trim().trim_matches('"').parse().unwrap_or(0);
-                        let rx: u64 = parts[1].trim().trim_matches('"').parse().unwrap_or(0);
-                        info.traffic_stats = format!("TX {} / RX {}", format_bytes(tx), format_bytes(rx));
+                        let tx: u64 = parts[0].trim().parse().unwrap_or(0);
+                        let rx: u64 = parts[1].trim().parse().unwrap_or(0);
+                        Some(format!("TX {} / RX {}", format_bytes(tx), format_bytes(rx)))
+                    } else { None }
+                })
+        }).unwrap_or_default();
+    if info.traffic_stats.is_empty() {
+        // fallback to QGDAT
+        match send_at_command_async(&mut serial_file, "AT+QGDAT?").await {
+            Ok(resp) => {
+                for line in resp.lines() {
+                    if line.contains("+QGDAT:") {
+                        let parts: Vec<&str> = line.trim()
+                            .strip_prefix("+QGDAT:").unwrap_or(line).trim()
+                            .split(',').collect();
+                        if parts.len() >= 2 {
+                            let tx: u64 = parts[0].trim().trim_matches('"').parse().unwrap_or(0);
+                            let rx: u64 = parts[1].trim().trim_matches('"').parse().unwrap_or(0);
+                            info.traffic_stats = format!("TX {} / RX {}", format_bytes(tx), format_bytes(rx));
+                        }
+                        break;
                     }
-                    break;
                 }
             }
+            Err(e) => eprintln!("⚠️ QGDAT 获取失败: {}", e),
         }
-        Err(e) => eprintln!("⚠️ QGDAT 获取失败: {}", e),
     }
     if info.traffic_stats.is_empty() {
         info.traffic_stats = "N/A".to_string();
@@ -412,52 +429,22 @@ async fn send_at_command_async(file: &mut File, cmd: &str) -> Result<String, Str
 }
 
 /// 解析合并命令的响应，提取各部分
-fn parse_combined_response(raw: &str) -> (String, String, String) {
-    let mut cpin = String::new();
-    let mut qeng = String::new();
-    let mut cgpaddr = String::new();
-
-    if let Some(start) = raw.find("+CPIN:") {
-        let remaining = &raw[start..];
-        let end = remaining
-            .find("+QENG:")
-            .or_else(|| remaining.find("+CGPADDR:"))
-            .unwrap_or(remaining.len());
-        let block = &remaining[..end];
-        if let Some(ok_pos) = block.find("\r\nOK\r\n") {
-            cpin = block[..ok_pos + 6].to_string();
-        } else if let Some(err_pos) = block.find("\r\nERROR\r\n") {
-            cpin = block[..err_pos + 8].to_string();
-        } else {
-            cpin = block.to_string();
-        }
-    }
-
-    if let Some(start) = raw.find("+QENG:") {
-        let remaining = &raw[start..];
-        let end = remaining.find("+CGPADDR:").unwrap_or(remaining.len());
-        let block = &remaining[..end];
-        if let Some(ok_pos) = block.find("\r\nOK\r\n") {
-            qeng = block[..ok_pos + 6].to_string();
-        } else if let Some(err_pos) = block.find("\r\nERROR\r\n") {
-            qeng = block[..err_pos + 8].to_string();
-        } else {
-            qeng = block.to_string();
-        }
-    }
-
-    if let Some(start) = raw.find("+CGPADDR:") {
-        let block = &raw[start..];
-        if let Some(ok_pos) = block.find("\r\nOK\r\n") {
-            cgpaddr = block[..ok_pos + 6].to_string();
-        } else if let Some(err_pos) = block.find("\r\nERROR\r\n") {
-            cgpaddr = block[..err_pos + 8].to_string();
-        } else {
-            cgpaddr = block.to_string();
-        }
-    }
-
-    (cpin, qeng, cgpaddr)
+fn parse_combined_response(raw: &str) -> (String, String, String, String) {
+    let extract = |key: &str| -> String {
+        raw.find(key).map_or(String::new(), |pos| {
+            let rem = &raw[pos..];
+            let end = ["+CPIN:", "+QENG:", "+QCAINFO:", "+CGPADDR:"].iter()
+                .filter_map(|k| {
+                    let start = rem[k.len()..].find(k)?;
+                    if start == 0 { None } // 跳过自身
+                    else { Some(start + k.len()) }
+                })
+                .min()
+                .unwrap_or(rem.len());
+            rem[..end.min(rem.len())].to_string()
+        })
+    };
+    (extract("+CPIN:"), extract("+QENG:"), extract("+QCAINFO:"), extract("+CGPADDR:"))
 }
 
 fn parse_qeng(qeng_res: &str, telemetry: &mut TelemetryData) {
@@ -746,16 +733,17 @@ async fn hardware_polling_actor(
                     let start_poll = std::time::Instant::now();
                     println!("📡 开始周期性硬件轮询 (活跃视图: {})", active_count);
 
-                    let (cpin_res, qeng_res, gpad_res) = if let Some(file) = &mut serial_file {
-                        let combined = "AT+CPIN?;+QENG=\"servingcell\";+CGPADDR";
+                    let (cpin_res, qeng_res, _qca_res, gpad_res) = if let Some(file) = &mut serial_file {
+                        let combined = "AT+CPIN?;+QENG=\"servingcell\";+QCAINFO;+CGPADDR";
                         match send_at_command_async(file, combined).await {
                             Ok(resp) => parse_combined_response(&resp),
                             Err(e) => {
                                 println!("⚠️ 合并命令失败: {}，降级到单独发送", e);
                                 let cpin = send_at_command_async(file, "AT+CPIN?").await.unwrap_or_default();
                                 let qeng = send_at_command_async(file, "AT+QENG=\"servingcell\"").await.unwrap_or_default();
+                                let qca = send_at_command_async(file, "AT+QCAINFO").await.unwrap_or_default();
                                 let gpad = send_at_command_async(file, "AT+CGPADDR").await.unwrap_or_default();
-                                (cpin, qeng, gpad)
+                                (cpin, qeng, qca, gpad)
                             }
                         }
                     } else {
@@ -763,6 +751,7 @@ async fn hardware_polling_actor(
                         (
                             "+CPIN: READY\r\nOK\r\n".to_string(),
                             "+QENG: \"servingcell\",\"NOCONN\",\"NR5G-SA\",\"TDD\",460,00,39074C001,751,72002F,504990,41,12,-64,-11,22,1,-\r\nOK\r\n".to_string(),
+                            "+QCAINFO: \"PCC\",504990,12,\"NR5G BAND 41\",751\r\nOK\r\n".to_string(),
                             "+CGPADDR: 1,\"10.202.165.254\",\"2409::1\"\r\nOK\r\n".to_string(),
                         )
                     };

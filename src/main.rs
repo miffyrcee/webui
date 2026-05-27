@@ -16,6 +16,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use std::{env, sync::Arc};
 use sysinfo::{Components, System};
+use nom::{
+    IResult,
+    Parser,
+    bytes::complete::{tag, take_while},
+    character::complete::{char, digit1},
+    sequence::delimited,
+    branch::alt,
+};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -291,18 +299,20 @@ fn parse_qeng(qeng_res: &str, telemetry: &mut TelemetryData) {
 
 fn parse_cgpaddr(gpad_res: &str, telemetry: &mut TelemetryData) {
     for line in gpad_res.lines() {
-        if line.contains("+CGPADDR:") {
-            let mut parts = line.split(',').map(|s| s.trim_matches('"').trim());
-            let _cmd_part = parts.next();
-            if let Some(ipv4) = parts.next() {
-                if !ipv4.is_empty() && ipv4 != "0.0.0.0" && telemetry.ipv4.is_empty() {
-                    telemetry.ipv4 = ipv4.to_string();
-                }
+        if let Ok((_, (_, ipv4, ipv6))) = parse_cgpaddr_line(line.trim()) {
+            if !ipv4.is_empty()
+                && ipv4 != "0.0.0.0"
+                && is_valid_ipv4(ipv4)
+                && telemetry.ipv4.is_empty()
+            {
+                telemetry.ipv4 = ipv4.to_string();
             }
-            if let Some(ipv6) = parts.next() {
-                if !ipv6.is_empty() && !ipv6.starts_with("0.0.0.0") && telemetry.ipv6.is_empty() {
-                    telemetry.ipv6 = ipv6.to_string();
-                }
+            if !ipv6.is_empty()
+                && ipv6 != "0.0.0.0"
+                && is_valid_ipv6(ipv6)
+                && telemetry.ipv6.is_empty()
+            {
+                telemetry.ipv6 = ipv6.to_string();
             }
         }
     }
@@ -312,6 +322,93 @@ fn parse_cgpaddr(gpad_res: &str, telemetry: &mut TelemetryData) {
     if telemetry.ipv6.is_empty() {
         telemetry.ipv6 = "--".to_string();
     }
+}
+
+/// 使用 nom 解析单行 +CGPADDR 响应，例如：
+///   +CGPADDR: 1,"10.202.165.254","2409::1"
+/// 返回 (cid, ipv4_addr, ipv6_addr)
+fn parse_cgpaddr_line(input: &str) -> IResult<&str, (u32, &str, &str)> {
+    let (input, _) = tag("+CGPADDR:")(input)?;
+    let (input, _) = take_while(|c: char| c == ' ' || c == '\t')(input)?;
+    // 解析 CID（数字）
+    let (input, cid_str) = digit1(input)?;
+    let cid: u32 = cid_str.parse().unwrap_or(0);
+    let (input, _) = take_while(|c: char| c == ' ' || c == '\t')(input)?;
+    let (input, _) = char(',')(input)?;
+    let (input, _) = take_while(|c: char| c == ' ' || c == '\t')(input)?;
+    // 解析第一个 IP 地址（带引号或不带引号）
+    let (input, ipv4) = parse_ip_value(input)?;
+    let (input, _) = take_while(|c: char| c == ' ' || c == '\t')(input)?;
+    let (input, _) = char(',')(input)?;
+    let (input, _) = take_while(|c: char| c == ' ' || c == '\t')(input)?;
+    // 解析第二个 IP 地址（带引号或不带引号）
+    let (input, ipv6) = parse_ip_value(input)?;
+    Ok((input, (cid, ipv4, ipv6)))
+}
+
+/// 解析一个 IP 值：可能是带双引号的 "1.2.3.4" 或不带引号的 1.2.3.4
+fn parse_ip_value(input: &str) -> IResult<&str, &str> {
+    alt((
+        // 带引号的值
+        delimited(
+            char('"'),
+            take_while(|c: char| c != '"' && c != '\r' && c != '\n'),
+            char('"'),
+        ),
+        // 不带引号的值
+        take_while(|c: char| c != ',' && c != '\r' && c != '\n' && c != ' ' && c != '\t'),
+    ))
+    .parse(input)
+}
+
+/// 校验是否为合法的 IPv4 地址（点分十进制）
+fn is_valid_ipv4(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('.').collect();
+    if parts.len() != 4 {
+        return false;
+    }
+    parts.iter().all(|p| {
+        if p.is_empty() || p.len() > 3 {
+            return false;
+        }
+        p.parse::<u8>().is_ok()
+    })
+}
+
+/// 校验是否为合法的 IPv6 地址（冒号十六进制格式）
+fn is_valid_ipv6(s: &str) -> bool {
+    // 空字符串不算有效 IPv6
+    if s.is_empty() {
+        return false;
+    }
+    // IPv6 合法字符：十六进制数字、冒号
+    if !s.chars().all(|c| c.is_ascii_hexdigit() || c == ':') {
+        return false;
+    }
+    // :: 缩写最多出现一次
+    let double_colon_count = s.as_bytes().windows(2).filter(|w| *w == b"::").count();
+    if double_colon_count > 1 {
+        return false;
+    }
+    // 不能以单个冒号开头（除非是 :: 这种缩写）
+    if s.starts_with(':') && !s.starts_with("::") {
+        return false;
+    }
+    // 不能以单个冒号结尾（除非是 :: 这种缩写）
+    if s.ends_with(':') && !s.ends_with("::") {
+        return false;
+    }
+    // 按冒号分割，每段最多4位十六进制
+    let segments: Vec<&str> = s.split(':').filter(|seg| !seg.is_empty()).collect();
+    if segments.is_empty() {
+        // 全是 ::: 但已经被上面的规则排除，这里只有 "::" 这种
+        return double_colon_count == 1;
+    }
+    // 最多 8 段（完整的 IPv6）
+    if segments.len() > 8 {
+        return false;
+    }
+    segments.iter().all(|seg| seg.len() <= 4 && u16::from_str_radix(seg, 16).is_ok())
 }
 
 async fn hardware_polling_actor(

@@ -461,55 +461,98 @@ fn parse_combined_response(raw: &str) -> (String, String, String) {
 }
 
 fn parse_qeng(qeng_res: &str, telemetry: &mut TelemetryData) {
-    if let Some(line) = qeng_res
+    // 收集所有 servingcell 行（载波聚合时有多行）
+    let serving_lines: Vec<Vec<&str>> = qeng_res
         .lines()
-        .find(|l| l.contains("+QENG: \"servingcell\""))
-    {
-        let line = line.trim();
-        let parts: Vec<&str> = line
-            .split(',')
-            .map(|s| s.trim().trim_matches('"'))
-            .collect();
-        if parts.len() >= 15 {
-            telemetry.network_mode = format!("{} {}", parts[2], parts[3]);
-            telemetry.mccmnc = format!("{}{}", parts[4], parts[5]);
-            telemetry.cell_id = parts[6].to_string();
+        .filter(|l| l.contains("+QENG: \"servingcell\""))
+        .map(|line| {
+            line.trim()
+                .split(',')
+                .map(|s| s.trim().trim_matches('"'))
+                .collect()
+        })
+        .collect();
 
-            if parts[6].len() >= 6 {
-                telemetry.enb_id = parts[6][..parts[6].len() - 3].to_string();
-            } else {
-                telemetry.enb_id = parts[6].to_string();
-            }
-
-            telemetry.tac = parts[8].to_string();
-            telemetry.bands = format!("NR5G BAND {}", parts[10]);
-            telemetry.bandwidth = format!("{} MHz", parts[11]);
-            telemetry.earfcn = parts[9].to_string();
-            telemetry.pci = parts[7].to_string();
-
-            let rsrp: i32 = parts[12].parse().unwrap_or(-140);
-            let rsrq: i32 = parts[13].parse().unwrap_or(-20);
-            let sinr: i32 = parts[14].parse().unwrap_or(-20);
-
-            let rsrp_pct = ((rsrp + 140) as f32 / 96.0 * 100.0).clamp(0.0, 100.0) as i32;
-            let rsrq_pct = ((rsrq + 20) as f32 / 17.0 * 100.0).clamp(0.0, 100.0) as i32;
-            let sinr_pct = ((sinr + 20) as f32 / 50.0 * 100.0).clamp(0.0, 100.0) as i32;
-
-            telemetry.assessment = if rsrp > -80 && sinr > 20 {
-                "Excellent".to_string()
-            } else {
-                "Good".to_string()
-            };
-
-            telemetry.ss_rsrp = format!("{} / {}%", rsrp, rsrp_pct);
-            telemetry.ss_rsrq = format!("{} / {}%", rsrq, rsrq_pct);
-            telemetry.sinr = format!("{} / {}%", sinr, sinr_pct);
-            telemetry.signal_percentage = format!("{}%", rsrp_pct);
-        } else {
-            println!("⚠️ QENG 字段数不足: {} (需要 >=15)", parts.len());
-        }
-    } else {
+    if serving_lines.is_empty() {
         println!("⚠️ 未找到 +QENG 响应");
+        return;
+    }
+
+    // 使用第一行（PCC/主载波）作为基础字段
+    let pcc = &serving_lines[0];
+    if pcc.len() < 15 {
+        println!("⚠️ QENG 字段数不足: {} (需要 >=15)", pcc.len());
+        return;
+    }
+
+    // 基础字段（来自 PCC）
+    telemetry.network_mode = format!("{} {}", pcc[2], pcc[3]);
+    telemetry.mccmnc = format!("{}{}", pcc[4], pcc[5]);
+    telemetry.cell_id = pcc[6].to_string();
+    if pcc[6].len() >= 6 {
+        telemetry.enb_id = pcc[6][..pcc[6].len() - 3].to_string();
+    } else {
+        telemetry.enb_id = pcc[6].to_string();
+    }
+    telemetry.tac = pcc[8].to_string();
+
+    // 信号指标（来自 PCC）
+    let rsrp: i32 = pcc[12].parse().unwrap_or(-140);
+    let rsrq: i32 = pcc[13].parse().unwrap_or(-20);
+    let sinr: i32 = pcc[14].parse().unwrap_or(-20);
+
+    let rsrp_pct = ((rsrp + 140) as f32 / 96.0 * 100.0).clamp(0.0, 100.0) as i32;
+    let rsrq_pct = ((rsrq + 20) as f32 / 17.0 * 100.0).clamp(0.0, 100.0) as i32;
+    let sinr_pct = ((sinr + 20) as f32 / 50.0 * 100.0).clamp(0.0, 100.0) as i32;
+
+    telemetry.assessment = if rsrp > -80 && sinr > 20 {
+        "Excellent"
+    } else {
+        "Good"
+    }
+    .to_string();
+
+    telemetry.ss_rsrp = format!("{} / {}%", rsrp, rsrp_pct);
+    telemetry.ss_rsrq = format!("{} / {}%", rsrq, rsrq_pct);
+    telemetry.sinr = format!("{} / {}%", sinr, sinr_pct);
+    telemetry.signal_percentage = format!("{}%", rsrp_pct);
+
+    // 载波聚合字段：合并所有 CC
+    if serving_lines.len() > 1 {
+        // Bands: 合并去重
+        let mut bands: Vec<String> = Vec::new();
+        for line in &serving_lines {
+            if line.len() >= 11 {
+                let band = format!("NR5G BAND {}", line[10]);
+                if !bands.contains(&band) {
+                    bands.push(band);
+                }
+            }
+        }
+        telemetry.bands = bands.join(", ");
+
+        // Bandwidth: 提取主载波带宽，标注类型
+        if serving_lines[0].len() >= 12 {
+            let bw: i32 = serving_lines[0][11].parse().unwrap_or(0);
+            telemetry.bandwidth = format!("NR {} MHz", bw);
+        }
+
+        // EARFCN / PCI: 逗号连接
+        let earfcns: Vec<&str> = serving_lines.iter()
+            .filter_map(|l| if l.len() >= 10 { Some(l[9]) } else { None })
+            .collect();
+        telemetry.earfcn = earfcns.join(", ");
+
+        let pcis: Vec<&str> = serving_lines.iter()
+            .filter_map(|l| if l.len() >= 8 { Some(l[7]) } else { None })
+            .collect();
+        telemetry.pci = pcis.join(", ");
+    } else {
+        // 单载波（原逻辑）
+        telemetry.bands = format!("NR5G BAND {}", pcc[10]);
+        telemetry.bandwidth = format!("{} MHz", pcc[11]);
+        telemetry.earfcn = pcc[9].to_string();
+        telemetry.pci = pcc[7].to_string();
     }
 }
 

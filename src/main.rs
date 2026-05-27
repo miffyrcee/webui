@@ -193,14 +193,15 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
             for line in resp.lines() {
                 if line.contains("+QSPN:") {
                     // +QSPN: <FNN>,<SNN>,<SPN>,<Alphabet>
-                    let parts: Vec<&str> = line.split(',').collect();
-                    if parts.len() >= 1 {
-                        let cleaned = parts[0]
-                            .trim()
-                            .trim_matches('"')
-                            .trim();
-                        if !cleaned.is_empty() && cleaned != "????" {
-                            info.network_provider = cleaned.to_string();
+                    // 先去掉 "+QSPN: " 前缀，再按逗号分割
+                    let after_prefix = line.trim().strip_prefix("+QSPN:").unwrap_or(line).trim();
+                    let parts: Vec<&str> = after_prefix.split(',').collect();
+                    if !parts.is_empty() {
+                        let raw = parts[0].trim().trim_matches('"').trim();
+                        if !raw.is_empty() && raw != "????" {
+                            // 尝试 hex 解码（移远部分模块返回 UCS2 十六进制编码）
+                            let decoded = decode_hex_ucs2(raw);
+                            info.network_provider = if decoded.is_empty() { raw.to_string() } else { decoded };
                         }
                     }
                 }
@@ -214,11 +215,13 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
                 for line in resp.lines() {
                     if line.contains("+COPS:") {
                         // +COPS: <mode>[,<format>,<oper>[,<Act>]]
-                        let parts: Vec<&str> = line.split(',').collect();
-                        if parts.len() >= 3 {
-                            let cleaned = parts[2].trim().trim_matches('"').trim();
-                            if !cleaned.is_empty() && cleaned != "????" {
-                                info.network_provider = cleaned.to_string();
+                        let after_prefix = line.trim().strip_prefix("+COPS:").unwrap_or(line).trim();
+                        let parts: Vec<&str> = after_prefix.split(',').collect();
+                        if parts.len() >= 2 {
+                            let raw = parts[1].trim().trim_matches('"').trim();
+                            if !raw.is_empty() && raw != "????" {
+                                let decoded = decode_hex_ucs2(raw);
+                                info.network_provider = if decoded.is_empty() { raw.to_string() } else { decoded };
                             }
                         }
                     }
@@ -228,14 +231,14 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         }
     }
     if info.network_provider.is_empty() {
-        // 最后尝试从 MCCMNC 映射（46000/46001 = 中国联通）
+        // 最后尝试从 MCCMNC 映射
         match send_at_command_async(&mut serial_file, "AT+QENG=\"servingcell\"").await {
             Ok(resp) => {
                 for line in resp.lines() {
                     if line.contains("+QENG: \"servingcell\"") {
                         let parts: Vec<&str> = line.split(',').map(|s| s.trim().trim_matches('"')).collect();
                         if parts.len() >= 6 {
-                                let mccmnc = format!("{}{}", parts[4], parts[5]);
+                            let mccmnc = format!("{}{}", parts[4], parts[5]);
                             info.network_provider = match mccmnc.as_str() {
                                 "46000" | "46002" | "46007" => "中国移动".to_string(),
                                 "46001" => "中国联通".to_string(),
@@ -259,9 +262,10 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         Ok(resp) => {
             for line in resp.lines() {
                 if line.contains("+CGDCONT: 1,") {
-                    let parts: Vec<&str> = line.split(',').collect();
-                    if parts.len() >= 3 {
-                        info.apn = parts[2].trim().trim_matches('"').to_string();
+                    let after_prefix = line.trim().strip_prefix("+CGDCONT: 1,").unwrap_or(line).trim();
+                    let parts: Vec<&str> = after_prefix.split(',').collect();
+                    if parts.len() >= 2 {
+                        info.apn = parts[1].trim().trim_matches('"').to_string();
                     }
                     break;
                 }
@@ -273,7 +277,28 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         info.apn = "N/A".to_string();
     }
 
-    info.traffic_stats = "N/A".to_string();
+    // 流量统计 — AT+QGDAT? (或 QGDCNT)
+    match send_at_command_async(&mut serial_file, "AT+QGDAT?").await {
+        Ok(resp) => {
+            for line in resp.lines() {
+                if line.contains("+QGDAT:") {
+                    // +QGDAT: <tx_bytes>,<rx_bytes>,<tx_packets>,<rx_packets>
+                    let after_prefix = line.trim().strip_prefix("+QGDAT:").unwrap_or(line).trim();
+                    let parts: Vec<&str> = after_prefix.split(',').collect();
+                    if parts.len() >= 2 {
+                        let tx: u64 = parts[0].trim().trim_matches('"').parse().unwrap_or(0);
+                        let rx: u64 = parts[1].trim().trim_matches('"').parse().unwrap_or(0);
+                        info.traffic_stats = format!("TX {} / RX {}", format_bytes(tx), format_bytes(rx));
+                    }
+                    break;
+                }
+            }
+        }
+        Err(e) => eprintln!("⚠️ QGDAT 获取失败: {}", e),
+    }
+    if info.traffic_stats.is_empty() {
+        info.traffic_stats = "N/A".to_string();
+    }
 
     println!(
         "📋 静态信息已获取: FW={}, SIM={}, Provider={}, APN={}",
@@ -282,6 +307,45 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
 
     let mut guard = state.static_info.lock().await;
     *guard = info;
+}
+
+/// 将 UCS2 十六进制编码字符串解码为 UTF-8
+/// 例如 "4E2D56FD79FB52A8" -> "中国联通"
+fn decode_hex_ucs2(hex: &str) -> String {
+    if hex.len() % 4 != 0 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return String::new();
+    }
+    let mut bytes = Vec::new();
+    for i in (0..hex.len()).step_by(4) {
+        if let Ok(code) = u16::from_str_radix(&hex[i..i + 4], 16) {
+            match code {
+                0x0000..=0x007F => bytes.push(code as u8),
+                0x0080..=0x07FF => {
+                    bytes.push(0xC0 | (code >> 6) as u8);
+                    bytes.push(0x80 | (code & 0x3F) as u8);
+                }
+                _ => {
+                    bytes.push(0xE0 | (code >> 12) as u8);
+                    bytes.push(0x80 | ((code >> 6) & 0x3F) as u8);
+                    bytes.push(0x80 | (code & 0x3F) as u8);
+                }
+            }
+        }
+    }
+    String::from_utf8(bytes).unwrap_or_default()
+}
+
+/// 格式化字节数为可读字符串 (KB / MB / GB)
+fn format_bytes(bytes: u64) -> String {
+    if bytes >= 1_073_741_824 {
+        format!("{:.2} GB", bytes as f64 / 1_073_741_824.0)
+    } else if bytes >= 1_048_576 {
+        format!("{:.2} MB", bytes as f64 / 1_048_576.0)
+    } else if bytes >= 1024 {
+        format!("{:.2} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{} B", bytes)
+    }
 }
 
 async fn index_handler() -> impl IntoResponse {

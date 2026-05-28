@@ -1,5 +1,11 @@
 # Cline AI Change History
 
+## 2026-05-29 01:16 — 修改默认串口设备为 /dev/smd11
+- **修改内容**: 将 `DEFAULT_SERIAL_PORT` 从 `/dev/ttyIN` 改为 `/dev/smd11`
+- **原因**: 设备默认使用 SMD 通道 `/dev/smd11` 进行 AT 通信，无需 socat PTY 桥接
+- **涉及文件**:
+  - `src/main.rs`
+
 ## 2026-05-29 00:19 — 修复串口打开失败问题
 - **问题**: 代码使用 `tokio::fs::OpenOptions` 直接打开串口设备文件，未配置串口参数（波特率、数据位等），导致 `Not a typewriter` 错误
 - **修改内容**:

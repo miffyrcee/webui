@@ -25,7 +25,7 @@ use tokio_serial::SerialStream;
 use at::parser::{parse_cgpaddr, parse_combined_response, parse_qcainfo, parse_qeng};
 use at::utils::{decode_hex_ucs2, format_bytes};
 
-const DEFAULT_SERIAL_PORT: &str = "/dev/ttyIN";
+const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 串口句柄：支持SerialStream（标准TTY串口）和RawFile（SMD/非TTY设备）

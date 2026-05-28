@@ -12,6 +12,21 @@
   - `src/main.rs`
   - `CLINE_HISTORY.md`
 
+## 2026-05-29 02:00 — 实机测试确认：ATE0 写入永久阻塞，问题未解决
+- **问题**: 尽管新增了 500ms 串口 read 超时和 5s 总超时，程序在 `/dev/smd11` 上依然卡死，无任何错误输出
+- **诊断结果**: 卡死点位于 `send_at_command_async("ATE0")` 的 `write_all()` 写入操作，而非 read 阶段。`write_all()` 在 SMD 通道 `/dev/smd11` 上永久阻塞，不返回错误、不触发超时
+- **尝试修改内容**:
+  - 串口 read 超时从 10s → 500ms（可及时检测读卡死）
+  - 新增 AT 命令 5s 总超时截止（可及时检测写卡死）
+  - 全流程新增诊断日志（定位卡死准确阶段）
+- **结果**: 均无效。SMD 通道 `write()` 阻塞可能是内核级问题（驱动无响应/流控挂死/设备未就绪），无法通过应用层超时解决
+- **建议下一步**:
+  - 回到 `/dev/ttyIN`（socat PTY 桥接），该通道已被 `adb shell "echo AT > /dev/ttyIN && ... cat /dev/ttyOUT"` 确认正常
+  - 或排查 `/dev/smd11` 是否被其他进程独占（`fuser /dev/smd11`）
+- **涉及文件**:
+  - `src/main.rs`
+  - `CLINE_HISTORY.md`
+
 ## 2026-05-29 01:32 — 移除 tokio-serial 依赖
 - **修改内容**: 完全移除 `tokio-serial` crate 的使用
   - 删除 `Cargo.toml` 中的 `tokio-serial = "5.4.5"` 依赖
@@ -119,3 +134,17 @@
   - 移除不再使用的 `tokio::fs::{File, OpenOptions}` 和 `tokio::io` 中不再需要的导入
 - **涉及文件**:
   - `src/main.rs`
+
+## 2026-05-29 01:52 — 增强全流程诊断日志（含串口 read 超时优化）
+- **修改内容**:
+  - `drain_serial_buffer()`: 增加残留数据首段 ASCII 内容输出，可判断残留数据来源（开机日志/前次响应）
+  - `open_serial()`: 增加打开耗时统计，失败时显示完整路径和耗时
+  - `send_at_command_async()`: 增加 AT 命令执行耗时统计和完整响应输出；ERROR 返回标记 ⚠️；串口 read 超时从 10s **降为 500ms**；新增 **5 秒总超时截止** 防止单个 AT 永久卡死
+  - `fetch_static_info()`: 增加分步进度 [1/5]～[5/5]；模拟模式写入提示；最终结果包含全部 5 个字段
+  - `hardware_polling_actor()` 轮询循环: 合并命令增加发送/解析阶段耗时统计；降级发送时每个命令独立标记失败原因；SIM 状态、静态信息、解析耗时输出；WS 广播前输出接收者数量和 JSON 前 200 字节预览；序列化失败标记 ❌
+  - `handle_ws()`: 各 WS 动作请求日志（manual_at 命令内容、set_interval 秒数、set_view_state 切换详情、get_static_info 发送内容）；未知 action 标记 ⚠️；无法解析的 WS 消息标记 ⚠️
+  - 移除不再使用的 `IO_TIMEOUT` 常量（由 500ms read 超时替代）
+- **实机测试结果**: 程序在 `/dev/smd11` 上 `drain_serial_buffer` 完成后卡死，无 `ATE0` 响应输出、无超时错误输出。`send_at_command_async` 的 5s 总超时也未触发，表明 `write_all()` 写入操作本身即永久阻塞，而非 read 阶段卡住。SMD 通道 `/dev/smd11` 写入卡死，模块无应答
+- **涉及文件**:
+  - `src/main.rs`
+  - `CLINE_HISTORY.md`

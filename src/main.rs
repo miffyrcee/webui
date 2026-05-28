@@ -158,7 +158,10 @@ async fn main() {
 }
 
 /// 带短超时的串口读取（用于清空缓冲区，不依赖 IO_TIMEOUT 的 10s 超时）
-async fn read_with_short_timeout(serial: &mut SerialHandle, buf: &mut [u8]) -> Result<usize, String> {
+async fn read_with_short_timeout(
+    serial: &mut SerialHandle,
+    buf: &mut [u8],
+) -> Result<usize, String> {
     match serial {
         SerialHandle::Raw(f) => match timeout(Duration::from_millis(300), f.read(buf)).await {
             Ok(Ok(n)) => Ok(n),
@@ -230,16 +233,24 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
 
     // SMD 通道初始化：清空残留数据（如开机日志、前次会话残留）
     drain_serial_buffer(&mut serial).await;
+    eprintln!("🔍 DEBUG: drain_serial_buffer 完成");
 
     // 发送 ATE0 关闭回显，避免响应中出现 AT 命令的回显干扰解析
-    let _ = send_at_command_async(&mut serial, "ATE0").await;
+    let ate0_resp = send_at_command_async(&mut serial, "ATE0").await;
+    eprintln!("🔍 DEBUG: ATE0 原始响应:\n{:?}", ate0_resp);
 
     // 发送 AT 验证通信
-    let _ = send_at_command_async(&mut serial, "AT").await;
+    let at_resp = send_at_command_async(&mut serial, "AT").await;
+    eprintln!("🔍 DEBUG: AT 原始响应:\n{:?}", at_resp);
 
     // 固件版本
     match send_at_command_async(&mut serial, "AT+CGMR").await {
         Ok(resp) => {
+            eprintln!(
+                "🔍 DEBUG: AT+CGMR 原始响应({}字节):\n{:?}",
+                resp.len(),
+                resp
+            );
             for line in resp.lines() {
                 let trimmed = line.trim();
                 if !trimmed.is_empty()

@@ -10,6 +10,21 @@
 - **涉及文件**:
   - `src/main.rs`
 
+## 2026-05-29 01:12 — ADB 实际调试：发现 AT 通道为 socat PTY 桥接 /dev/ttyIN
+- **问题**: SMD 通道（smd7/smd8/smd11/smd21/smd22）和 ttyMSM0/ttyGS0 全部无 AT 响应，程序卡在读取超时
+- **调试过程**:
+  - `adb shell "ls -la /dev/smd* /dev/tty*"` → 列出所有串口设备
+  - `adb shell "ps | grep -iE 'ril|modem|qmux|qmi|at|radio'"` → 发现有 `socat-at-bridge` 进程：
+    `socat-armel-static pty,link=/dev/ttyIN,raw,echo=0 pty,link=/dev/ttyOUT,raw,echo=1`
+  - `adb shell "echo -ne 'AT\r\n' > /dev/ttyIN && sleep 0.3 && timeout 2 cat /dev/ttyOUT"` → 确认 /dev/ttyIN 返回 AT 响应（FW: RG520NEUDCR01A02M4G_TP）
+- **修复内容**:
+  - 默认串口从 `/dev/ttyMSM0` 改为 `/dev/ttyIN`（socat PTY 桥接 AT 通道）
+  - 新增 `skip_tty_mode()` 函数：socat PTY 桥接设备（ttyIN/ttyOUT）不能用 `tokio_serial` 打开（tcsetattr 会破坏 socat 的 raw 配置），必须跳过 TTY 模式直接用 Raw 文件模式
+  - `open_serial()` 增加 TTY 跳过逻辑，先判断是否 socat 设备，再决定用哪种模式
+- **涉及文件**:
+  - `src/main.rs`
+  - `CLINE_HISTORY.md`
+
 ## 2026-05-29 00:58 — SMD 通道通信修复 + Skill 文档更新
 - **问题**: `/dev/smd11` (Qualcomm SMD) Raw 模式下 AT 命令返回空或无响应
 - **修复内容**:

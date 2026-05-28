@@ -6,9 +6,14 @@
 ## Key Technical Decisions
 
 ### Serial Port Communication
-- 不要使用 `tokio_serial`, AT_SERIAL_PORT不是串口设备。
-- 默认端口: `/dev/smd11`，可通过 `AT_SERIAL_PORT` 环境变量覆盖
+- 默认端口: `/dev/ttyIN`（socat PTY 桥接 AT 通道），可通过 `AT_SERIAL_PORT` 环境变量覆盖
+- **设备发现**: 实际设备上运行 `socat-at-bridge`（socat-armel-static），桥接 `/dev/ttyIN` ↔ `/dev/ttyOUT`
+  - `/dev/ttyIN`: 写入 AT 命令（echo=0 关闭回显）
+  - `/dev/ttyOUT`: 读取响应（echo=1）
+  - 可通过 `adb shell "echo -ne 'AT\\r\\n' > /dev/ttyIN && sleep 0.3 && timeout 2 cat /dev/ttyOUT"` 测试
+- **其他 AT 端口备选**: `/dev/ttyIN2`（第二路 socat 桥接）、`/dev/smd11`（SMD 通道，需确认使用哪个）
 - AT 命令通过 `send_at_command_async()` 函数发送，自动检测 `\r\nOK\r\n` / `\r\nERROR\r\n` 结束标志
+- **socat PTY 桥接设备注意事项**: `tokio_serial::tcsetattr` 会破坏 socat 的 raw 配置，代码中通过 `skip_tty_mode()` 函数自动跳过 TTY 模式直接使用 Raw 文件模式
 
 ### Architecture
 - `AppState` (Arc) 持有 broadcast channel (tx) + mpsc actor channel (actor_tx) + 静态信息缓存

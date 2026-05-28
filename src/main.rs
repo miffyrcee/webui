@@ -20,7 +20,6 @@ use sysinfo::{Components, System};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 use tokio::time::{sleep, timeout};
-use tokio_serial::SerialStream;
 
 use at::parser::{parse_cgpaddr, parse_combined_response, parse_qcainfo, parse_qeng};
 use at::utils::{decode_hex_ucs2, format_bytes};
@@ -28,9 +27,8 @@ use at::utils::{decode_hex_ucs2, format_bytes};
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// 串口句柄：支持SerialStream（标准TTY串口）和RawFile（SMD/非TTY设备）
+/// 串口句柄：RawFile（SMD设备、socat PTY桥接等非TTY设备）
 enum SerialHandle {
-    Tty(SerialStream),
     Raw(tokio::fs::File),
 }
 
@@ -38,10 +36,6 @@ impl SerialHandle {
     /// 写入数据
     async fn write_all(&mut self, buf: &[u8]) -> Result<(), String> {
         match self {
-            SerialHandle::Tty(s) => s
-                .write_all(buf)
-                .await
-                .map_err(|e| format!("写失败: {}", e)),
             SerialHandle::Raw(f) => f
                 .write_all(buf)
                 .await
@@ -52,10 +46,6 @@ impl SerialHandle {
     /// flush
     async fn flush(&mut self) -> Result<(), String> {
         match self {
-            SerialHandle::Tty(s) => s
-                .flush()
-                .await
-                .map_err(|e| format!("flush失败: {}", e)),
             SerialHandle::Raw(f) => f
                 .flush()
                 .await
@@ -66,11 +56,6 @@ impl SerialHandle {
     /// 读取数据（带超时）
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, String> {
         match self {
-            SerialHandle::Tty(s) => match timeout(IO_TIMEOUT, s.read(buf)).await {
-                Ok(Ok(n)) => Ok(n),
-                Ok(Err(e)) => Err(format!("读错误: {}", e)),
-                Err(_) => Err("读超时(10s)".to_string()),
-            },
             SerialHandle::Raw(f) => match timeout(IO_TIMEOUT, f.read(buf)).await {
                 Ok(Ok(n)) => Ok(n),
                 Ok(Err(e)) => Err(format!("读错误: {}", e)),
@@ -178,32 +163,9 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-/// 判断是否应跳过 TTY 模式（socat PTY 桥接设备 /dev/ttyIN, /dev/ttyOUT 等
-/// real TTY），tokio_serial::tcsetattr 会破坏 socat 的 raw 配置
-fn skip_tty_mode(path: &str) -> bool {
-    path.contains("ttyIN") || path.contains("ttyOUT")
-}
-
 /// 尝试打开串口，返回 Some(SerialHandle) 或 None（模拟模式）
 async fn open_serial(path: &str) -> Option<SerialHandle> {
-    // socat PTY 桥接设备直接使用 Raw 文件模式，跳过 TTY 配置
-    if !skip_tty_mode(path) {
-        // 策略1: 尝试用 tokio_serial 打开（标准TTY串口，如 /dev/ttyUSB2）
-        let builder = tokio_serial::new(path, 115200);
-        match tokio_serial::SerialPortBuilderExt::open_native_async(builder) {
-            Ok(stream) => {
-                println!("✅ 串口已打开(TTY模式): {} @ 115200", path);
-                return Some(SerialHandle::Tty(stream));
-            }
-            Err(e) => {
-                // Not a typewriter / Inappropriate ioctl 表示该设备不是标准TTY
-                // 对于 /dev/smd11 (Qualcomm SMD通道)，这是预期行为
-                eprintln!("⏩ TTY模式打开失败: {}，尝试Raw文件模式", e);
-            }
-        };
-    }
-
-    // 策略2: 用 tokio::fs::File 打开（SMD设备、非TTY设备、socat PTY桥接）
+    // 使用 tokio::fs::File 打开（SMD设备、非TTY设备、socat PTY桥接）
     match tokio::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -215,7 +177,7 @@ async fn open_serial(path: &str) -> Option<SerialHandle> {
             Some(SerialHandle::Raw(file))
         }
         Err(e) => {
-            eprintln!("❌ 打开串口失败(Raw模式也失败): {}，将运行在模拟模式", e);
+            eprintln!("❌ 打开串口失败: {}，将运行在模拟模式", e);
             None
         }
     }
@@ -242,13 +204,10 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
 
     // SMD 通道初始化：清空残留 + 关闭回显
     drain_serial_buffer(&mut serial).await;
-    if let SerialHandle::Raw(_) = serial {
-        // SMD 通道先发简单 AT 测试连通性
-        match send_at_command_async(&mut serial, "ATE0").await {
-            Ok(resp) if resp.contains("OK") => println!("✅ SMD 静态信息通道握手成功"),
-            Ok(_) => eprintln!("⚠️ SMD ATE0 未收到预期 OK"),
-            Err(e) => eprintln!("⚠️ SMD ATE0 失败: {}", e),
-        }
+    match send_at_command_async(&mut serial, "ATE0").await {
+        Ok(resp) if resp.contains("OK") => println!("✅ SMD 静态信息通道握手成功"),
+        Ok(_) => eprintln!("⚠️ SMD ATE0 未收到预期 OK"),
+        Err(e) => eprintln!("⚠️ SMD ATE0 失败: {}", e),
     }
 
     // 固件版本
@@ -477,15 +436,6 @@ async fn drain_serial_buffer(serial: &mut SerialHandle) {
                     _ => break,
                 }
             }
-            SerialHandle::Tty(s) => {
-                match timeout(Duration::from_millis(50), s.read(&mut drain_buf)).await {
-                    Ok(Ok(n)) if n > 0 => {
-                        let drained = String::from_utf8_lossy(&drain_buf[..n]);
-                        println!("🧹 清空残留数据 ({} bytes): {:?}", n, drained);
-                    }
-                    _ => break,
-                }
-            }
         }
     }
 }
@@ -505,9 +455,7 @@ async fn send_at_command_async(serial: &mut SerialHandle, cmd: &str) -> Result<S
         .map_err(|e| format!("flush失败: {}", e))?;
 
     // SMD 通道需要短暂等待模块处理 AT 命令
-    if let SerialHandle::Raw(_) = serial {
-        sleep(Duration::from_millis(200)).await;
-    }
+    sleep(Duration::from_millis(200)).await;
 
     let mut buf = [0u8; 1024];
     let mut response_bytes = Vec::with_capacity(4096);
@@ -516,8 +464,7 @@ async fn send_at_command_async(serial: &mut SerialHandle, cmd: &str) -> Result<S
     loop {
         match serial.read(&mut buf).await {
             Ok(0) => {
-                // SMD/Raw 模式：0字节读取不代表EOF，只是暂无数据
-                // TTY模式：0字节通常也是暂无数据
+                // Raw模式：0字节读取不代表EOF，只是暂无数据
                 consecutive_zeros += 1;
                 if consecutive_zeros > 3 {
                     // 连续3次读到0字节，可能是真的没有更多数据了

@@ -1,5 +1,25 @@
 # Cline AI Change History
 
+## 2026-05-29 01:32 — 移除 tokio-serial 依赖
+- **修改内容**: 完全移除 `tokio-serial` crate 的使用
+  - 删除 `Cargo.toml` 中的 `tokio-serial = "5.4.5"` 依赖
+  - 删除 `SerialHandle::Tty` 变体，只保留 `Raw(tokio::fs::File)`
+  - 删除 `skip_tty_mode()` 函数
+  - 简化 `open_serial()` 只使用 `tokio::fs::File` 直接打开设备（SMD/socat PTY 等非TTY设备）
+  - 删除 `drain_serial_buffer()`、`send_at_command_async()` 中所有 Tty 模式匹配分支
+  - `send_at_command_async()` 中 SMD 200ms 延迟始终执行（不再条件判断）
+- **原因**: 实际设备使用 `/dev/smd11`（SMD 通道）或 socat PTY 桥接设备（`/dev/ttyIN`），都不是标准 TTY 串口。`tokio_serial` 的 `tcsetattr` 反而会破坏 socat 的 raw 配置，且 SMD 通道也不支持 TTY ioctl。所有设备都通过 Raw 文件模式工作正常
+- **涉及文件**:
+  - `Cargo.toml`
+  - `src/main.rs`
+
+## 2026-05-29 01:27 — 验证 /dev/smd11 SMD 通道直连正常
+- **验证内容**: `cat /dev/smd11` 测试确认 `/dev/smd11` 为可直接 AT 通信的 SMD 通道
+- **结果**: ATI 正确返回 Quectel RG520N-EU (Revision: RG520NEUDCR01A02M4G_TP)
+- **说明**: 代码已配置 `/dev/smd11` 为默认串口，且 `open_serial()` 的 TTY→Raw 回退策略正确处理 SMD 设备。无需额外修改
+- **涉及文件**:
+  - 无需代码修改（仅本文档记录）
+
 ## 2026-05-29 01:16 — 修改默认串口设备为 /dev/smd11
 - **修改内容**: 将 `DEFAULT_SERIAL_PORT` 从 `/dev/ttyIN` 改为 `/dev/smd11`
 - **原因**: 设备默认使用 SMD 通道 `/dev/smd11` 进行 AT 通信，无需 socat PTY 桥接

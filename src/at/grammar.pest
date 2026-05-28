@@ -1,0 +1,81 @@
+// ===== AT Command Response Grammar =====
+
+// ─── Low-level tokens ───
+WHITESPACE = _{ " " | "\t" }
+COMMA      = { "," }
+CRLF       = { "\r\n" }
+DQUOTE     = { "\"" }
+
+// Numeric tokens
+digits    = @{ ASCII_DIGIT+ }
+hex_digit = { ASCII_HEX_DIGIT }
+hex_seq   = @{ hex_digit+ }
+
+// ─── Quoted / unquoted value ───
+quoted_value = @{ DQUOTE ~ (!(DQUOTE | CRLF) ~ ANY)* ~ DQUOTE }
+raw_value    = @{ (!(COMMA | CRLF | " ") ~ ANY)+ }
+
+generic_value = _{ quoted_value | raw_value }
+
+// ─── Response status ───
+at_ok    = { "OK" }
+at_error = { "ERROR" }
+at_cme_error = { "+CME ERROR:" ~ (digits | quoted_value) }
+
+status_line = _{ at_ok | at_error | at_cme_error }
+
+// ─── CPIN ───
+cpin_resp = { "+CPIN:" ~ (quoted_value | raw_value) }
+
+// ─── QUIMSLOT ───
+quimslot_resp = { "+QUIMSLOT:" ~ digits }
+
+// ─── QSPN ───
+// +QSPN: <FNN>,<SNN>,<SPN>,<Alphabet>
+qspn_resp = { "+QSPN:" ~ qspn_fields }
+qspn_fields = { generic_value ~ (COMMA ~ generic_value)* }
+
+// ─── COPS ───
+// +COPS: <mode>[,<format>,<oper>,<Act>]
+cops_resp = { "+COPS:" ~ cops_fields }
+cops_fields = { generic_value ~ (COMMA ~ generic_value)* }
+
+// ─── CGMR ───
+// Free-text firmware version line between AT+CGMR and OK
+cgmr_line = @{ (!CRLF ~ ANY)+ }
+
+// ─── CGDCONT ───
+// +CGDCONT: <cid>,<PDP_type>,<APN>,<PDP_addr>,<d_comp>,<h_comp>
+cgdcont_resp = { "+CGDCONT:" ~ cgdcont_cid ~ COMMA ~ cgdcont_fields }
+cgdcont_cid = { digits }
+cgdcont_fields = { generic_value ~ (COMMA ~ generic_value)* }
+
+// ─── QGDNRCNT ───
+// +QGDNRCNT: <tx>,<rx>
+qgdnrcnt_resp = { "+QGDNRCNT:" ~ digits ~ COMMA ~ digits }
+
+// ─── QGDAT ───
+// +QGDAT: "<tx>","<rx>"
+qgdat_resp = { "+QGDAT:" ~ quoted_value ~ COMMA ~ quoted_value }
+
+// ─── CGPADDR ───
+// +CGPADDR: <cid>,"<PDP_addr>","<PDP_addr>"
+cgpaddr_resp = { "+CGPADDR:" ~ cgpaddr_cid ~ COMMA ~ cgpaddr_ip }
+cgpaddr_cid = { digits }
+cgpaddr_ip  = { quoted_value }
+
+// ─── QENG "servingcell" ───
+// +QENG: "servingcell","<conn>","<act>","<opmode>",<MCC>,<MNC>,<CellID>,<PCI>,<TAC>,<EARFCN>,<band>,<bandwidth>,<RSRP>,<RSRQ>,<SINR>,<srxlev>,<rssi>
+qeng_servingcell = { "+QENG: \"servingcell\"" ~ COMMA ~ qeng_fields }
+qeng_fields = { generic_value ~ (COMMA ~ generic_value)* }
+
+// ─── QCAINFO ───
+// +QCAINFO: "PCC",<earfcn>,<bw>,<band>,<pci>[,<scc_idx>,<pci>,<rsrp>,<rsrq>,<sinr>]
+qcainfo_resp = { "+QCAINFO:" ~ COMMA? ~ qcainfo_fields }
+qcainfo_fields = { generic_value ~ (COMMA ~ generic_value)* }
+
+// ─── Combined AT command response ───
+// A response can contain multiple AT result lines interspersed
+at_response_line = { (cpin_resp | quimslot_resp | qspn_resp | cops_resp | cgdcont_resp | qgdnrcnt_resp | qgdat_resp | cgpaddr_resp | qeng_servingcell | qcainfo_resp | cgmr_line | status_line) }
+
+at_response = { SOI ~ (at_response_line ~ (CRLF ~ at_response_line)*)? ~ EOI }

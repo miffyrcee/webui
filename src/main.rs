@@ -1,3 +1,5 @@
+mod at;
+
 use axum::{
     Router,
     extract::{
@@ -15,20 +17,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use std::{env, sync::Arc};
 use sysinfo::{Components, System};
-use nom::{
-    IResult,
-    Parser,
-    bytes::complete::{tag, take_while},
-    character::complete::{char, digit1},
-    sequence::delimited,
-    branch::alt,
-};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
+use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 use tokio::time::sleep;
 
-const DEFAULT_SERIAL_PORT: &str = "/dev/at_mdm0";
+use at::parser::{parse_combined_response, parse_cgpaddr, parse_qcainfo, parse_qeng};
+use at::utils::{decode_hex_ucs2, format_bytes};
+
+const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
 
 #[derive(Debug)]
 enum AtAction {
@@ -157,7 +154,11 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         Ok(resp) => {
             for line in resp.lines() {
                 let trimmed = line.trim();
-                if !trimmed.is_empty() && !trimmed.contains("OK") && !trimmed.contains("ERROR") && !trimmed.starts_with("AT+") {
+                if !trimmed.is_empty()
+                    && !trimmed.contains("OK")
+                    && !trimmed.contains("ERROR")
+                    && !trimmed.starts_with("AT+")
+                {
                     info.firmware_version = trimmed.to_string();
                     break;
                 }
@@ -201,7 +202,11 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
                         if !raw.is_empty() && raw != "????" {
                             // 尝试 hex 解码（移远部分模块返回 UCS2 十六进制编码）
                             let decoded = decode_hex_ucs2(raw);
-                            info.network_provider = if decoded.is_empty() { raw.to_string() } else { decoded };
+                            info.network_provider = if decoded.is_empty() {
+                                raw.to_string()
+                            } else {
+                                decoded
+                            };
                         }
                     }
                 }
@@ -215,13 +220,18 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
                 for line in resp.lines() {
                     if line.contains("+COPS:") {
                         // +COPS: <mode>[,<format>,<oper>[,<Act>]]
-                        let after_prefix = line.trim().strip_prefix("+COPS:").unwrap_or(line).trim();
+                        let after_prefix =
+                            line.trim().strip_prefix("+COPS:").unwrap_or(line).trim();
                         let parts: Vec<&str> = after_prefix.split(',').collect();
                         if parts.len() >= 2 {
                             let raw = parts[1].trim().trim_matches('"').trim();
                             if !raw.is_empty() && raw != "????" {
                                 let decoded = decode_hex_ucs2(raw);
-                                info.network_provider = if decoded.is_empty() { raw.to_string() } else { decoded };
+                                info.network_provider = if decoded.is_empty() {
+                                    raw.to_string()
+                                } else {
+                                    decoded
+                                };
                             }
                         }
                     }
@@ -236,7 +246,10 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
             Ok(resp) => {
                 for line in resp.lines() {
                     if line.contains("+QENG: \"servingcell\"") {
-                        let parts: Vec<&str> = line.split(',').map(|s| s.trim().trim_matches('"')).collect();
+                        let parts: Vec<&str> = line
+                            .split(',')
+                            .map(|s| s.trim().trim_matches('"'))
+                            .collect();
                         if parts.len() >= 6 {
                             let mccmnc = format!("{}{}", parts[4], parts[5]);
                             info.network_provider = match mccmnc.as_str() {
@@ -262,7 +275,11 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         Ok(resp) => {
             for line in resp.lines() {
                 if line.contains("+CGDCONT: 1,") {
-                    let after_prefix = line.trim().strip_prefix("+CGDCONT: 1,").unwrap_or(line).trim();
+                    let after_prefix = line
+                        .trim()
+                        .strip_prefix("+CGDCONT: 1,")
+                        .unwrap_or(line)
+                        .trim();
                     let parts: Vec<&str> = after_prefix.split(',').collect();
                     if parts.len() >= 2 {
                         info.apn = parts[1].trim().trim_matches('"').to_string();
@@ -278,33 +295,47 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     }
 
     // 流量统计 — 尝试 QGDNRCNT 或 QGDAT
-    info.traffic_stats = send_at_command_async(&mut serial_file, "AT+QGDNRCNT?").await
-        .ok().and_then(|r| {
-            r.lines().find(|l| l.contains("+QGDNRCNT:"))
+    info.traffic_stats = send_at_command_async(&mut serial_file, "AT+QGDNRCNT?")
+        .await
+        .ok()
+        .and_then(|r| {
+            r.lines()
+                .find(|l| l.contains("+QGDNRCNT:"))
                 .and_then(|line| {
-                    let parts: Vec<&str> = line.trim()
-                        .strip_prefix("+QGDNRCNT:")?.trim()
-                        .split(',').collect();
+                    let parts: Vec<&str> = line
+                        .trim()
+                        .strip_prefix("+QGDNRCNT:")?
+                        .trim()
+                        .split(',')
+                        .collect();
                     if parts.len() >= 2 {
                         let tx: u64 = parts[0].trim().parse().unwrap_or(0);
                         let rx: u64 = parts[1].trim().parse().unwrap_or(0);
                         Some(format!("TX {} / RX {}", format_bytes(tx), format_bytes(rx)))
-                    } else { None }
+                    } else {
+                        None
+                    }
                 })
-        }).unwrap_or_default();
+        })
+        .unwrap_or_default();
     if info.traffic_stats.is_empty() {
         // fallback to QGDAT
         match send_at_command_async(&mut serial_file, "AT+QGDAT?").await {
             Ok(resp) => {
                 for line in resp.lines() {
                     if line.contains("+QGDAT:") {
-                        let parts: Vec<&str> = line.trim()
-                            .strip_prefix("+QGDAT:").unwrap_or(line).trim()
-                            .split(',').collect();
+                        let parts: Vec<&str> = line
+                            .trim()
+                            .strip_prefix("+QGDAT:")
+                            .unwrap_or(line)
+                            .trim()
+                            .split(',')
+                            .collect();
                         if parts.len() >= 2 {
                             let tx: u64 = parts[0].trim().trim_matches('"').parse().unwrap_or(0);
                             let rx: u64 = parts[1].trim().trim_matches('"').parse().unwrap_or(0);
-                            info.traffic_stats = format!("TX {} / RX {}", format_bytes(tx), format_bytes(rx));
+                            info.traffic_stats =
+                                format!("TX {} / RX {}", format_bytes(tx), format_bytes(rx));
                         }
                         break;
                     }
@@ -324,53 +355,6 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
 
     let mut guard = state.static_info.write().await;
     *guard = info;
-}
-
-/// 将 UCS2 十六进制编码字符串解码为 UTF-8
-/// 例如 "4E2D56FD79FB52A8" -> "中国联通"
-fn decode_hex_ucs2(hex: &str) -> String {
-    if hex.len() % 4 != 0 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        return String::new();
-    }
-    let mut bytes = Vec::new();
-    for i in (0..hex.len()).step_by(4) {
-        if let Ok(code) = u16::from_str_radix(&hex[i..i + 4], 16) {
-            match code {
-                0x0000..=0x007F => bytes.push(code as u8),
-                0x0080..=0x07FF => {
-                    bytes.push(0xC0 | (code >> 6) as u8);
-                    bytes.push(0x80 | (code & 0x3F) as u8);
-                }
-                _ => {
-                    bytes.push(0xE0 | (code >> 12) as u8);
-                    bytes.push(0x80 | ((code >> 6) & 0x3F) as u8);
-                    bytes.push(0x80 | (code & 0x3F) as u8);
-                }
-            }
-        }
-    }
-    String::from_utf8(bytes).unwrap_or_default()
-}
-
-/// 格式化字节数为可读字符串 (KB / MB / GB)
-fn format_bytes(bytes: u64) -> String {
-    if bytes >= 1_073_741_824 {
-        format!("{:.2} GB", bytes as f64 / 1_073_741_824.0)
-    } else if bytes >= 1_048_576 {
-        format!("{:.2} MB", bytes as f64 / 1_048_576.0)
-    } else if bytes >= 1024 {
-        format!("{:.2} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{} B", bytes)
-    }
-}
-
-async fn index_handler() -> impl IntoResponse {
-    let html = include_str!("index.html");
-    Response::builder()
-        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-        .body(axum::body::Body::from(html))
-        .unwrap()
 }
 
 /// 异步发送 AT 命令并读取响应
@@ -428,306 +412,12 @@ async fn send_at_command_async(file: &mut File, cmd: &str) -> Result<String, Str
     Ok(response)
 }
 
-/// 解析合并命令的响应，提取各部分
-fn parse_combined_response(raw: &str) -> (String, String, String, String) {
-    // 提取从 key 开始到下一个不同 key 之前的所有内容
-    let extract = |key: &str| -> String {
-        raw.find(key).map_or(String::new(), |pos| {
-            let rem = &raw[pos..];
-            let delim_keys = ["+CPIN:", "+QENG:", "+QCAINFO:", "+CGPADDR:"];
-            let end = delim_keys.iter()
-                .filter(|&&other| other != key) // 不用自身作为分割点（支持多行同 key）
-                .filter_map(|&other| rem[other.len()..].find(other).map(|p| p + other.len()))
-                .min()
-                .unwrap_or(rem.len());
-            rem[..end.min(rem.len())].to_string()
-        })
-    };
-    (extract("+CPIN:"), extract("+QENG:"), extract("+QCAINFO:"), extract("+CGPADDR:"))
-}
-
-fn parse_qeng(qeng_res: &str, telemetry: &mut TelemetryData) {
-    // 收集所有 servingcell 行（载波聚合时有多行）
-    let serving_lines: Vec<Vec<&str>> = qeng_res
-        .lines()
-        .filter(|l| l.contains("+QENG: \"servingcell\""))
-        .map(|line| {
-            line.trim()
-                .split(',')
-                .map(|s| s.trim().trim_matches('"'))
-                .collect()
-        })
-        .collect();
-
-    if serving_lines.is_empty() {
-        println!("⚠️ 未找到 +QENG 响应");
-        return;
-    }
-
-    // 使用第一行（PCC/主载波）作为基础字段
-    let pcc = &serving_lines[0];
-    if pcc.len() < 15 {
-        println!("⚠️ QENG 字段数不足: {} (需要 >=15)", pcc.len());
-        return;
-    }
-
-    // 基础字段（来自 PCC）
-    telemetry.network_mode = format!("{} {}", pcc[2], pcc[3]);
-    telemetry.mccmnc = format!("{}{}", pcc[4], pcc[5]);
-    telemetry.cell_id = pcc[6].to_string();
-    if pcc[6].len() >= 6 {
-        telemetry.enb_id = pcc[6][..pcc[6].len() - 3].to_string();
-    } else {
-        telemetry.enb_id = pcc[6].to_string();
-    }
-    telemetry.tac = pcc[8].to_string();
-
-    // 信号指标（来自 PCC）
-    let rsrp: i32 = pcc[12].parse().unwrap_or(-140);
-    let rsrq: i32 = pcc[13].parse().unwrap_or(-20);
-    let sinr: i32 = pcc[14].parse().unwrap_or(-20);
-
-    let rsrp_pct = ((rsrp + 140) as f32 / 96.0 * 100.0).clamp(0.0, 100.0) as i32;
-    let rsrq_pct = ((rsrq + 20) as f32 / 17.0 * 100.0).clamp(0.0, 100.0) as i32;
-    let sinr_pct = ((sinr + 20) as f32 / 50.0 * 100.0).clamp(0.0, 100.0) as i32;
-
-    telemetry.assessment = if rsrp > -80 && sinr > 20 {
-        "Excellent"
-    } else {
-        "Good"
-    }
-    .to_string();
-
-    telemetry.ss_rsrp = format!("{} / {}%", rsrp, rsrp_pct);
-    telemetry.ss_rsrq = format!("{} / {}%", rsrq, rsrq_pct);
-    telemetry.sinr = format!("{} / {}%", sinr, sinr_pct);
-    telemetry.signal_percentage = format!("{}%", rsrp_pct);
-
-    // 载波聚合字段：合并所有 CC
-    if serving_lines.len() > 1 {
-        // Bands: 合并去重
-        let mut bands: Vec<String> = Vec::new();
-        for line in &serving_lines {
-            if line.len() >= 11 {
-                let band = format!("NR5G BAND {}", line[10]);
-                if !bands.contains(&band) {
-                    bands.push(band);
-                }
-            }
-        }
-        telemetry.bands = bands.join(", ");
-
-        // Bandwidth: 载波聚合时求和所有分量载波带宽，并显示明细
-        let mut total_bw = 0i32;
-        let mut bw_parts: Vec<String> = Vec::new();
-        for line in &serving_lines {
-            if line.len() >= 12 {
-                if let Ok(bw) = line[11].parse::<i32>() {
-                    total_bw += bw;
-                    bw_parts.push(bw.to_string());
-                }
-            }
-        }
-        if !bw_parts.is_empty() {
-            telemetry.bandwidth = format!("NR {} MHz ({})", total_bw, bw_parts.join("+"));
-        }
-
-        // EARFCN / PCI: 逗号连接
-        let earfcns: Vec<&str> = serving_lines.iter()
-            .filter_map(|l| if l.len() >= 10 { Some(l[9]) } else { None })
-            .collect();
-        telemetry.earfcn = earfcns.join(", ");
-
-        let pcis: Vec<&str> = serving_lines.iter()
-            .filter_map(|l| if l.len() >= 8 { Some(l[7]) } else { None })
-            .collect();
-        telemetry.pci = pcis.join(", ");
-    } else {
-        // 单载波（原逻辑）
-        telemetry.bands = format!("NR5G BAND {}", pcc[10]);
-        telemetry.bandwidth = format!("{} MHz", pcc[11]);
-        telemetry.earfcn = pcc[9].to_string();
-        telemetry.pci = pcc[7].to_string();
-    }
-}
-
-/// 解析 +QCAINFO 获取准确的载波聚合数据（替代 QENG 的多行 parsing）
-/// +QCAINFO: "PCC",504990,12,"NR5G BAND 41",751
-/// +QCAINFO: "SCC",156490,3,"NR5G BAND 28",1,250,0,-,-
-fn parse_qcainfo(qca_res: &str, telemetry: &mut TelemetryData) {
-    let lines: Vec<Vec<&str>> = qca_res
-        .lines()
-        .filter(|l| l.contains("+QCAINFO:"))
-        .map(|line| {
-            line.trim()
-                .strip_prefix("+QCAINFO:").unwrap_or(line).trim()
-                .split(',')
-                .map(|s| s.trim().trim_matches('"'))
-                .collect()
-        })
-        .collect();
-
-    if lines.is_empty() { return; }
-
-    // 收集 bands/earfcn/pci（去重 bands）和带宽
-    let mut bands: Vec<String> = Vec::new();
-    let mut earfcns = Vec::new();
-    let mut pcis = Vec::new();
-    let mut total_bw = 0i32;
-    let mut bw_parts: Vec<String> = Vec::new();
-
-    for line in lines.iter() {
-        if line.len() < 4 { continue; }
-        // PCC: "PCC",earfcn,bw,"NR5G BAND XX",pci                       (5 fields)
-        // SCC: "SCC",earfcn,bw,"NR5G BAND XX",scc_idx,pci,rsrp,rsrq,sinr (9 fields)
-        if let Some(bw_str) = line.get(2) {
-            if let Ok(bw) = bw_str.parse::<i32>() {
-                total_bw += bw;
-                bw_parts.push(bw.to_string());
-            }
-        }
-        if let Some(earfcn) = line.get(1) { earfcns.push(*earfcn); }
-        let pci_idx = if line.len() >= 6 { 5 } else { 4 };
-        if let Some(pci) = line.get(pci_idx) { pcis.push(*pci); }
-        let band = format!("NR5G BAND {}", line[3].trim_start_matches("NR5G BAND "));
-        let full_band = if band.contains("NR5G BAND") { band } else { format!("NR5G BAND {}", line[3]) };
-        if !bands.contains(&full_band) { bands.push(full_band); }
-    }
-
-    if !bands.is_empty() { telemetry.bands = bands.join(", "); }
-    if !bw_parts.is_empty() {
-        telemetry.bandwidth = format!("NR {} MHz ({})", total_bw, bw_parts.join("+"));
-    }
-    if !earfcns.is_empty() { telemetry.earfcn = earfcns.join(", "); }
-    if !pcis.is_empty() { telemetry.pci = pcis.join(", "); }
-
-    eprintln!("🔍 QCAINFO parsed: bands={} bw={} earfcn={} pci={}", telemetry.bands, telemetry.bandwidth, telemetry.earfcn, telemetry.pci);
-}
-
-fn parse_cgpaddr(gpad_res: &str, telemetry: &mut TelemetryData) {
-    for line in gpad_res.lines() {
-        if let Ok((_, (_, ipv4, ipv6))) = parse_cgpaddr_line(line.trim()) {
-            if !ipv4.is_empty()
-                && ipv4 != "0.0.0.0"
-                && is_valid_ipv4(ipv4)
-                && telemetry.ipv4.is_empty()
-            {
-                telemetry.ipv4 = ipv4.to_string();
-            }
-            if !ipv6.is_empty()
-                && ipv6 != "0.0.0.0"
-            {
-                // 尝试转换为标准IPv6格式（处理点分十进制16字节格式）
-                let normalized = convert_dotted_ipv6_to_standard(ipv6);
-                if is_valid_ipv6(&normalized) && telemetry.ipv6.is_empty() {
-                    telemetry.ipv6 = normalized;
-                }
-            }
-        }
-    }
-    if telemetry.ipv4.is_empty() {
-        telemetry.ipv4 = "--".to_string();
-    }
-    if telemetry.ipv6.is_empty() {
-        telemetry.ipv6 = "--".to_string();
-    }
-}
-
-/// 将16字节点分十进制格式的IPv6转换为标准冒号十六进制格式
-/// 例如: "36.9.137.112.10.181.36.74.24.179.107.247.91.255.29.48"
-///    => "2409:8970:ab5:244a:18b3:6bf7:5bff:1d30"
-fn convert_dotted_ipv6_to_standard(raw: &str) -> String {
-    let bytes: Vec<u8> = raw
-        .split('.')
-        .filter_map(|s| s.parse::<u8>().ok())
-        .collect();
-
-    if bytes.len() != 16 {
-        // 不是16字节的点分十进制，直接返回原值（可能是标准格式）
-        return raw.to_string();
-    }
-
-    let mut groups = Vec::with_capacity(8);
-    for i in 0..8 {
-        let hi = bytes[i * 2];
-        let lo = bytes[i * 2 + 1];
-        groups.push(format!("{:x}", (hi as u16) << 8 | lo as u16));
-    }
-    groups.join(":")
-}
-
-/// 使用 nom 解析单行 +CGPADDR 响应
-fn parse_cgpaddr_line(input: &str) -> IResult<&str, (u32, &str, &str)> {
-    let (input, _) = tag("+CGPADDR:")(input)?;
-    let (input, _) = take_while(|c: char| c == ' ' || c == '\t')(input)?;
-    let (input, cid_str) = digit1(input)?;
-    let cid: u32 = cid_str.parse().unwrap_or(0);
-    let (input, _) = take_while(|c: char| c == ' ' || c == '\t')(input)?;
-    let (input, _) = char(',')(input)?;
-    let (input, _) = take_while(|c: char| c == ' ' || c == '\t')(input)?;
-    let (input, ipv4) = parse_ip_value(input)?;
-    let (input, _) = take_while(|c: char| c == ' ' || c == '\t')(input)?;
-    let (input, _) = char(',')(input)?;
-    let (input, _) = take_while(|c: char| c == ' ' || c == '\t')(input)?;
-    let (input, ipv6) = parse_ip_value(input)?;
-    Ok((input, (cid, ipv4, ipv6)))
-}
-
-/// 解析一个 IP 值：可能是带双引号的 "1.2.3.4" 或不带引号的 1.2.3.4
-fn parse_ip_value(input: &str) -> IResult<&str, &str> {
-    alt((
-        delimited(
-            char('"'),
-            take_while(|c: char| c != '"' && c != '\r' && c != '\n'),
-            char('"'),
-        ),
-        take_while(|c: char| c != ',' && c != '\r' && c != '\n' && c != ' ' && c != '\t'),
-    ))
-    .parse(input)
-}
-
-/// 校验是否为合法的 IPv4 地址（点分十进制）
-fn is_valid_ipv4(s: &str) -> bool {
-    let parts: Vec<&str> = s.split('.').collect();
-    if parts.len() != 4 {
-        return false;
-    }
-    parts.iter().all(|p| {
-        if p.is_empty() || p.len() > 3 {
-            return false;
-        }
-        p.parse::<u8>().is_ok()
-    })
-}
-
-/// 校验是否为合法的 IPv6 地址（冒号十六进制格式）
-fn is_valid_ipv6(s: &str) -> bool {
-    if s.is_empty() {
-        return false;
-    }
-    if !s.chars().all(|c| c.is_ascii_hexdigit() || c == ':') {
-        return false;
-    }
-    let double_colon_count = s.as_bytes().windows(2).filter(|w| *w == b"::").count();
-    if double_colon_count > 1 {
-        return false;
-    }
-    if s.starts_with(':') && !s.starts_with("::") {
-        return false;
-    }
-    if s.ends_with(':') && !s.ends_with("::") {
-        return false;
-    }
-    let segments: Vec<&str> = s.split(':').filter(|seg| !seg.is_empty()).collect();
-    if segments.is_empty() {
-        return double_colon_count == 1;
-    }
-    if segments.len() > 8 {
-        return false;
-    }
-    segments
-        .iter()
-        .all(|seg| seg.len() <= 4 && u16::from_str_radix(seg, 16).is_ok())
+async fn index_handler() -> impl IntoResponse {
+    let html = include_str!("index.html");
+    Response::builder()
+        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .body(axum::body::Body::from(html))
+        .unwrap()
 }
 
 async fn hardware_polling_actor(
@@ -869,10 +559,7 @@ async fn hardware_polling_actor(
     }
 }
 
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
     ws.on_upgrade(|socket| handle_ws(socket, state))
 }
 
@@ -973,7 +660,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     }
 
     println!(
-        "👋 WebSocket 客户端已断开 (当前在线: {})",
+        " WebSocket 客户端已断开 (当前在线: {})",
         state.tx.receiver_count()
     );
 }

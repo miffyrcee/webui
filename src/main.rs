@@ -22,7 +22,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 use tokio::time::sleep;
 
-use at::parser::{parse_combined_response, parse_cgpaddr, parse_qcainfo, parse_qeng};
+use at::parser::{parse_cgpaddr, parse_combined_response, parse_qcainfo, parse_qeng};
 use at::utils::{decode_hex_ucs2, format_bytes};
 
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";

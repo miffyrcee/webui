@@ -89,7 +89,11 @@ fn parse_single_line(line: &str) -> Option<ParsedLine> {
         if parts.len() >= 1 {
             let raw = extract_value(parts[0]);
             let decoded = decode_hex_ucs2(raw);
-            resp.fnn = if decoded.is_empty() { raw.to_string() } else { decoded };
+            resp.fnn = if decoded.is_empty() {
+                raw.to_string()
+            } else {
+                decoded
+            };
         }
         if parts.len() >= 2 {
             resp.snn = extract_value(parts[1]).to_string();
@@ -129,11 +133,26 @@ fn parse_single_line(line: &str) -> Option<ParsedLine> {
             .unwrap_or(0);
         let entry = CgdcontEntry {
             cid,
-            pdp_type: parts.get(1).map(|s| extract_value(s).to_string()).unwrap_or_default(),
-            apn: parts.get(2).map(|s| extract_value(s).to_string()).unwrap_or_default(),
-            pdp_addr: parts.get(3).map(|s| extract_value(s).to_string()).unwrap_or_default(),
-            d_comp: parts.get(4).map(|s| extract_value(s).to_string()).unwrap_or_default(),
-            h_comp: parts.get(5).map(|s| extract_value(s).to_string()).unwrap_or_default(),
+            pdp_type: parts
+                .get(1)
+                .map(|s| extract_value(s).to_string())
+                .unwrap_or_default(),
+            apn: parts
+                .get(2)
+                .map(|s| extract_value(s).to_string())
+                .unwrap_or_default(),
+            pdp_addr: parts
+                .get(3)
+                .map(|s| extract_value(s).to_string())
+                .unwrap_or_default(),
+            d_comp: parts
+                .get(4)
+                .map(|s| extract_value(s).to_string())
+                .unwrap_or_default(),
+            h_comp: parts
+                .get(5)
+                .map(|s| extract_value(s).to_string())
+                .unwrap_or_default(),
         };
         return Some(ParsedLine::Cgdcont(entry));
     }
@@ -142,9 +161,18 @@ fn parse_single_line(line: &str) -> Option<ParsedLine> {
     if line.starts_with("+QGDNRCNT:") {
         let rest = line.strip_prefix("+QGDNRCNT:").unwrap_or("").trim();
         let parts: Vec<&str> = rest.split(',').collect();
-        let tx = parts.first().and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
-        let rx = parts.get(1).and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
-        return Some(ParsedLine::Qgdnrcnt(QgdnrcntResponse { tx_bytes: tx, rx_bytes: rx }));
+        let tx = parts
+            .first()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(0);
+        let rx = parts
+            .get(1)
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(0);
+        return Some(ParsedLine::Qgdnrcnt(QgdnrcntResponse {
+            tx_bytes: tx,
+            rx_bytes: rx,
+        }));
     }
 
     // +QGDAT:
@@ -159,7 +187,10 @@ fn parse_single_line(line: &str) -> Option<ParsedLine> {
             .get(1)
             .and_then(|s| extract_value(s).parse::<u64>().ok())
             .unwrap_or(0);
-        return Some(ParsedLine::Qgdat(QgdatResponse { tx_bytes: tx, rx_bytes: rx }));
+        return Some(ParsedLine::Qgdat(QgdatResponse {
+            tx_bytes: tx,
+            rx_bytes: rx,
+        }));
     }
 
     // +CGPADDR:
@@ -183,7 +214,10 @@ fn parse_single_line(line: &str) -> Option<ParsedLine> {
 
     // +QENG: "servingcell"
     if line.starts_with("+QENG: \"servingcell\"") {
-        let rest = line.strip_prefix("+QENG: \"servingcell\"").unwrap_or("").trim();
+        let rest = line
+            .strip_prefix("+QENG: \"servingcell\"")
+            .unwrap_or("")
+            .trim();
         // Remove leading comma if present
         let rest = rest.strip_prefix(',').unwrap_or(rest);
         let parts: Vec<&str> = rest
@@ -192,22 +226,54 @@ fn parse_single_line(line: &str) -> Option<ParsedLine> {
             .collect();
 
         let mut cell = QengServingCell::default();
-        if let Some(v) = parts.get(0) { cell.connection_status = v.to_string(); }
-        if let Some(v) = parts.get(1) { cell.rat = v.to_string(); }
-        if let Some(v) = parts.get(2) { cell.opmode = v.to_string(); }
-        if let Some(v) = parts.get(3) { cell.mcc = v.to_string(); }
-        if let Some(v) = parts.get(4) { cell.mnc = v.to_string(); }
-        if let Some(v) = parts.get(5) { cell.cell_id = v.to_string(); }
-        if let Some(v) = parts.get(6) { cell.pci = v.to_string(); }
-        if let Some(v) = parts.get(7) { cell.tac = v.to_string(); }
-        if let Some(v) = parts.get(8) { cell.earfcn = v.to_string(); }
-        if let Some(v) = parts.get(9) { cell.band = v.to_string(); }
-        if let Some(v) = parts.get(10) { cell.bandwidth = v.to_string(); }
-        if let Some(v) = parts.get(11) { cell.rsrp = v.to_string(); }
-        if let Some(v) = parts.get(12) { cell.rsrq = v.to_string(); }
-        if let Some(v) = parts.get(13) { cell.sinr = v.to_string(); }
-        if let Some(v) = parts.get(14) { cell.srxlev = v.to_string(); }
-        if let Some(v) = parts.get(15) { cell.rssi = v.to_string(); }
+        if let Some(v) = parts.get(0) {
+            cell.connection_status = v.to_string();
+        }
+        if let Some(v) = parts.get(1) {
+            cell.rat = v.to_string();
+        }
+        if let Some(v) = parts.get(2) {
+            cell.opmode = v.to_string();
+        }
+        if let Some(v) = parts.get(3) {
+            cell.mcc = v.to_string();
+        }
+        if let Some(v) = parts.get(4) {
+            cell.mnc = v.to_string();
+        }
+        if let Some(v) = parts.get(5) {
+            cell.cell_id = v.to_string();
+        }
+        if let Some(v) = parts.get(6) {
+            cell.pci = v.to_string();
+        }
+        if let Some(v) = parts.get(7) {
+            cell.tac = v.to_string();
+        }
+        if let Some(v) = parts.get(8) {
+            cell.earfcn = v.to_string();
+        }
+        if let Some(v) = parts.get(9) {
+            cell.band = v.to_string();
+        }
+        if let Some(v) = parts.get(10) {
+            cell.bandwidth = v.to_string();
+        }
+        if let Some(v) = parts.get(11) {
+            cell.rsrp = v.to_string();
+        }
+        if let Some(v) = parts.get(12) {
+            cell.rsrq = v.to_string();
+        }
+        if let Some(v) = parts.get(13) {
+            cell.sinr = v.to_string();
+        }
+        if let Some(v) = parts.get(14) {
+            cell.srxlev = v.to_string();
+        }
+        if let Some(v) = parts.get(15) {
+            cell.rssi = v.to_string();
+        }
         return Some(ParsedLine::QengServingCell(cell));
     }
 
@@ -220,10 +286,18 @@ fn parse_single_line(line: &str) -> Option<ParsedLine> {
             .collect();
 
         let mut entry = QcainfoEntry::default();
-        if let Some(v) = parts.get(0) { entry.component = v.to_string(); }
-        if let Some(v) = parts.get(1) { entry.earfcn = v.to_string(); }
-        if let Some(v) = parts.get(2) { entry.bandwidth = v.to_string(); }
-        if let Some(v) = parts.get(3) { entry.band = v.to_string(); }
+        if let Some(v) = parts.get(0) {
+            entry.component = v.to_string();
+        }
+        if let Some(v) = parts.get(1) {
+            entry.earfcn = v.to_string();
+        }
+        if let Some(v) = parts.get(2) {
+            entry.bandwidth = v.to_string();
+        }
+        if let Some(v) = parts.get(3) {
+            entry.band = v.to_string();
+        }
 
         // PCC: 5 fields total; SCC: 9 fields total
         if parts.len() >= 5 {
@@ -406,16 +480,10 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
         }
 
         // EARFCN / PCI: comma-joined
-        let earfcns: Vec<&str> = serving_cells
-            .iter()
-            .map(|c| c.earfcn.as_str())
-            .collect();
+        let earfcns: Vec<&str> = serving_cells.iter().map(|c| c.earfcn.as_str()).collect();
         telemetry.earfcn = earfcns.join(", ");
 
-        let pcis: Vec<&str> = serving_cells
-            .iter()
-            .map(|c| c.pci.as_str())
-            .collect();
+        let pcis: Vec<&str> = serving_cells.iter().map(|c| c.pci.as_str()).collect();
         telemetry.pci = pcis.join(", ");
     } else {
         // Single carrier
@@ -550,44 +618,58 @@ mod tests {
     #[test]
     fn test_parse_cops() {
         let result = parse_single_line(r#"+COPS: 0,0,"CHN-UNICOM",13"#);
-        assert!(matches!(result, Some(ParsedLine::Cops(ref r)) if r.oper.as_deref() == Some("CHN-UNICOM")));
+        assert!(
+            matches!(result, Some(ParsedLine::Cops(ref r)) if r.oper.as_deref() == Some("CHN-UNICOM"))
+        );
     }
 
     #[test]
     fn test_parse_gdcont() {
         let result = parse_single_line("+CGDCONT: 1,\"IP\",\"3gnet\",\"\",0,0");
-        assert!(matches!(result, Some(ParsedLine::Cgdcont(ref r)) if r.cid == 1 && r.apn == "3gnet"));
+        assert!(
+            matches!(result, Some(ParsedLine::Cgdcont(ref r)) if r.cid == 1 && r.apn == "3gnet")
+        );
     }
 
     #[test]
     fn test_parse_qgdnrcnt() {
         let result = parse_single_line("+QGDNRCNT: 123456,789012");
-        assert!(matches!(result, Some(ParsedLine::Qgdnrcnt(ref r)) if r.tx_bytes == 123456 && r.rx_bytes == 789012));
+        assert!(
+            matches!(result, Some(ParsedLine::Qgdnrcnt(ref r)) if r.tx_bytes == 123456 && r.rx_bytes == 789012)
+        );
     }
 
     #[test]
     fn test_parse_qgdat() {
         let result = parse_single_line("+QGDAT: \"123456\",\"789012\"");
-        assert!(matches!(result, Some(ParsedLine::Qgdat(ref r)) if r.tx_bytes == 123456 && r.rx_bytes == 789012));
+        assert!(
+            matches!(result, Some(ParsedLine::Qgdat(ref r)) if r.tx_bytes == 123456 && r.rx_bytes == 789012)
+        );
     }
 
     #[test]
     fn test_parse_cgpaddr() {
         let result = parse_single_line("+CGPADDR: 1,\"10.202.165.254\",\"2409::1\"");
-        assert!(matches!(result, Some(ParsedLine::Cgpaddr(ref r)) if r.cid == 1 && r.ipv4 == "10.202.165.254"));
+        assert!(
+            matches!(result, Some(ParsedLine::Cgpaddr(ref r)) if r.cid == 1 && r.ipv4 == "10.202.165.254")
+        );
     }
 
     #[test]
     fn test_parse_qeng_servingcell() {
         let line = "+QENG: \"servingcell\",\"NOCONN\",\"NR5G-SA\",\"TDD\",460,00,39074C001,751,72002F,504990,41,12,-64,-11,22,1,-";
         let result = parse_single_line(line);
-        assert!(matches!(result, Some(ParsedLine::QengServingCell(ref r)) if r.rat == "NR5G-SA" && r.mcc == "460"));
+        assert!(
+            matches!(result, Some(ParsedLine::QengServingCell(ref r)) if r.rat == "NR5G-SA" && r.mcc == "460")
+        );
     }
 
     #[test]
     fn test_parse_qcainfo_pcc() {
         let result = parse_single_line("+QCAINFO: \"PCC\",504990,12,\"NR5G BAND 41\",751");
-        assert!(matches!(result, Some(ParsedLine::Qcainfo(ref r)) if r.component == "PCC" && r.earfcn == "504990"));
+        assert!(
+            matches!(result, Some(ParsedLine::Qcainfo(ref r)) if r.component == "PCC" && r.earfcn == "504990")
+        );
     }
 
     #[test]
@@ -614,7 +696,13 @@ OK\r\n";
     #[test]
     fn test_ok_error() {
         assert!(matches!(parse_single_line("OK"), Some(ParsedLine::Ok)));
-        assert!(matches!(parse_single_line("ERROR"), Some(ParsedLine::Error)));
-        assert!(matches!(parse_single_line("+CME ERROR: 50"), Some(ParsedLine::Error)));
+        assert!(matches!(
+            parse_single_line("ERROR"),
+            Some(ParsedLine::Error)
+        ));
+        assert!(matches!(
+            parse_single_line("+CME ERROR: 50"),
+            Some(ParsedLine::Error)
+        ));
     }
 }

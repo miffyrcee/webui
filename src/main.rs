@@ -47,13 +47,13 @@ impl SerialHandle {
         }
     }
 
-    /// 读取数据（带超时）
+    /// 读取数据（带超时）- 用于 AT 命令响应读取（快速轮询）
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, String> {
         match self {
-            SerialHandle::Raw(f) => match timeout(IO_TIMEOUT, f.read(buf)).await {
+            SerialHandle::Raw(f) => match timeout(Duration::from_millis(500), f.read(buf)).await {
                 Ok(Ok(n)) => Ok(n),
                 Ok(Err(e)) => Err(format!("读错误: {}", e)),
-                Err(_) => Err("读超时(10s)".to_string()),
+                Err(_) => Err("读超时(500ms)".to_string()),
             },
         }
     }
@@ -495,11 +495,23 @@ async fn send_at_command_async(serial: &mut SerialHandle, cmd: &str) -> Result<S
     // SMD 通道需要短暂等待模块处理 AT 命令
     sleep(Duration::from_millis(200)).await;
 
+    // 总超时 5 秒（防止单个 AT 命令永久卡死）
+    let overall_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+
     let mut buf = [0u8; 1024];
     let mut response_bytes = Vec::with_capacity(4096);
 
     let mut consecutive_zeros = 0u32;
     loop {
+        if tokio::time::Instant::now() >= overall_deadline {
+            let partial = String::from_utf8_lossy(&response_bytes);
+            return Err(format!(
+                "AT命令总超时(5s)，已读取 {} 字节: {:?}",
+                response_bytes.len(),
+                &partial[..partial.len().min(100)]
+            ));
+        }
+
         match serial.read(&mut buf).await {
             Ok(0) => {
                 // Raw模式：0字节读取不代表EOF，只是暂无数据

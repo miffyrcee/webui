@@ -17,15 +17,68 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use std::{env, sync::Arc};
 use sysinfo::{Components, System};
-use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
+use tokio_serial::SerialStream;
 
 use at::parser::{parse_cgpaddr, parse_combined_response, parse_qcainfo, parse_qeng};
 use at::utils::{decode_hex_ucs2, format_bytes};
 
-const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
+const DEFAULT_SERIAL_PORT: &str = "/dev/ttyMSM0";
+const IO_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// 串口句柄：支持SerialStream（标准TTY串口）和RawFile（SMD/非TTY设备）
+enum SerialHandle {
+    Tty(SerialStream),
+    Raw(tokio::fs::File),
+}
+
+impl SerialHandle {
+    /// 写入数据
+    async fn write_all(&mut self, buf: &[u8]) -> Result<(), String> {
+        match self {
+            SerialHandle::Tty(s) => s
+                .write_all(buf)
+                .await
+                .map_err(|e| format!("写失败: {}", e)),
+            SerialHandle::Raw(f) => f
+                .write_all(buf)
+                .await
+                .map_err(|e| format!("写失败: {}", e)),
+        }
+    }
+
+    /// flush
+    async fn flush(&mut self) -> Result<(), String> {
+        match self {
+            SerialHandle::Tty(s) => s
+                .flush()
+                .await
+                .map_err(|e| format!("flush失败: {}", e)),
+            SerialHandle::Raw(f) => f
+                .flush()
+                .await
+                .map_err(|e| format!("flush失败: {}", e)),
+        }
+    }
+
+    /// 读取数据（带超时）
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, String> {
+        match self {
+            SerialHandle::Tty(s) => match timeout(IO_TIMEOUT, s.read(buf)).await {
+                Ok(Ok(n)) => Ok(n),
+                Ok(Err(e)) => Err(format!("读错误: {}", e)),
+                Err(_) => Err("读超时(10s)".to_string()),
+            },
+            SerialHandle::Raw(f) => match timeout(IO_TIMEOUT, f.read(buf)).await {
+                Ok(Ok(n)) => Ok(n),
+                Ok(Err(e)) => Err(format!("读错误: {}", e)),
+                Err(_) => Err("读超时(10s)".to_string()),
+            },
+        }
+    }
+}
 
 #[derive(Debug)]
 enum AtAction {
@@ -125,19 +178,51 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
+/// 尝试打开串口，返回 Some(SerialHandle) 或 None（模拟模式）
+async fn open_serial(path: &str) -> Option<SerialHandle> {
+    // 策略1: 尝试用 tokio_serial 打开（标准TTY串口，如 /dev/ttyUSB2）
+    let builder = tokio_serial::new(path, 115200);
+    match tokio_serial::SerialPortBuilderExt::open_native_async(builder) {
+        Ok(stream) => {
+            println!("✅ 串口已打开(TTY模式): {} @ 115200", path);
+            return Some(SerialHandle::Tty(stream));
+        }
+        Err(e) => {
+            // Not a typewriter / Inappropriate ioctl 表示该设备不是标准TTY
+            // 对于 /dev/smd11 (Qualcomm SMD通道)，这是预期行为
+            eprintln!(
+                "⏩ TTY模式打开失败: {}，尝试Raw文件模式",
+                e
+            );
+        }
+    };
+
+    // 策略2: 用 tokio::fs::File 打开（SMD设备、非TTY设备）
+    match tokio::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .await
+    {
+        Ok(file) => {
+            println!("✅ 串口已打开(Raw文件模式): {}", path);
+            Some(SerialHandle::Raw(file))
+        }
+        Err(e) => {
+            eprintln!("❌ 打开串口失败(Raw模式也失败): {}，将运行在模拟模式", e);
+            None
+        }
+    }
+}
+
 /// 启动时一次性获取静态信息：固件版本、SIM槽位、运营商、APN
 async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     let mut info = StaticInfo::default();
 
-    let mut serial_file = match OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(serial_path)
-        .await
-    {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("❌ 打开串口失败: {}，使用模拟静态数据", e);
+    let mut serial = match open_serial(serial_path).await {
+        Some(s) => s,
+        None => {
+            eprintln!("⚠️ 使用模拟静态数据");
             info.firmware_version = "RM520NGLAAR03A03M4G_BETA".to_string();
             info.active_sim = "SIM 1".to_string();
             info.network_provider = "CHN-UNICOM".to_string();
@@ -149,8 +234,19 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         }
     };
 
+    // SMD 通道初始化：清空残留 + 关闭回显
+    drain_serial_buffer(&mut serial).await;
+    if let SerialHandle::Raw(_) = serial {
+        // SMD 通道先发简单 AT 测试连通性
+        match send_at_command_async(&mut serial, "ATE0").await {
+            Ok(resp) if resp.contains("OK") => println!("✅ SMD 静态信息通道握手成功"),
+            Ok(_) => eprintln!("⚠️ SMD ATE0 未收到预期 OK"),
+            Err(e) => eprintln!("⚠️ SMD ATE0 失败: {}", e),
+        }
+    }
+
     // 固件版本
-    match send_at_command_async(&mut serial_file, "AT+CGMR").await {
+    match send_at_command_async(&mut serial, "AT+CGMR").await {
         Ok(resp) => {
             for line in resp.lines() {
                 let trimmed = line.trim();
@@ -171,7 +267,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     }
 
     // SIM 槽位
-    match send_at_command_async(&mut serial_file, "AT+QUIMSLOT?").await {
+    match send_at_command_async(&mut serial, "AT+QUIMSLOT?").await {
         Ok(resp) => {
             for line in resp.lines() {
                 if line.contains("+QUIMSLOT:") {
@@ -189,7 +285,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     }
 
     // 运营商 — 先尝试 QSPN（中文名），再 fallback COPS
-    match send_at_command_async(&mut serial_file, "AT+QSPN").await {
+    match send_at_command_async(&mut serial, "AT+QSPN").await {
         Ok(resp) => {
             for line in resp.lines() {
                 if line.contains("+QSPN:") {
@@ -215,7 +311,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         Err(e) => eprintln!("⚠️ QSPN 获取失败: {}", e),
     }
     if info.network_provider.is_empty() {
-        match send_at_command_async(&mut serial_file, "AT+COPS?").await {
+        match send_at_command_async(&mut serial, "AT+COPS?").await {
             Ok(resp) => {
                 for line in resp.lines() {
                     if line.contains("+COPS:") {
@@ -242,7 +338,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     }
     if info.network_provider.is_empty() {
         // 最后尝试从 MCCMNC 映射
-        match send_at_command_async(&mut serial_file, "AT+QENG=\"servingcell\"").await {
+        match send_at_command_async(&mut serial, "AT+QENG=\"servingcell\"").await {
             Ok(resp) => {
                 for line in resp.lines() {
                     if line.contains("+QENG: \"servingcell\"") {
@@ -271,7 +367,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     }
 
     // APN (CGDCONT 第一个上下文)
-    match send_at_command_async(&mut serial_file, "AT+CGDCONT?").await {
+    match send_at_command_async(&mut serial, "AT+CGDCONT?").await {
         Ok(resp) => {
             for line in resp.lines() {
                 if line.contains("+CGDCONT: 1,") {
@@ -295,7 +391,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     }
 
     // 流量统计 — 尝试 QGDNRCNT 或 QGDAT
-    info.traffic_stats = send_at_command_async(&mut serial_file, "AT+QGDNRCNT?")
+    info.traffic_stats = send_at_command_async(&mut serial, "AT+QGDNRCNT?")
         .await
         .ok()
         .and_then(|r| {
@@ -320,7 +416,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         .unwrap_or_default();
     if info.traffic_stats.is_empty() {
         // fallback to QGDAT
-        match send_at_command_async(&mut serial_file, "AT+QGDAT?").await {
+        match send_at_command_async(&mut serial, "AT+QGDAT?").await {
             Ok(resp) => {
                 for line in resp.lines() {
                     if line.contains("+QGDAT:") {
@@ -353,29 +449,79 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         info.firmware_version, info.active_sim, info.network_provider, info.apn
     );
 
+    // 完成后关闭串口（drop serial），hardware_polling_actor 会重新打开
+    drop(serial);
+
     let mut guard = state.static_info.write().await;
     *guard = info;
 }
 
+/// 清空串口残留数据（SMD通道可能有启动残留）
+async fn drain_serial_buffer(serial: &mut SerialHandle) {
+    let mut drain_buf = [0u8; 256];
+    // 使用非常短的超时快速排空
+    loop {
+        match serial {
+            SerialHandle::Raw(f) => {
+                match timeout(Duration::from_millis(50), f.read(&mut drain_buf)).await {
+                    Ok(Ok(n)) if n > 0 => {
+                        let drained = String::from_utf8_lossy(&drain_buf[..n]);
+                        println!("🧹 清空残留数据 ({} bytes): {:?}", n, drained);
+                    }
+                    _ => break,
+                }
+            }
+            SerialHandle::Tty(s) => {
+                match timeout(Duration::from_millis(50), s.read(&mut drain_buf)).await {
+                    Ok(Ok(n)) if n > 0 => {
+                        let drained = String::from_utf8_lossy(&drain_buf[..n]);
+                        println!("🧹 清空残留数据 ({} bytes): {:?}", n, drained);
+                    }
+                    _ => break,
+                }
+            }
+        }
+    }
+}
+
 /// 异步发送 AT 命令并读取响应
-async fn send_at_command_async(file: &mut File, cmd: &str) -> Result<String, String> {
+async fn send_at_command_async(serial: &mut SerialHandle, cmd: &str) -> Result<String, String> {
     let start = std::time::Instant::now();
     let full_cmd = format!("{}\r\n", cmd);
 
-    file.write_all(full_cmd.as_bytes())
+    serial
+        .write_all(full_cmd.as_bytes())
         .await
         .map_err(|e| format!("写失败: {}", e))?;
-    file.flush()
+    serial
+        .flush()
         .await
         .map_err(|e| format!("flush失败: {}", e))?;
+
+    // SMD 通道需要短暂等待模块处理 AT 命令
+    if let SerialHandle::Raw(_) = serial {
+        sleep(Duration::from_millis(200)).await;
+    }
 
     let mut buf = [0u8; 1024];
     let mut response_bytes = Vec::with_capacity(4096);
 
+    let mut consecutive_zeros = 0u32;
     loop {
-        match file.read(&mut buf).await {
-            Ok(0) => break,
+        match serial.read(&mut buf).await {
+            Ok(0) => {
+                // SMD/Raw 模式：0字节读取不代表EOF，只是暂无数据
+                // TTY模式：0字节通常也是暂无数据
+                consecutive_zeros += 1;
+                if consecutive_zeros > 3 {
+                    // 连续3次读到0字节，可能是真的没有更多数据了
+                    break;
+                }
+                sleep(Duration::from_millis(50)).await;
+                continue;
+            }
             Ok(n) => {
+                consecutive_zeros = 0;
                 response_bytes.extend_from_slice(&buf[..n]);
                 let len = response_bytes.len();
                 if len >= 6 && response_bytes[len - 6..] == *b"\r\nOK\r\n" {
@@ -384,6 +530,7 @@ async fn send_at_command_async(file: &mut File, cmd: &str) -> Result<String, Str
                 if len >= 9 && response_bytes[len - 9..] == *b"\r\nERROR\r\n" {
                     break;
                 }
+                // 检查更长的buffer尾部（如果一次性读入了多个OK/ERROR中间有数据）
                 if len >= 15 {
                     let tail = &response_bytes[len - 15..];
                     if tail.windows(6).any(|w| w == b"\r\nOK\r\n")
@@ -428,21 +575,29 @@ async fn hardware_polling_actor(
     let mut sys = System::new_all();
     let mut components = Components::new_with_refreshed_list();
 
-    let mut serial_file = match OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&serial_path)
-        .await
-    {
-        Ok(f) => {
-            println!("✅ 串口已打开: {}", serial_path);
-            Some(f)
+    // 打开串口（独立连接，与 fetch_static_info 互不影响）
+    let mut serial = open_serial(&serial_path).await;
+
+    // SMD 通道初始化握手：发送 ATE0 关闭回显，然后发送 AT 验证通信
+    if let Some(ref mut port) = serial {
+        // 先尝试清空可能的残留数据
+        drain_serial_buffer(port).await;
+        // 关闭回显（减少后续解析干扰）
+        match send_at_command_async(port, "ATE0").await {
+            Ok(resp) => {
+                if !resp.contains("OK") {
+                    eprintln!("⚠️ ATE0 初始化未收到 OK，SMD 通道可能异常");
+                } else {
+                    println!("✅ SMD 初始化握手成功 (ATE0 OK)");
+                }
+            }
+            Err(e) => {
+                eprintln!("❌ SMD 初始化握手失败: {}，尝试重连", e);
+                // 重新打开串口
+                serial = open_serial(&serial_path).await;
+            }
         }
-        Err(e) => {
-            eprintln!("❌ 打开串口失败: {}，将运行在模拟模式", e);
-            None
-        }
-    };
+    }
 
     let mut interval_secs = 3;
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
@@ -454,8 +609,8 @@ async fn hardware_polling_actor(
                 match req.action {
                     AtAction::ManualAt(cmd) => {
                         println!("👨‍💻 用户手动执行 AT: {}", cmd);
-                        let response = if let Some(file) = &mut serial_file {
-                            match send_at_command_async(file, &cmd).await {
+                        let response = if let Some(ref mut port) = serial {
+                            match send_at_command_async(port, &cmd).await {
                                 Ok(resp) => resp,
                                 Err(e) => format!("ERROR: {}", e),
                             }
@@ -484,16 +639,16 @@ async fn hardware_polling_actor(
                     let start_poll = std::time::Instant::now();
                     println!("📡 开始周期性硬件轮询 (活跃视图: {})", active_count);
 
-                    let (cpin_res, qeng_res, _qca_res, gpad_res) = if let Some(file) = &mut serial_file {
+                    let (cpin_res, qeng_res, _qca_res, gpad_res) = if let Some(ref mut port) = serial {
                         let combined = "AT+CPIN?;+QENG=\"servingcell\";+QCAINFO;+CGPADDR";
-                        match send_at_command_async(file, combined).await {
+                        match send_at_command_async(port, combined).await {
                             Ok(resp) => parse_combined_response(&resp),
                             Err(e) => {
                                 println!("⚠️ 合并命令失败: {}，降级到单独发送", e);
-                                let cpin = send_at_command_async(file, "AT+CPIN?").await.unwrap_or_default();
-                                let qeng = send_at_command_async(file, "AT+QENG=\"servingcell\"").await.unwrap_or_default();
-                                let qca = send_at_command_async(file, "AT+QCAINFO").await.unwrap_or_default();
-                                let gpad = send_at_command_async(file, "AT+CGPADDR").await.unwrap_or_default();
+                                let cpin = send_at_command_async(port, "AT+CPIN?").await.unwrap_or_default();
+                                let qeng = send_at_command_async(port, "AT+QENG=\"servingcell\"").await.unwrap_or_default();
+                                let qca = send_at_command_async(port, "AT+QCAINFO").await.unwrap_or_default();
+                                let gpad = send_at_command_async(port, "AT+CGPADDR").await.unwrap_or_default();
                                 (cpin, qeng, qca, gpad)
                             }
                         }

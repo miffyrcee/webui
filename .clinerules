@@ -6,7 +6,7 @@
 ## Key Technical Decisions
 
 ### Serial Port Communication
-- 使用 `tokio_serial`, AT_SERIAL_PORT不是串口设备。
+- 不要使用 `tokio_serial`, AT_SERIAL_PORT不是串口设备。
 - 默认端口: `/dev/smd11`，可通过 `AT_SERIAL_PORT` 环境变量覆盖
 - AT 命令通过 `send_at_command_async()` 函数发送，自动检测 `\r\nOK\r\n` / `\r\nERROR\r\n` 结束标志
 
@@ -43,12 +43,84 @@
 - 不允许覆盖或删除已有的历史记录条目（只能追加）
 - 如需删除文件等破坏性操作，需在历史记录中明确注明
 
+## Cross-compilation (armv7 / armhf)
+
+### Target Setup
+```bash
+rustup target add armv7-unknown-linux-musleabihf
+```
+
+### Build
+```bash
+# 开发构建（快速，带调试符号）
+cargo build --target armv7-unknown-linux-musleabihf
+
+# Release 构建（优化，体积小）
+cargo build --target armv7-unknown-linux-musleabihf --release
+```
+
+- 编译产物位于 `target/armv7-unknown-linux-musleabihf/release/quectel-webui`
+- 使用 musl 静态链接，无需目标设备安装额外依赖
+- 适用于 Android 设备上运行的 Linux 环境（如 Qualcomm MDM 平台）
+
+## ADB Deployment
+
+### 前置条件
+- 安装 `adb`（Android Debug Bridge）
+- 设备通过 USB 连接或网络 ADB 连接到开发机
+- 设备已 root 或有足够权限写入 `/opt/bin`
+
+### 常用 ADB 命令
+
+| 命令 | 用途 |
+|------|------|
+| `adb devices` | 列出已连接设备 |
+| `adb shell` | 进入设备 shell |
+| `adb push <local> <remote>` | 推送文件到设备 |
+| `adb pull <remote> <local>` | 从设备拉取文件 |
+| `adb shell "pkill -9 -f webui"` | 杀掉正在运行的 webui 进程 |
+
+### 一键构建部署测试
+```bash
+# 完整流程：构建 → 杀掉旧进程 → 推送 → 运行测试（12秒超时）
+cargo build --target armv7-unknown-linux-musleabihf --release 2>&1 && \
+  adb shell "pkill -9 -f webui" 2>/dev/null; \
+  adb push target/armv7-unknown-linux-musleabihf/release/quectel-webui /opt/bin && \
+  adb shell "chmod 755 /opt/bin/quectel-webui && RUST_BACKTRACE=1 timeout 12 /opt/bin/quectel-webui"
+```
+
+### 只推送不运行
+```bash
+cargo build --target armv7-unknown-linux-musleabihf --release 2>&1 && \
+  adb push target/armv7-unknown-linux-musleabihf/release/quectel-webui /opt/bin
+```
+
+### 设备端手动运行（后台常驻）
+```bash
+adb shell "/opt/bin/quectel-webui &"
+```
+
+### 查看设备端日志
+```bash
+adb shell "logcat | grep webui"           # Android logcat
+adb shell "tail -f /var/log/webui.log"    # 文件日志（如有）
+```
+
+### 串口设备排查
+```bash
+adb shell "ls -la /dev/smd* /dev/tty*"    # 列出可用串口设备
+adb shell "stty -F /dev/smd11"            # 检查串口属性（如支持）
+```
+
 ## Run Commands
 ```bash
-# cargo build
-# cargo run                # 默认使用 /dev/smd11
-# AT_SERIAL_PORT=/dev/ttyUSB2 cargo run   # 自定义串口
-cargo build --target armv7-unknown-linux-musleabihf --release 2>&1 && adb shell "pkill -9 -f webui" 2>/dev/null; adb push tar
-get/armv7-unknown-linux-musleabihf/release/quectel-webui /opt/bin && adb shell "chmod 755 /opt/bin/quectel-webui && RUST_BACKTRACE=1 timeout 12 /opt/bin/quect
-el-webui"
+# 本地开发运行
+cargo run                                                  # 默认使用 /dev/ttyMSM0
+AT_SERIAL_PORT=/dev/ttyUSB2 cargo run                      # 自定义串口
+
+# 交叉编译 + ADB 部署（一键）
+cargo build --target armv7-unknown-linux-musleabihf --release 2>&1 && \
+  adb shell "pkill -9 -f webui" 2>/dev/null; \
+  adb push target/armv7-unknown-linux-musleabihf/release/quectel-webui /opt/bin && \
+  adb shell "chmod 755 /opt/bin/quectel-webui && RUST_BACKTRACE=1 timeout 12 /opt/bin/quectel-webui"
 ```

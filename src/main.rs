@@ -36,20 +36,14 @@ impl SerialHandle {
     /// 写入数据
     async fn write_all(&mut self, buf: &[u8]) -> Result<(), String> {
         match self {
-            SerialHandle::Raw(f) => f
-                .write_all(buf)
-                .await
-                .map_err(|e| format!("写失败: {}", e)),
+            SerialHandle::Raw(f) => f.write_all(buf).await.map_err(|e| format!("写失败: {}", e)),
         }
     }
 
     /// flush
     async fn flush(&mut self) -> Result<(), String> {
         match self {
-            SerialHandle::Raw(f) => f
-                .flush()
-                .await
-                .map_err(|e| format!("flush失败: {}", e)),
+            SerialHandle::Raw(f) => f.flush().await.map_err(|e| format!("flush失败: {}", e)),
         }
     }
 
@@ -203,12 +197,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     };
 
     // SMD 通道初始化：清空残留 + 关闭回显
-    drain_serial_buffer(&mut serial).await;
-    match send_at_command_async(&mut serial, "ATE0").await {
-        Ok(resp) if resp.contains("OK") => println!("✅ SMD 静态信息通道握手成功"),
-        Ok(_) => eprintln!("⚠️ SMD ATE0 未收到预期 OK"),
-        Err(e) => eprintln!("⚠️ SMD ATE0 失败: {}", e),
-    }
+    // drain_serial_buffer(&mut serial).await;
 
     // 固件版本
     match send_at_command_async(&mut serial, "AT+CGMR").await {
@@ -421,25 +410,6 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     *guard = info;
 }
 
-/// 清空串口残留数据（SMD通道可能有启动残留）
-async fn drain_serial_buffer(serial: &mut SerialHandle) {
-    let mut drain_buf = [0u8; 256];
-    // 使用非常短的超时快速排空
-    loop {
-        match serial {
-            SerialHandle::Raw(f) => {
-                match timeout(Duration::from_millis(50), f.read(&mut drain_buf)).await {
-                    Ok(Ok(n)) if n > 0 => {
-                        let drained = String::from_utf8_lossy(&drain_buf[..n]);
-                        println!("🧹 清空残留数据 ({} bytes): {:?}", n, drained);
-                    }
-                    _ => break,
-                }
-            }
-        }
-    }
-}
-
 /// 异步发送 AT 命令并读取响应
 async fn send_at_command_async(serial: &mut SerialHandle, cmd: &str) -> Result<String, String> {
     let start = std::time::Instant::now();
@@ -532,25 +502,6 @@ async fn hardware_polling_actor(
     let mut serial = open_serial(&serial_path).await;
 
     // SMD 通道初始化握手：发送 ATE0 关闭回显，然后发送 AT 验证通信
-    if let Some(ref mut port) = serial {
-        // 先尝试清空可能的残留数据
-        drain_serial_buffer(port).await;
-        // 关闭回显（减少后续解析干扰）
-        match send_at_command_async(port, "ATE0").await {
-            Ok(resp) => {
-                if !resp.contains("OK") {
-                    eprintln!("⚠️ ATE0 初始化未收到 OK，SMD 通道可能异常");
-                } else {
-                    println!("✅ SMD 初始化握手成功 (ATE0 OK)");
-                }
-            }
-            Err(e) => {
-                eprintln!("❌ SMD 初始化握手失败: {}，尝试重连", e);
-                // 重新打开串口
-                serial = open_serial(&serial_path).await;
-            }
-        }
-    }
 
     let mut interval_secs = 3;
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));

@@ -157,6 +157,38 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
+/// 带短超时的串口读取（用于清空缓冲区，不依赖 IO_TIMEOUT 的 10s 超时）
+async fn read_with_short_timeout(serial: &mut SerialHandle, buf: &mut [u8]) -> Result<usize, String> {
+    match serial {
+        SerialHandle::Raw(f) => match timeout(Duration::from_millis(300), f.read(buf)).await {
+            Ok(Ok(n)) => Ok(n),
+            Ok(Err(e)) => Err(format!("读错误: {}", e)),
+            Err(_) => Err("读超时(300ms)".to_string()),
+        },
+    }
+}
+
+/// 清空串口缓冲区：读取并丢弃任何残留数据（如开机日志、前次会话残留）
+async fn drain_serial_buffer(serial: &mut SerialHandle) {
+    let mut buf = [0u8; 1024];
+    let mut total_drained = 0u32;
+    loop {
+        match read_with_short_timeout(serial, &mut buf).await {
+            Ok(n) if n > 0 => {
+                total_drained += n as u32;
+            }
+            _ => break,
+        }
+        // 防止无限循环（最多丢弃 8KB 残留数据）
+        if total_drained > 8192 {
+            break;
+        }
+    }
+    if total_drained > 0 {
+        println!("🔄 清空了串口缓冲区: {} 字节残留数据", total_drained);
+    }
+}
+
 /// 尝试打开串口，返回 Some(SerialHandle) 或 None（模拟模式）
 async fn open_serial(path: &str) -> Option<SerialHandle> {
     // 使用 tokio::fs::File 打开（SMD设备、非TTY设备、socat PTY桥接）
@@ -196,8 +228,14 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         }
     };
 
-    // SMD 通道初始化：清空残留 + 关闭回显
-    // drain_serial_buffer(&mut serial).await;
+    // SMD 通道初始化：清空残留数据（如开机日志、前次会话残留）
+    drain_serial_buffer(&mut serial).await;
+
+    // 发送 ATE0 关闭回显，避免响应中出现 AT 命令的回显干扰解析
+    let _ = send_at_command_async(&mut serial, "ATE0").await;
+
+    // 发送 AT 验证通信
+    let _ = send_at_command_async(&mut serial, "AT").await;
 
     // 固件版本
     match send_at_command_async(&mut serial, "AT+CGMR").await {
@@ -501,7 +539,12 @@ async fn hardware_polling_actor(
     // 打开串口（独立连接，与 fetch_static_info 互不影响）
     let mut serial = open_serial(&serial_path).await;
 
-    // SMD 通道初始化握手：发送 ATE0 关闭回显，然后发送 AT 验证通信
+    // SMD 通道初始化：清空残留 + 关闭回显 + 验证通信
+    if let Some(ref mut port) = serial {
+        drain_serial_buffer(port).await;
+        let _ = send_at_command_async(port, "ATE0").await;
+        let _ = send_at_command_async(port, "AT").await;
+    }
 
     let mut interval_secs = 3;
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));

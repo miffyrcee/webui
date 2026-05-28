@@ -1,5 +1,17 @@
 # Cline AI Change History
 
+## 2026-05-29 01:44 — 修复固件版本获取超时：SMD 通道初始化握手
+- **问题**: `fetch_static_info()` 中 `drain_serial_buffer()` 被注释掉，且缺少 ATE0 关闭回显和 AT 验证通信。对于 SMD 设备 `/dev/smd11`，开机日志或前次会话残留数据堵塞缓冲区，导致 `AT+CGMR` 的响应与预期格式不匹配，`send_at_command_async()` 读循环无法找到 `\r\nOK\r\n` 终止符，直到 10 秒 IO_TIMEOUT 触发才返回 `"读超时(10s)"`
+- **修改内容**:
+  - 恢复 `fetch_static_info()` 中 `drain_serial_buffer()` 的调用，清空 SMD 通道残留数据
+  - 在 `fetch_static_info()` 的 `AT+CGMR` 之前增加 `ATE0`（关闭回显）+ `AT`（验证通信）的初始化握手
+  - 在 `hardware_polling_actor()` 中也增加同样的初始化握手（drain + ATE0 + AT）
+  - 新增 `read_with_short_timeout()` 函数，使用 300ms 短超时读取（不依赖 `IO_TIMEOUT` 的 10s），用于 `drain_serial_buffer()` 实现非阻塞清空
+  - 修复上一轮编辑引入的 `打印` 中文残留字符
+- **涉及文件**:
+  - `src/main.rs`
+  - `CLINE_HISTORY.md`
+
 ## 2026-05-29 01:32 — 移除 tokio-serial 依赖
 - **修改内容**: 完全移除 `tokio-serial` crate 的使用
   - 删除 `Cargo.toml` 中的 `tokio-serial = "5.4.5"` 依赖

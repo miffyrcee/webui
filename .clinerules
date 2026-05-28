@@ -1,0 +1,54 @@
+# Cline Rules for quectel-webui
+
+## Project Overview
+移远 5G 终端 WebUI — Rust Axum 后端，提供 5G 模块的 AT 命令监控和 WebSocket 实时遥测。
+
+## Key Technical Decisions
+
+### Serial Port Communication
+- 使用 `tokio_serial`, AT_SERIAL_PORT不是串口设备。
+- 默认端口: `/dev/smd11`，可通过 `AT_SERIAL_PORT` 环境变量覆盖
+- AT 命令通过 `send_at_command_async()` 函数发送，自动检测 `\r\nOK\r\n` / `\r\nERROR\r\n` 结束标志
+
+### Architecture
+- `AppState` (Arc) 持有 broadcast channel (tx) + mpsc actor channel (actor_tx) + 静态信息缓存
+- `hardware_polling_actor` 是核心 actor，每 3s 轮询 AT 命令（间隔可动态调整）
+- `fetch_static_info()` 在启动时一次性获取固件版本、SIM、运营商、APN 等
+- 模拟模式: 当串口打开失败时自动降级为模拟数据，不影响 Web 服务启动
+
+### AT Parser
+- `src/at/` 目录下有 PEG parser (`grammar.pest`) 和 Rust 解析代码
+- `parse_combined_response()` 解析复合 AT 命令返回（分号分隔）
+- `parse_qeng()`, `parse_qcainfo()`, `parse_cgpaddr()` 解析具体模块响应
+
+## Coding Conventions
+- 使用 `edition = "2024"` Rust edition
+- 错误处理使用 `eprintln!` 记录，不 panic（main 中绑定的 unwrap 除外）
+- 所有 println! 使用 emoji 前缀分类（🔌📡✅⚠️❌🔄）
+- 串口读写使用 tokio async，注意 SerialStream 实现了 AsyncRead+AsyncWrite
+
+## Frontend Integration
+- 前端文件: `src/index.html`（使用 `include_str!` 嵌入）
+- 样式模板: `templates/style.css`
+- WebSocket 消息格式: JSON，type 字段区分消息类型（at_res, static_info, telemetry 等）
+- WebSocket 命令格式: `{action: "manual_at"|"set_interval"|"set_view_state"|"get_static_info", payload: ...}`
+
+## Testing
+- 没有硬件的环境可以通过 `AT_SERIAL_PORT` 指向不存在的端口触发模拟模式
+- 模拟模式下所有 AT 命令返回预定义 mock 数据
+
+## AI Change History
+- 每次 AI 修改代码必须追加记录到项目根目录的 `CLINE_HISTORY.md` 文件
+- 记录格式：时间戳、修改内容、涉及的文件列表
+- 不允许覆盖或删除已有的历史记录条目（只能追加）
+- 如需删除文件等破坏性操作，需在历史记录中明确注明
+
+## Run Commands
+```bash
+# cargo build
+# cargo run                # 默认使用 /dev/smd11
+# AT_SERIAL_PORT=/dev/ttyUSB2 cargo run   # 自定义串口
+cargo build --target armv7-unknown-linux-musleabihf --release 2>&1 && adb shell "pkill -9 -f webui" 2>/dev/null; adb push tar
+get/armv7-unknown-linux-musleabihf/release/quectel-webui /opt/bin && adb shell "chmod 755 /opt/bin/quectel-webui && RUST_BACKTRACE=1 timeout 12 /opt/bin/quect
+el-webui"
+```

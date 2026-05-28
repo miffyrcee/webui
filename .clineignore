@@ -1,0 +1,62 @@
+# Cline Ignore — files that Cline should never read or modify
+
+# --- Build artifacts ---
+/target/
+build/
+
+# --- Dependencies ---
+node_modules/
+/jspm_packages/
+
+# --- Environment secrets ---
+.env
+.env.*
+*.env
+
+# --- IDE / Editor configs ---
+.vscode/
+.idea/
+
+# --- Generated / output files ---
+dist/
+coverage/
+.nyc_output/
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+
+# --- Database files ---
+*.db
+*.sqlite
+
+# --- Large binary / media files ---
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.svg
+*.woff
+*.woff2
+*.ttf
+*.eot
+*.mp4
+*.mp3
+*.pdf
+*.zip
+*.tar
+*.gz
+*.iso
+
+# --- Git / VCS ---
+.git/
+.gitignore
+.gitattributes
+.gitmodules
+Cargo.lock
+
+# --- Project-specific generated files ---
+/templates/dist_index.html
+package-lock.json
+package.json

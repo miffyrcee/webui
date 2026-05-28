@@ -48,6 +48,22 @@
 - **涉及文件**:
   - `src/main.rs`
 
+## 2026-05-29 01:50 — 增强全流程日志：增加诊断信息便于定位问题
+- **修改内容**:
+  - `drain_serial_buffer()`: 增加残留数据首段 ASCII 内容输出，可判断残留数据来源（开机日志/前次响应）
+  - `open_serial()`: 增加打开耗时统计，失败时显示完整路径和耗时
+  - `send_at_command_async()`: 增加 AT 命令执行耗时统计，正确响应输出完整内容，ERROR 响应单独标记 ⚠️
+  - `fetch_static_info()`: 增加分步进度日志 [1/5]～[5/5]，模拟模式写入提示，最终结果包含全部 5 个字段
+  - `hardware_polling_actor()` 轮询循环:
+    - 合并命令增加发送/解析阶段耗时统计
+    - 降级发送时每个命令独立标记失败原因
+    - 增加 SIM 状态、静态信息、解析阶段耗时输出
+    - WS 广播前输出接收者数量和 JSON 前 200 字节预览
+    - 序列化失败时标记 ❌
+  - `handle_ws()`: 增加各 WS 动作的日志（manual_at 显示命令内容、set_interval 显示秒数、set_view_state 显示切换详情、get_static_info 显示发送的静态信息）、未知 action 标记 ⚠️、无法解析的 WS 消息标记 ⚠️
+- **涉及文件**:
+  - `src/main.rs`
+  - `CLINE_HISTORY.md`
 ## 2026-05-29 01:12 — ADB 实际调试：发现 AT 通道为 socat PTY 桥接 /dev/ttyIN
 - **问题**: SMD 通道（smd7/smd8/smd11/smd21/smd22）和 ttyMSM0/ttyGS0 全部无 AT 响应，程序卡在读取超时
 - **调试过程**:

@@ -175,10 +175,19 @@ async fn read_with_short_timeout(
 async fn drain_serial_buffer(serial: &mut SerialHandle) {
     let mut buf = [0u8; 1024];
     let mut total_drained = 0u32;
+    let mut first_chunk = String::new();
     loop {
         match read_with_short_timeout(serial, &mut buf).await {
             Ok(n) if n > 0 => {
                 total_drained += n as u32;
+                if first_chunk.is_empty() && n > 0 {
+                    // 记录第一段残留数据的 ASCII 内容用于诊断
+                    let readable: String = buf[..n]
+                        .iter()
+                        .map(|&b| if b.is_ascii_graphic() || b == b' ' || b == b'\n' || b == b'\r' { b as char } else { '.' })
+                        .collect();
+                    first_chunk = readable;
+                }
             }
             _ => break,
         }
@@ -188,13 +197,15 @@ async fn drain_serial_buffer(serial: &mut SerialHandle) {
         }
     }
     if total_drained > 0 {
-        println!("🔄 清空了串口缓冲区: {} 字节残留数据", total_drained);
+        println!("🔄 清空了串口缓冲区: {} 字节残留数据 (首段: {:?})", total_drained, first_chunk);
     }
 }
 
 /// 尝试打开串口，返回 Some(SerialHandle) 或 None（模拟模式）
 async fn open_serial(path: &str) -> Option<SerialHandle> {
     // 使用 tokio::fs::File 打开（SMD设备、非TTY设备、socat PTY桥接）
+    println!("🔌 正在尝试打开串口设备: {} ...", path);
+    let start = std::time::Instant::now();
     match tokio::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -202,11 +213,11 @@ async fn open_serial(path: &str) -> Option<SerialHandle> {
         .await
     {
         Ok(file) => {
-            println!("✅ 串口已打开(Raw文件模式): {}", path);
+            println!("✅ 串口已打开(Raw文件模式): {} (耗时: {}ms)", path, start.elapsed().as_millis());
             Some(SerialHandle::Raw(file))
         }
         Err(e) => {
-            eprintln!("❌ 打开串口失败: {}，将运行在模拟模式", e);
+            eprintln!("❌ 打开串口失败: {} (路径: {}, 耗时: {}ms)，将运行在模拟模式", e, path, start.elapsed().as_millis());
             None
         }
     }
@@ -214,6 +225,7 @@ async fn open_serial(path: &str) -> Option<SerialHandle> {
 
 /// 启动时一次性获取静态信息：固件版本、SIM槽位、运营商、APN
 async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
+    println!("📋 开始获取静态信息（此过程会短暂占用串口）...");
     let mut info = StaticInfo::default();
 
     let mut serial = match open_serial(serial_path).await {
@@ -227,6 +239,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
             info.traffic_stats = "N/A".to_string();
             let mut guard = state.static_info.write().await;
             *guard = info;
+            println!("📋 模拟静态数据已写入 AppState");
             return;
         }
     };
@@ -244,6 +257,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     eprintln!("🔍 DEBUG: AT 原始响应:\n{:?}", at_resp);
 
     // 固件版本
+    println!("📋 [1/5] 获取固件版本 (AT+CGMR)...");
     match send_at_command_async(&mut serial, "AT+CGMR").await {
         Ok(resp) => {
             eprintln!(
@@ -270,6 +284,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     }
 
     // SIM 槽位
+    println!("📋 [2/5] 获取 SIM 槽位 (AT+QUIMSLOT?)...");
     match send_at_command_async(&mut serial, "AT+QUIMSLOT?").await {
         Ok(resp) => {
             for line in resp.lines() {
@@ -288,6 +303,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     }
 
     // 运营商 — 先尝试 QSPN（中文名），再 fallback COPS
+    println!("📋 [3/5] 获取运营商 (AT+QSPN / AT+COPS?)...");
     match send_at_command_async(&mut serial, "AT+QSPN").await {
         Ok(resp) => {
             for line in resp.lines() {
@@ -370,6 +386,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     }
 
     // APN (CGDCONT 第一个上下文)
+    println!("📋 [4/5] 获取 APN (AT+CGDCONT?)...");
     match send_at_command_async(&mut serial, "AT+CGDCONT?").await {
         Ok(resp) => {
             for line in resp.lines() {
@@ -394,6 +411,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     }
 
     // 流量统计 — 尝试 QGDNRCNT 或 QGDAT
+    println!("📋 [5/5] 获取流量统计 (AT+QGDNRCNT?)...");
     info.traffic_stats = send_at_command_async(&mut serial, "AT+QGDNRCNT?")
         .await
         .ok()
@@ -448,12 +466,13 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     }
 
     println!(
-        "📋 静态信息已获取: FW={}, SIM={}, Provider={}, APN={}",
-        info.firmware_version, info.active_sim, info.network_provider, info.apn
+        "📋 静态信息已获取: FW={}, SIM={}, Provider={}, APN={}, Traffic={}",
+        info.firmware_version, info.active_sim, info.network_provider, info.apn, info.traffic_stats
     );
 
     // 完成后关闭串口（drop serial），hardware_polling_actor 会重新打开
     drop(serial);
+    println!("📋 静态信息串口已关闭，hardware_polling_actor 将重新打开");
 
     let mut guard = state.static_info.write().await;
     *guard = info;
@@ -599,14 +618,34 @@ async fn hardware_polling_actor(
 
                     let (cpin_res, qeng_res, _qca_res, gpad_res) = if let Some(ref mut port) = serial {
                         let combined = "AT+CPIN?;+QENG=\"servingcell\";+QCAINFO;+CGPADDR";
+                        eprintln!("📡 发送合并轮询命令 ({}ms 间隔)...", interval_secs);
+                        let poll_cmd_start = std::time::Instant::now();
                         match send_at_command_async(port, combined).await {
-                            Ok(resp) => parse_combined_response(&resp),
+                            Ok(resp) => {
+                                let parsed = parse_combined_response(&resp);
+                                eprintln!("📡 合并命令解析完成 ({}ms)，各段长度: CPIN={}, QENG={}, QCA={}, GPAD={}",
+                                    poll_cmd_start.elapsed().as_millis(),
+                                    parsed.0.len(), parsed.1.len(), parsed.2.len(), parsed.3.len());
+                                parsed
+                            }
                             Err(e) => {
-                                println!("⚠️ 合并命令失败: {}，降级到单独发送", e);
-                                let cpin = send_at_command_async(port, "AT+CPIN?").await.unwrap_or_default();
-                                let qeng = send_at_command_async(port, "AT+QENG=\"servingcell\"").await.unwrap_or_default();
-                                let qca = send_at_command_async(port, "AT+QCAINFO").await.unwrap_or_default();
-                                let gpad = send_at_command_async(port, "AT+CGPADDR").await.unwrap_or_default();
+                                println!("⚠️ 合并命令失败 ({}ms): {}，降级到单独发送", poll_cmd_start.elapsed().as_millis(), e);
+                                let cpin = send_at_command_async(port, "AT+CPIN?").await.unwrap_or_else(|e| {
+                                    eprintln!("❌ AT+CPIN? 降级也失败: {}", e);
+                                    String::new()
+                                });
+                                let qeng = send_at_command_async(port, "AT+QENG=\"servingcell\"").await.unwrap_or_else(|e| {
+                                    eprintln!("❌ AT+QENG 降级也失败: {}", e);
+                                    String::new()
+                                });
+                                let qca = send_at_command_async(port, "AT+QCAINFO").await.unwrap_or_else(|e| {
+                                    eprintln!("❌ AT+QCAINFO 降级也失败: {}", e);
+                                    String::new()
+                                });
+                                let gpad = send_at_command_async(port, "AT+CGPADDR").await.unwrap_or_else(|e| {
+                                    eprintln!("❌ AT+CGPADDR 降级也失败: {}", e);
+                                    String::new()
+                                });
                                 (cpin, qeng, qca, gpad)
                             }
                         }
@@ -621,6 +660,7 @@ async fn hardware_polling_actor(
                     };
 
                     let sim_status = if cpin_res.contains("READY") { "Active" } else { "No Card / Locked" };
+                    eprintln!("📡 SIM 状态: {}", sim_status);
 
                     let mut telemetry = TelemetryData::default();
                     telemetry.sim_status = sim_status.to_string();
@@ -632,15 +672,15 @@ async fn hardware_polling_actor(
                         telemetry.network_provider = guard.network_provider.clone();
                         telemetry.apn = guard.apn.clone();
                         telemetry.traffic_stats = guard.traffic_stats.clone();
+                        eprintln!("📡 静态信息: SIM={}, Provider={}, APN={}, Traffic={}",
+                            guard.active_sim, guard.network_provider, guard.apn, guard.traffic_stats);
                     }
 
-                    eprintln!("🔍 RAW QENG:\n{}", qeng_res);
-                    eprintln!("🔍 RAW QCAINFO:\n{}", _qca_res);
-                    eprintln!("🔍 RAW CGPADDR:\n{}", gpad_res);
-
+                    let parse_start = std::time::Instant::now();
                     parse_qeng(&qeng_res, &mut telemetry);
                     parse_qcainfo(&_qca_res, &mut telemetry);
                     parse_cgpaddr(&gpad_res, &mut telemetry);
+                    eprintln!("📡 解析完成 ({}ms)", parse_start.elapsed().as_millis());
 
                     sys.refresh_cpu_all();
                     components.refresh(false);
@@ -659,11 +699,15 @@ async fn hardware_polling_actor(
                     telemetry.updated = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
                     if let Ok(json_str) = serde_json::to_string(&telemetry) {
-                        eprintln!("📤 WS SEND: {}", json_str);
+                        let send_rc = state.tx.receiver_count();
+                        eprintln!("📤 WS 广播遥测数据 ({} 接收者, {} 字节): {}",
+                            send_rc, json_str.len(), &json_str[..json_str.len().min(200)]);
                         let _ = state.tx.send(json_str);
+                    } else {
+                        eprintln!("❌ 序列化遥测数据失败");
                     }
 
-                    println!("✅ 轮询任务完成，耗时: {}ms", start_poll.elapsed().as_millis());
+                    println!("✅ 轮询任务完成，总耗时: {}ms", start_poll.elapsed().as_millis());
                 } else {
                     println!("💤 硬件轮询处于空闲模式 (无活跃视图)");
                 }
@@ -678,10 +722,8 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) ->
 
 async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     let mut broadcast_rx = state.tx.subscribe();
-    println!(
-        "🔌 新的 WebSocket 客户端已连接 (当前在线: {})",
-        state.tx.receiver_count()
-    );
+    let online_count = state.tx.receiver_count();
+    println!("🔌 新的 WebSocket 客户端已连接 (当前在线: {})", online_count);
 
     state.active_views.fetch_add(1, Ordering::SeqCst);
     let mut current_is_active = true;
@@ -715,13 +757,19 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                 if let Ok(cmd) = serde_json::from_str::<WsCommand>(&text) {
                     let (resp_tx, resp_rx) = oneshot::channel();
                     let action = match cmd.action.as_str() {
-                        "manual_at" => AtAction::ManualAt(cmd.payload.unwrap_or_default()),
+                        "manual_at" => {
+                            let payload = cmd.payload.unwrap_or_default();
+                            println!("👨‍💻 WS 收到手动 AT 命令: {}", payload);
+                            AtAction::ManualAt(payload)
+                        }
                         "set_interval" => {
                             let secs = cmd.payload.and_then(|p| p.parse().ok()).unwrap_or(3);
+                            println!("🔄 WS 收到间隔调整: {} 秒", secs);
                             AtAction::SetInterval(secs)
                         }
                         "set_view_state" => {
                             let is_active = cmd.payload.as_deref() == Some("active");
+                            eprintln!("📡 WS 视图状态变更: active={} (当前={})", is_active, current_is_active);
                             if is_active != current_is_active {
                                 if is_active {
                                     state_inner.active_views.fetch_add(1, Ordering::SeqCst);
@@ -745,10 +793,15 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                                     "traffic_stats": guard.traffic_stats,
                                 }
                             });
+                            eprintln!("📤 WS 回复静态信息: FW={}, SIM={}",
+                                guard.firmware_version, guard.active_sim);
                             let _ = local_tx.send(info_json.to_string()).await;
                             continue;
                         }
-                        _ => continue,
+                        unknown_action => {
+                            eprintln!("⚠️ 未知 WebSocket 动作: {:?} (payload: {:?})", unknown_action, cmd.payload);
+                            continue;
+                        }
                     };
                     let _ = state_inner
                         .actor_tx
@@ -761,6 +814,8 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             break;
                         }
                     }
+                } else {
+                    eprintln!("⚠️ WS 收到无法解析的消息: {:?}", text);
                 }
             }
         } => {

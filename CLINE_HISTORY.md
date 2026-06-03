@@ -148,3 +148,15 @@
 - **涉及文件**:
   - `src/main.rs`
   - `CLINE_HISTORY.md`
+
+## 2026-06-03 22:49 — 修复 fetch_static_info 启动卡死：增加全局超时保护
+- **对比 commit**: 94bfaced5d68dcf99cfa00e44c9e657da1f38e66
+- **问题**: `fetch_static_info()` 在 `main()` 中同步 await，如果串口设备无响应（SMD 通道 write 阻塞），会导致整个启动流程永久卡死，`hardware_polling_actor` 永远不会被 spawn，HTTP 服务器永远不会启动
+- **根因**: `fetch_static_info().await` 没有全局超时保护。每个 AT 命令虽有 5s 超时，但如果 `send_at_command_async` 内部的同步 `write_all()` 在 OS 层面永久阻塞（如 SMD 驱动无响应），tokio 的超时也无法取消正在执行的同步阻塞 syscall
+- **修改内容**:
+  - `main()` 中用 `tokio::time::timeout(Duration::from_secs(30), fetch_static_info(...))` 包裹，30s 后取消 Future，写入默认静态信息并继续启动 HTTP 服务器和 hardware_polling_actor
+  - 移除 `fetch_static_info()` 中 DEBUG `eprintln!` 日志（drain_serial_buffer/ATE0/AT/AT+CGMR 原始响应）
+  - 移除不再使用的 `IO_TIMEOUT` 常量
+- **涉及文件**:
+  - `src/main.rs`
+  - `CLINE_HISTORY.md`

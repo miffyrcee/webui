@@ -1,5 +1,17 @@
 # Cline AI Change History
 
+## 2026-06-04 00:50 — 修复 AT 命令响应交叉污染：改用持久串口连接
+- **问题**: 每次 AT 命令 `send_at_command_async` 打开新 fd → 发送 → 关闭。但 SMD 内核缓冲区是共享的，新 fd 打开后第一个 `read()` 会先读到上一个命令残留的旧数据，导致响应错位（`AT+CGPADDR` 的响应被 `AT+QENG` 读取，反之亦然）。
+- **尝试修复（失败）**: 在 `send_at_command_inner` 开头增加 drain 清空残留数据。但 `read()` 在 SMD 通道上本身就可能阻塞，反而引入新的卡死问题。
+- **最终修复**: 改用持久串口连接
+  - `fetch_static_info()`: 打开一次串口，所有 5 个 AT 命令顺序使用同一 `&mut SerialHandle`，函数结束 drop 关闭
+  - `hardware_polling_actor()`: 启动时打开串口并保持 `Option<SerialHandle>`，所有 AT 调用（用户请求 + 定时轮询）通过 `send_at_command_inner(&mut s, ...)` 序列化使用同一 fd
+  - 同一 fd 上的读写天然串行：写入命令 → 读取响应至 `\r\nOK\r\n` → fd 读位置恰好停在下一个命令的起始位置，不会读到旧数据
+  - `send_at_command_async` 保留但不被调用（`#[allow(dead_code)]` 由编译器警告标注）
+- **涉及文件**:
+  - `src/main.rs`
+  - `CLINE_HISTORY.md`
+
 ## 2026-06-04 00:06 — 新增 6 个 WebUI 选项卡 (Simple Network / Simple Scan / Simple Settings / SMS / Console / Device Information)
 - **修改内容**:
   - `src/index.html`: 重构为 7 选项卡布局 (Dashboard + 6 new)

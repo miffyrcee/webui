@@ -202,11 +202,12 @@ async fn open_serial(path: &str) -> Option<SerialHandle> {
 }
 
 /// 启动时一次性获取静态信息：固件版本、SIM槽位、运营商、APN
+/// 使用持久串口连接避免每次 open/close 导致的 SMD 缓冲区交叉污染
 async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
-    println!("📋 开始获取静态信息（每次 AT 命令独立打开/关闭串口）...");
+    println!("📋 开始获取静态信息（持久串口连接）...");
     let mut info = StaticInfo::default();
 
-    if open_serial(serial_path).await.is_none() {
+    let Some(mut serial) = open_serial(serial_path).await else {
         eprintln!("⚠️ 使用模拟静态数据");
         info.firmware_version = "RM520NGLAAR03A03M4G_BETA".to_string();
         info.active_sim = "SIM 1".to_string();
@@ -217,11 +218,11 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         *guard = info;
         println!("📋 模拟静态数据已写入 AppState");
         return;
-    }
+    };
 
     // 1. 固件版本
     println!("📋 [1/5] 获取固件版本 (AT+CGMR)...");
-    if let Ok(resp) = send_at_command_async(serial_path, "AT+CGMR").await {
+    if let Ok(resp) = send_at_command_inner(&mut serial, "AT+CGMR").await {
         for line in resp.lines() {
             let trimmed = line.trim();
             if !trimmed.is_empty()
@@ -240,7 +241,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
 
     // 2. SIM 槽位
     println!("📋 [2/5] 获取 SIM 槽位 (AT+QUIMSLOT?)...");
-    if let Ok(resp) = send_at_command_async(serial_path, "AT+QUIMSLOT?").await {
+    if let Ok(resp) = send_at_command_inner(&mut serial, "AT+QUIMSLOT?").await {
         for line in resp.lines() {
             if line.contains("+QUIMSLOT:") {
                 let parts: Vec<&str> = line.split(':').collect();
@@ -256,7 +257,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
 
     // 3. 运营商 — 先 QSPN 其次 COPS
     println!("📋 [3/5] 获取运营商 (AT+QSPN / AT+COPS?)...");
-    if let Ok(resp) = send_at_command_async(serial_path, "AT+QSPN").await {
+    if let Ok(resp) = send_at_command_inner(&mut serial, "AT+QSPN").await {
         for line in resp.lines() {
             if line.contains("+QSPN:") {
                 let after_prefix = line.trim().strip_prefix("+QSPN:").unwrap_or(line).trim();
@@ -276,7 +277,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         }
     }
     if info.network_provider.is_empty() {
-        if let Ok(resp) = send_at_command_async(serial_path, "AT+COPS?").await {
+        if let Ok(resp) = send_at_command_inner(&mut serial, "AT+COPS?").await {
             for line in resp.lines() {
                 if line.contains("+COPS:") {
                     let after_prefix = line.trim().strip_prefix("+COPS:").unwrap_or(line).trim();
@@ -297,7 +298,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         }
     }
     if info.network_provider.is_empty() {
-        if let Ok(resp) = send_at_command_async(serial_path, "AT+QENG=\"servingcell\"").await {
+        if let Ok(resp) = send_at_command_inner(&mut serial, "AT+QENG=\"servingcell\"").await {
             for line in resp.lines() {
                 if line.contains("+QENG: \"servingcell\"") {
                     let parts: Vec<&str> = line
@@ -324,7 +325,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
 
     // 4. APN
     println!("📋 [4/5] 获取 APN (AT+CGDCONT?)...");
-    if let Ok(resp) = send_at_command_async(serial_path, "AT+CGDCONT?").await {
+    if let Ok(resp) = send_at_command_inner(&mut serial, "AT+CGDCONT?").await {
         for line in resp.lines() {
             if line.contains("+CGDCONT: 1,") {
                 let after_prefix = line.trim().strip_prefix("+CGDCONT: 1,").unwrap_or(line).trim();
@@ -342,7 +343,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
 
     // 5. 流量统计
     println!("📋 [5/5] 获取流量统计 (AT+QGDNRCNT?)...");
-    info.traffic_stats = send_at_command_async(serial_path, "AT+QGDNRCNT?")
+    info.traffic_stats = send_at_command_inner(&mut serial, "AT+QGDNRCNT?")
         .await
         .ok()
         .and_then(|r| {
@@ -367,7 +368,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         .unwrap_or_default();
 
     if info.traffic_stats.is_empty() {
-        if let Ok(resp) = send_at_command_async(serial_path, "AT+QGDAT?").await {
+        if let Ok(resp) = send_at_command_inner(&mut serial, "AT+QGDAT?").await {
             for line in resp.lines() {
                 if line.contains("+QGDAT:") {
                     let parts: Vec<&str> = line
@@ -391,6 +392,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     if info.traffic_stats.is_empty() {
         info.traffic_stats = "N/A".to_string();
     }
+    // serial 在此函数结束时 drop，自动关闭连接
 
     println!(
         "📋 静态信息已获取: FW={}, SIM={}, Provider={}, APN={}, Traffic={}",
@@ -501,7 +503,9 @@ async fn hardware_polling_actor(
     let mut _sys = System::new_all();
     let mut components = Components::new_with_refreshed_list();
 
-    let serial_available = open_serial(&serial_path).await.is_some();
+    // 持久串口连接：同一 fd 上读写序列化，避免 SMD 缓冲区交叉污染
+    let mut serial = open_serial(&serial_path).await;
+    let serial_available = serial.is_some();
     if !serial_available {
         println!("⚠️ 硬件轮询 actor 运行在模拟模式（串口不可用）");
     }
@@ -516,8 +520,8 @@ async fn hardware_polling_actor(
                 match req.action {
                     AtAction::ManualAt(cmd) => {
                         println!("👨‍💻 用户手动执行 AT: {}", cmd);
-                        let response = if serial_available {
-                            match send_at_command_async(&serial_path, &cmd).await {
+                        let response = if let Some(ref mut s) = serial {
+                            match send_at_command_inner(s, &cmd).await {
                                 Ok(resp) => resp,
                                 Err(e) => format!("ERROR: {}", e),
                             }
@@ -542,9 +546,9 @@ async fn hardware_polling_actor(
                     }
                     AtAction::GetSmsList => {
                         println!("📱 actor: get_sms_list via AT+CMGL");
-                        let resp = if serial_available {
-                            let _mode_result = send_at_command_async(&serial_path, "AT+CMGF=1").await;
-                            send_at_command_async(&serial_path, "AT+CMGL=\"ALL\"").await
+                        let resp = if let Some(ref mut s) = serial {
+                            let _ = send_at_command_inner(s, "AT+CMGF=1").await;
+                            send_at_command_inner(s, "AT+CMGL=\"ALL\"").await
                                 .unwrap_or_else(|_| "+CMGL: 0 messages\r\nOK\r\n".to_string())
                         } else {
                             "+CMGL: 1,\"REC READ\",\"+8613800138000\",,\"2026/06/04 10:30:08\"\r\nYour data usage this month: 15.2 GB\r\n+CMGL: 2,\"REC UNREAD\",\"10086\",,\"2026/06/03 09:15:22\"\r\nWelcome to China Mobile 5G network!\r\nOK\r\n".to_string()
@@ -553,10 +557,10 @@ async fn hardware_polling_actor(
                     }
                     AtAction::SetApn(apn, user, pass, auth_type) => {
                         println!("🌐 actor: set_apn apn={} user={} auth={}", apn, user, auth_type);
-                        if serial_available {
-                            let _ = send_at_command_async(&serial_path, &format!("AT+CGDCONT=1,\"IPV4V6\",\"{}\"", apn)).await;
+                        if let Some(ref mut s) = serial {
+                            let _ = send_at_command_inner(s, &format!("AT+CGDCONT=1,\"IPV4V6\",\"{}\"", apn)).await;
                             if !user.is_empty() {
-                                let _ = send_at_command_async(&serial_path, &format!("AT+QGAUTH=1,{},\"{}\",\"{}\"", auth_type, user, pass)).await;
+                                let _ = send_at_command_inner(s, &format!("AT+QGAUTH=1,{},\"{}\",\"{}\"", auth_type, user, pass)).await;
                             }
                         }
                         let _ = req.resp_tx.send(serde_json::json!({
@@ -566,7 +570,7 @@ async fn hardware_polling_actor(
                     }
                     AtAction::SetNetworkMode(mode) => {
                         println!("🌐 actor: set_network_mode {}", mode);
-                        if serial_available {
+                        if let Some(ref mut s) = serial {
                             let at_mode = match mode.as_str() {
                                 "nr5g" => "AT+QNWPREFCFG=\"mode_pref\",NR5G",
                                 "lte" => "AT+QNWPREFCFG=\"mode_pref\",LTE",
@@ -574,7 +578,7 @@ async fn hardware_polling_actor(
                                 "wcdma" => "AT+QNWPREFCFG=\"mode_pref\",WCDMA",
                                 _ => "AT+QNWPREFCFG=\"mode_pref\",AUTO",
                             };
-                            let _ = send_at_command_async(&serial_path, at_mode).await;
+                            let _ = send_at_command_inner(s, at_mode).await;
                         }
                         let _ = req.resp_tx.send(serde_json::json!({
                             "type": "network_status",
@@ -583,9 +587,9 @@ async fn hardware_polling_actor(
                     }
                     AtAction::NetConnect(connect) => {
                         println!("🌐 actor: net_{}", if connect { "connect" } else { "disconnect" });
-                        if serial_available {
+                        if let Some(ref mut s) = serial {
                             let action_val = if connect { "1" } else { "0" };
-                            let _ = send_at_command_async(&serial_path, &format!("AT+CGACT={},1", action_val)).await;
+                            let _ = send_at_command_inner(s, &format!("AT+CGACT={},1", action_val)).await;
                         }
                         let _ = req.resp_tx.send(serde_json::json!({
                             "type": "network_status",
@@ -595,8 +599,8 @@ async fn hardware_polling_actor(
                     AtAction::NetworkScan => {
                         println!("🔍 actor: network_scan via AT+COPS=?");
                         let mut networks = Vec::new();
-                        if serial_available {
-                            if let Ok(_resp) = send_at_command_async(&serial_path, "AT+COPS=?").await {
+                        if let Some(ref mut s) = serial {
+                            if let Ok(_resp) = send_at_command_inner(s, "AT+COPS=?").await {
                                 // 实际项目中解析 _resp 并在 networks 中填充，此处作为示例放置模拟返回
                             }
                         }
@@ -615,10 +619,10 @@ async fn hardware_polling_actor(
                     AtAction::SendSms(recipient, message) => {
                         println!("📱 actor: send_sms to={}", recipient);
                         let mut success = false;
-                        if serial_available {
-                            if send_at_command_async(&serial_path, "AT+CMGF=1").await.is_ok() {
-                                if send_at_command_async(&serial_path, &format!("AT+CMGS=\"{}\"", recipient)).await.is_ok() {
-                                    if send_at_command_async(&serial_path, &format!("{}\u{001A}", message)).await.is_ok() {
+                        if let Some(ref mut s) = serial {
+                            if send_at_command_inner(s, "AT+CMGF=1").await.is_ok() {
+                                if send_at_command_inner(s, &format!("AT+CMGS=\"{}\"", recipient)).await.is_ok() {
+                                    if send_at_command_inner(s, &format!("{}\u{001A}", message)).await.is_ok() {
                                         success = true;
                                     }
                                 }
@@ -633,17 +637,17 @@ async fn hardware_polling_actor(
                     }
                     AtAction::GetDeviceInfo => {
                         println!("📱 actor: get_device_info via AT+CGMI/+CGMM/+CGMR/+CGSN");
-                        let (mfr, model, fw, imei) = if serial_available {
-                            let m = send_at_command_async(&serial_path, "AT+CGMI").await
+                        let (mfr, model, fw, imei) = if let Some(ref mut s) = serial {
+                            let m = send_at_command_inner(s, "AT+CGMI").await
                                 .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("Quectel").trim().to_string())
                                 .unwrap_or_else(|_| "Quectel".to_string());
-                            let mo = send_at_command_async(&serial_path, "AT+CGMM").await
+                            let mo = send_at_command_inner(s, "AT+CGMM").await
                                 .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("RM520N-GL").trim().to_string())
                                 .unwrap_or_else(|_| "RM520N-GL".to_string());
-                            let f = send_at_command_async(&serial_path, "AT+CGMR").await
+                            let f = send_at_command_inner(s, "AT+CGMR").await
                                 .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("Unknown").trim().to_string())
                                 .unwrap_or_else(|_| "Unknown".to_string());
-                            let i = send_at_command_async(&serial_path, "AT+CGSN").await
+                            let i = send_at_command_inner(s, "AT+CGSN").await
                                 .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("Unknown").trim().to_string())
                                 .unwrap_or_else(|_| "Unknown".to_string());
                             (m, mo, f, i)
@@ -677,8 +681,8 @@ async fn hardware_polling_actor(
                     }
                     AtAction::Reboot => {
                         println!("🔄 actor: rebooting module...");
-                        if serial_available {
-                            let _ = send_at_command_async(&serial_path, "AT+CFUN=1,1").await;
+                        if let Some(ref mut s) = serial {
+                            let _ = send_at_command_inner(s, "AT+CFUN=1,1").await;
                         }
                         let _ = req.resp_tx.send(serde_json::json!({
                             "type": "settings_log",
@@ -687,8 +691,8 @@ async fn hardware_polling_actor(
                     }
                     AtAction::FactoryReset => {
                         println!("⚠️ actor: factory reset module...");
-                        if serial_available {
-                            let _ = send_at_command_async(&serial_path, "AT&F0").await;
+                        if let Some(ref mut s) = serial {
+                            let _ = send_at_command_inner(s, "AT&F0").await;
                         }
                         let _ = req.resp_tx.send(serde_json::json!({
                             "type": "settings_log",
@@ -698,8 +702,8 @@ async fn hardware_polling_actor(
                     AtAction::FlightMode(on) => {
                         let cfun_val = if on { "4" } else { "1" };
                         println!("✈️ actor: setting flight mode to {}", if on { "ON" } else { "OFF" });
-                        if serial_available {
-                            let _ = send_at_command_async(&serial_path, &format!("AT+CFUN={}", cfun_val)).await;
+                        if let Some(ref mut s) = serial {
+                            let _ = send_at_command_inner(s, &format!("AT+CFUN={}", cfun_val)).await;
                         }
                         let _ = req.resp_tx.send(serde_json::json!({
                             "type": "settings_log",
@@ -715,14 +719,14 @@ async fn hardware_polling_actor(
 
                     let mut telemetry = TelemetryData::default();
 
-                    if serial_available {
-                        if let Ok(cgpaddr_resp) = send_at_command_async(&serial_path, "AT+CGPADDR").await {
+                    if let Some(ref mut s) = serial {
+                        if let Ok(cgpaddr_resp) = send_at_command_inner(s, "AT+CGPADDR").await {
                             parse_cgpaddr(&cgpaddr_resp, &mut telemetry);
                         }
-                        if let Ok(qeng_resp) = send_at_command_async(&serial_path, "AT+QENG=\"servingcell\"").await {
+                        if let Ok(qeng_resp) = send_at_command_inner(s, "AT+QENG=\"servingcell\"").await {
                             parse_qeng(&qeng_resp, &mut telemetry);
                         }
-                        if let Ok(qcainfo_resp) = send_at_command_async(&serial_path, "AT+QCAINFO").await {
+                        if let Ok(qcainfo_resp) = send_at_command_inner(s, "AT+QCAINFO").await {
                             parse_qcainfo(&qcainfo_resp, &mut telemetry);
                         }
                         if telemetry.signal_percentage.is_empty() {

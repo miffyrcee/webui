@@ -170,3 +170,14 @@
 - **涉及文件**:
   - `src/main.rs`
   - `CLINE_HISTORY.md`
+
+## 2026-06-03 23:22 — 串口改为每次 AT 命令打开/关闭
+- **问题**: 串口保持持久打开导致 socat PTY 桥接设备状态异常、资源占用
+- **修改内容**:
+  - 原 `send_at_command_async(serial, cmd)` 重命名为 `send_at_command_inner(serial, cmd)`（纯底层发送逻辑，仍接受 `&mut SerialHandle`）
+  - 新增 `send_at_command_async(path, cmd)` 包装函数：每次调用 `open_serial()` → `drain_serial_buffer()` → `send_at_command_inner()` → drop（自动关闭串口）
+  - `fetch_static_info()`: 移除持久串口句柄 `serial`，所有 `send_at_command_async(&mut serial, ...)` 改为 `send_at_command_async(serial_path, ...)`，模拟检测改为单次 `open_serial().is_none()` 判断
+  - `hardware_polling_actor()`: 移除 `Option<SerialHandle>` 持久句柄，改为 `bool serial_available`，所有 AT 调用通过 `send_at_command_async(&serial_path, ...)` 每次独立打开/关闭
+- **涉及文件**:
+  - `src/main.rs`
+  - `CLINE_HISTORY.md`

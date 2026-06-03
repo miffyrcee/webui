@@ -239,33 +239,26 @@ async fn open_serial(path: &str) -> Option<SerialHandle> {
 
 /// 启动时一次性获取静态信息：固件版本、SIM槽位、运营商、APN
 async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
-    println!("📋 开始获取静态信息（此过程会短暂占用串口）...");
+    println!("📋 开始获取静态信息（每次 AT 命令独立打开/关闭串口）...");
     let mut info = StaticInfo::default();
 
-    let mut serial = match open_serial(serial_path).await {
-        Some(s) => s,
-        None => {
-            eprintln!("⚠️ 使用模拟静态数据");
-            info.firmware_version = "RM520NGLAAR03A03M4G_BETA".to_string();
-            info.active_sim = "SIM 1".to_string();
-            info.network_provider = "CHN-UNICOM".to_string();
-            info.apn = "3gnet".to_string();
-            info.traffic_stats = "N/A".to_string();
-            let mut guard = state.static_info.write().await;
-            *guard = info;
-            println!("📋 模拟静态数据已写入 AppState");
-            return;
-        }
-    };
-
-    // SMD 通道初始化：清空残留 + 关闭回显 + 验证通信
-    drain_serial_buffer(&mut serial).await;
-    let _ = send_at_command_async(&mut serial, "ATE0").await;
-    let _ = send_at_command_async(&mut serial, "AT").await;
+    // 先试着打开一次串口，判断是否为模拟模式
+    if open_serial(serial_path).await.is_none() {
+        eprintln!("⚠️ 使用模拟静态数据");
+        info.firmware_version = "RM520NGLAAR03A03M4G_BETA".to_string();
+        info.active_sim = "SIM 1".to_string();
+        info.network_provider = "CHN-UNICOM".to_string();
+        info.apn = "3gnet".to_string();
+        info.traffic_stats = "N/A".to_string();
+        let mut guard = state.static_info.write().await;
+        *guard = info;
+        println!("📋 模拟静态数据已写入 AppState");
+        return;
+    }
 
     // 固件版本
     println!("📋 [1/5] 获取固件版本 (AT+CGMR)...");
-    match send_at_command_async(&mut serial, "AT+CGMR").await {
+    match send_at_command_async(serial_path, "AT+CGMR").await {
         Ok(resp) => {
             for line in resp.lines() {
                 let trimmed = line.trim();
@@ -287,7 +280,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
 
     // SIM 槽位
     println!("📋 [2/5] 获取 SIM 槽位 (AT+QUIMSLOT?)...");
-    match send_at_command_async(&mut serial, "AT+QUIMSLOT?").await {
+    match send_at_command_async(serial_path, "AT+QUIMSLOT?").await {
         Ok(resp) => {
             for line in resp.lines() {
                 if line.contains("+QUIMSLOT:") {
@@ -306,7 +299,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
 
     // 运营商 — 先尝试 QSPN（中文名），再 fallback COPS
     println!("📋 [3/5] 获取运营商 (AT+QSPN / AT+COPS?)...");
-    match send_at_command_async(&mut serial, "AT+QSPN").await {
+    match send_at_command_async(serial_path, "AT+QSPN").await {
         Ok(resp) => {
             for line in resp.lines() {
                 if line.contains("+QSPN:") {
@@ -329,7 +322,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         Err(e) => eprintln!("⚠️ QSPN 获取失败: {}", e),
     }
     if info.network_provider.is_empty() {
-        match send_at_command_async(&mut serial, "AT+COPS?").await {
+        match send_at_command_async(serial_path, "AT+COPS?").await {
             Ok(resp) => {
                 for line in resp.lines() {
                     if line.contains("+COPS:") {
@@ -355,7 +348,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     }
     if info.network_provider.is_empty() {
         // 最后尝试从 MCCMNC 映射
-        match send_at_command_async(&mut serial, "AT+QENG=\"servingcell\"").await {
+        match send_at_command_async(serial_path, "AT+QENG=\"servingcell\"").await {
             Ok(resp) => {
                 for line in resp.lines() {
                     if line.contains("+QENG: \"servingcell\"") {
@@ -385,7 +378,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
 
     // APN (CGDCONT 第一个上下文)
     println!("📋 [4/5] 获取 APN (AT+CGDCONT?)...");
-    match send_at_command_async(&mut serial, "AT+CGDCONT?").await {
+    match send_at_command_async(serial_path, "AT+CGDCONT?").await {
         Ok(resp) => {
             for line in resp.lines() {
                 if line.contains("+CGDCONT: 1,") {
@@ -410,7 +403,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
 
     // 流量统计 — 尝试 QGDNRCNT 或 QGDAT
     println!("📋 [5/5] 获取流量统计 (AT+QGDNRCNT?)...");
-    info.traffic_stats = send_at_command_async(&mut serial, "AT+QGDNRCNT?")
+    info.traffic_stats = send_at_command_async(serial_path, "AT+QGDNRCNT?")
         .await
         .ok()
         .and_then(|r| {
@@ -434,7 +427,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         })
         .unwrap_or_default();
     if info.traffic_stats.is_empty() {
-        match send_at_command_async(&mut serial, "AT+QGDAT?").await {
+        match send_at_command_async(serial_path, "AT+QGDAT?").await {
             Ok(resp) => {
                 for line in resp.lines() {
                     if line.contains("+QGDAT:") {
@@ -467,16 +460,14 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         info.firmware_version, info.active_sim, info.network_provider, info.apn, info.traffic_stats
     );
 
-    // 完成后关闭串口（drop serial），hardware_polling_actor 会重新打开
-    drop(serial);
-    println!("📋 静态信息串口已关闭，hardware_polling_actor 将重新打开");
+    println!("📋 静态信息获取完毕，串口已自动关闭");
 
     let mut guard = state.static_info.write().await;
     *guard = info;
 }
 
-/// 异步发送 AT 命令并读取响应
-async fn send_at_command_async(serial: &mut SerialHandle, cmd: &str) -> Result<String, String> {
+/// 底层 AT 命令发送（使用已打开的串口句柄）
+async fn send_at_command_inner(serial: &mut SerialHandle, cmd: &str) -> Result<String, String> {
     let start = std::time::Instant::now();
     let full_cmd = format!("{}\r\n", cmd);
 
@@ -558,6 +549,15 @@ async fn send_at_command_async(serial: &mut SerialHandle, cmd: &str) -> Result<S
     Ok(response)
 }
 
+/// 异步发送 AT 命令（每次打开串口→发送→关闭）
+async fn send_at_command_async(path: &str, cmd: &str) -> Result<String, String> {
+    let mut serial = open_serial(path).await
+        .ok_or_else(|| "无法打开串口".to_string())?;
+    drain_serial_buffer(&mut serial).await;
+    send_at_command_inner(&mut serial, cmd).await
+    // serial 在此 drop → 串口关闭
+}
+
 async fn index_handler() -> impl IntoResponse {
     let html = include_str!("index.html");
     Response::builder()
@@ -574,14 +574,10 @@ async fn hardware_polling_actor(
     let mut sys = System::new_all();
     let mut components = Components::new_with_refreshed_list();
 
-    // 打开串口（独立连接，与 fetch_static_info 互不影响）
-    let mut serial = open_serial(&serial_path).await;
-
-    // SMD 通道初始化：清空残留 + 关闭回显 + 验证通信
-    if let Some(ref mut port) = serial {
-        drain_serial_buffer(port).await;
-        let _ = send_at_command_async(port, "ATE0").await;
-        let _ = send_at_command_async(port, "AT").await;
+    // 检测串口是否可用（不保持打开）
+    let serial_available = open_serial(&serial_path).await.is_some();
+    if !serial_available {
+        println!("⚠️ 硬件轮询 actor 运行在模拟模式（串口不可用）");
     }
 
     let mut interval_secs = 3;
@@ -594,8 +590,8 @@ async fn hardware_polling_actor(
                 match req.action {
                     AtAction::ManualAt(cmd) => {
                         println!("👨‍💻 用户手动执行 AT: {}", cmd);
-                        let response = if let Some(ref mut port) = serial {
-                            match send_at_command_async(port, &cmd).await {
+                        let response = if serial_available {
+                            match send_at_command_async(&serial_path, &cmd).await {
                                 Ok(resp) => resp,
                                 Err(e) => format!("ERROR: {}", e),
                             }
@@ -624,11 +620,11 @@ async fn hardware_polling_actor(
                     let start_poll = std::time::Instant::now();
                     println!("📡 开始周期性硬件轮询 (活跃视图: {})", active_count);
 
-                    let (cpin_res, qeng_res, _qca_res, gpad_res) = if let Some(ref mut port) = serial {
+                    let (cpin_res, qeng_res, _qca_res, gpad_res) = if serial_available {
                         let combined = "AT+CPIN?;+QENG=\"servingcell\";+QCAINFO;+CGPADDR";
-                        eprintln!("📡 发送合并轮询命令 ({}ms 间隔)...", interval_secs);
+                        eprintln!("📡 发送合并轮询命令 ({}s 间隔)...", interval_secs);
                         let poll_cmd_start = std::time::Instant::now();
-                        match send_at_command_async(port, combined).await {
+                        match send_at_command_async(&serial_path, combined).await {
                             Ok(resp) => {
                                 let parsed = parse_combined_response(&resp);
                                 eprintln!("📡 合并命令解析完成 ({}ms)，各段长度: CPIN={}, QENG={}, QCA={}, GPAD={}",
@@ -638,19 +634,19 @@ async fn hardware_polling_actor(
                             }
                             Err(e) => {
                                 println!("⚠️ 合并命令失败 ({}ms): {}，降级到单独发送", poll_cmd_start.elapsed().as_millis(), e);
-                                let cpin = send_at_command_async(port, "AT+CPIN?").await.unwrap_or_else(|e| {
+                                let cpin = send_at_command_async(&serial_path, "AT+CPIN?").await.unwrap_or_else(|e| {
                                     eprintln!("❌ AT+CPIN? 降级也失败: {}", e);
                                     String::new()
                                 });
-                                let qeng = send_at_command_async(port, "AT+QENG=\"servingcell\"").await.unwrap_or_else(|e| {
+                                let qeng = send_at_command_async(&serial_path, "AT+QENG=\"servingcell\"").await.unwrap_or_else(|e| {
                                     eprintln!("❌ AT+QENG 降级也失败: {}", e);
                                     String::new()
                                 });
-                                let qca = send_at_command_async(port, "AT+QCAINFO").await.unwrap_or_else(|e| {
+                                let qca = send_at_command_async(&serial_path, "AT+QCAINFO").await.unwrap_or_else(|e| {
                                     eprintln!("❌ AT+QCAINFO 降级也失败: {}", e);
                                     String::new()
                                 });
-                                let gpad = send_at_command_async(port, "AT+CGPADDR").await.unwrap_or_else(|e| {
+                                let gpad = send_at_command_async(&serial_path, "AT+CGPADDR").await.unwrap_or_else(|e| {
                                     eprintln!("❌ AT+CGPADDR 降级也失败: {}", e);
                                     String::new()
                                 });

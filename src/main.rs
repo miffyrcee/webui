@@ -17,89 +17,58 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use std::{env, sync::Arc};
 use sysinfo::{Components, System};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 use tokio::time::sleep;
-
-// 引入同步标准库 I/O 模块
-use std::io::{Read, Write};
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 
 use at::parser::{parse_cgpaddr, parse_combined_response, parse_qcainfo, parse_qeng};
 use at::utils::{decode_hex_ucs2, format_bytes};
 
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
 
-/// 串口句柄：使用 std::fs::File 实现同步 I/O
+/// 单次 I/O 超时（用于 tokio::time::timeout 包裹单个 read/write 操作）
+const IO_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// 串口句柄：tokio::fs::File（阻塞 I/O 在 spawn_blocking 线程池执行）
 enum SerialHandle {
-    Raw(std::fs::File),
+    Raw(tokio::fs::File),
 }
 
 impl SerialHandle {
-    /// 带重试和超时的写入（O_NONBLOCK 模式下 write 可能返回 WouldBlock/EBUSY）
+    /// 阻塞写入（tokio::fs::File::write_all 内部用 spawn_blocking，外层加 timeout）
     async fn write_all(&mut self, buf: &[u8]) -> Result<(), String> {
         match self {
             SerialHandle::Raw(f) => {
-                let start = std::time::Instant::now();
-                let timeout_dur = Duration::from_secs(5);
-                let mut offset = 0usize;
-                loop {
-                    match f.write(&buf[offset..]) {
-                        Ok(n) => {
-                            offset += n;
-                            if offset >= buf.len() {
-                                return Ok(());
-                            }
-                        }
-                        Err(ref e)
-                            if e.kind() == std::io::ErrorKind::WouldBlock
-                                || e.raw_os_error() == Some(16 /* EBUSY */) =>
-                        {
-                            if start.elapsed() >= timeout_dur {
-                                return Err(format!("写超时({}ms)", timeout_dur.as_millis()));
-                            }
-                            sleep(Duration::from_millis(10)).await;
-                        }
-                        Err(e) => return Err(format!("写失败: {}", e)),
-                    }
-                }
+                tokio::time::timeout(IO_TIMEOUT, f.write_all(buf))
+                    .await
+                    .map_err(|_| format!("写超时({}ms)", IO_TIMEOUT.as_millis()))?
+                    .map_err(|e| format!("写失败: {}", e))
             }
         }
     }
 
-    /// 同步 flush
-    fn flush(&mut self) -> Result<(), String> {
-        match self {
-            SerialHandle::Raw(f) => f.flush().map_err(|e| format!("flush失败: {}", e)),
-        }
-    }
-
-    /// 辅助方法：带超时的同步读取（结合 O_NONBLOCK，避免彻底卡死 Tokio 线程）
-    async fn read_timeout(&mut self, buf: &mut [u8], timeout_dur: Duration) -> Result<usize, String> {
+    /// 阻塞 flush
+    async fn flush(&mut self) -> Result<(), String> {
         match self {
             SerialHandle::Raw(f) => {
-                let start = std::time::Instant::now();
-                loop {
-                    match f.read(buf) {
-                        Ok(n) => return Ok(n),
-                        // 非阻塞模式下，若当前无数据会返回 WouldBlock
-                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            if start.elapsed() >= timeout_dur {
-                                return Err(format!("读超时({}ms)", timeout_dur.as_millis()));
-                            }
-                            // 短暂让出执行权，避免 CPU 空转
-                            sleep(Duration::from_millis(10)).await;
-                        }
-                        Err(e) => return Err(format!("读错误: {}", e)),
-                    }
-                }
+                tokio::time::timeout(IO_TIMEOUT, f.flush())
+                    .await
+                    .map_err(|_| format!("flush超时({}ms)", IO_TIMEOUT.as_millis()))?
+                    .map_err(|e| format!("flush失败: {}", e))
             }
         }
     }
 
-    /// 读取数据（500ms 超时）
+    /// 阻塞读取（带超时）
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, String> {
-        self.read_timeout(buf, Duration::from_millis(500)).await
+        match self {
+            SerialHandle::Raw(f) => {
+                tokio::time::timeout(IO_TIMEOUT, f.read(buf))
+                    .await
+                    .map_err(|_| format!("读超时({}ms)", IO_TIMEOUT.as_millis()))?
+                    .map_err(|e| format!("读错误: {}", e))
+            }
+        }
     }
 }
 
@@ -118,7 +87,7 @@ struct AppState {
     tx: broadcast::Sender<String>,
     actor_tx: mpsc::Sender<AtRequest>,
     active_views: AtomicUsize,
-    /// 启动时一次性获取的静态信息
+    /// 启动时一次性获取的静态信息（在线程安全下共享）
     static_info: RwLock<StaticInfo>,
 }
 
@@ -216,22 +185,16 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-/// 带短超时的串口读取（用于清空缓冲区，不依赖 IO_TIMEOUT 的 10s 超时）
-async fn read_with_short_timeout(
-    serial: &mut SerialHandle,
-    buf: &mut [u8],
-) -> Result<usize, String> {
-    serial.read_timeout(buf, Duration::from_millis(300)).await
-}
-
-/// 清空串口缓冲区：读取并丢弃任何残留数据
+/// 清空串口缓冲区：读取并丢弃任何残留数据（非阻塞，短超时）
 async fn drain_serial_buffer(serial: &mut SerialHandle) {
     let mut buf = [0u8; 1024];
     let mut total_drained = 0u32;
     let mut first_chunk = String::new();
     loop {
-        match read_with_short_timeout(serial, &mut buf).await {
-            Ok(n) if n > 0 => {
+        // 用短超时读取缓冲区残留（300ms）
+        let result = tokio::time::timeout(Duration::from_millis(300), serial.read(&mut buf)).await;
+        match result {
+            Ok(Ok(n)) if n > 0 => {
                 total_drained += n as u32;
                 if first_chunk.is_empty() {
                     let readable: String = buf[..n]
@@ -256,20 +219,15 @@ async fn drain_serial_buffer(serial: &mut SerialHandle) {
 async fn open_serial(path: &str) -> Option<SerialHandle> {
     println!("🔌 正在尝试打开串口设备: {} ...", path);
     let start = std::time::Instant::now();
-
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true).write(true);
-
-    #[cfg(unix)]
+    // tokio::fs::File 内部使用 spawn_blocking，SMD 设备必须用阻塞 I/O
+    match tokio::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .await
     {
-        // 关键：在 Unix 系统上以非阻塞（O_NONBLOCK）方式打开设备，
-        // 配合 std::io::Read::read，防止在数据未到达时直接卡死系统线程
-        options.custom_flags(2048);
-    }
-
-    match options.open(path) {
         Ok(file) => {
-            println!("✅ 串口已打开(同步Raw文件模式): {} (耗时: {}ms)", path, start.elapsed().as_millis());
+            println!("✅ 串口已打开(阻塞Raw文件模式): {} (耗时: {}ms)", path, start.elapsed().as_millis());
             Some(SerialHandle::Raw(file))
         }
         Err(e) => {
@@ -300,10 +258,9 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         }
     };
 
+    // SMD 通道初始化：清空残留 + 关闭回显 + 验证通信
     drain_serial_buffer(&mut serial).await;
-
     let _ = send_at_command_async(&mut serial, "ATE0").await;
-
     let _ = send_at_command_async(&mut serial, "AT").await;
 
     // 固件版本
@@ -347,7 +304,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         info.active_sim = "SIM 1".to_string();
     }
 
-    // 运营商
+    // 运营商 — 先尝试 QSPN（中文名），再 fallback COPS
     println!("📋 [3/5] 获取运营商 (AT+QSPN / AT+COPS?)...");
     match send_at_command_async(&mut serial, "AT+QSPN").await {
         Ok(resp) => {
@@ -397,6 +354,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         }
     }
     if info.network_provider.is_empty() {
+        // 最后尝试从 MCCMNC 映射
         match send_at_command_async(&mut serial, "AT+QENG=\"servingcell\"").await {
             Ok(resp) => {
                 for line in resp.lines() {
@@ -425,7 +383,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         info.network_provider = "Unknown".to_string();
     }
 
-    // APN
+    // APN (CGDCONT 第一个上下文)
     println!("📋 [4/5] 获取 APN (AT+CGDCONT?)...");
     match send_at_command_async(&mut serial, "AT+CGDCONT?").await {
         Ok(resp) => {
@@ -450,7 +408,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         info.apn = "N/A".to_string();
     }
 
-    // 流量统计
+    // 流量统计 — 尝试 QGDNRCNT 或 QGDAT
     println!("📋 [5/5] 获取流量统计 (AT+QGDNRCNT?)...");
     info.traffic_stats = send_at_command_async(&mut serial, "AT+QGDNRCNT?")
         .await
@@ -509,6 +467,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         info.firmware_version, info.active_sim, info.network_provider, info.apn, info.traffic_stats
     );
 
+    // 完成后关闭串口（drop serial），hardware_polling_actor 会重新打开
     drop(serial);
     println!("📋 静态信息串口已关闭，hardware_polling_actor 将重新打开");
 
@@ -516,22 +475,24 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     *guard = info;
 }
 
-/// 发送 AT 命令并读取响应
+/// 异步发送 AT 命令并读取响应
 async fn send_at_command_async(serial: &mut SerialHandle, cmd: &str) -> Result<String, String> {
     let start = std::time::Instant::now();
     let full_cmd = format!("{}\r\n", cmd);
 
-    // 写入 AT 命令（带超时和重试）
     serial
         .write_all(full_cmd.as_bytes())
         .await
         .map_err(|e| format!("写失败: {}", e))?;
     serial
         .flush()
+        .await
         .map_err(|e| format!("flush失败: {}", e))?;
 
+    // SMD 通道需要短暂等待模块处理 AT 命令
     sleep(Duration::from_millis(200)).await;
 
+    // 总超时 5 秒（防止单个 AT 命令永久卡死）
     let overall_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
 
     let mut buf = [0u8; 1024];
@@ -548,9 +509,9 @@ async fn send_at_command_async(serial: &mut SerialHandle, cmd: &str) -> Result<S
             ));
         }
 
-        // 调用带超时的非阻塞同步 read
         match serial.read(&mut buf).await {
             Ok(0) => {
+                // Raw模式：0字节读取不代表EOF，只是暂无数据
                 consecutive_zeros += 1;
                 if consecutive_zeros > 3 {
                     break;
@@ -568,6 +529,7 @@ async fn send_at_command_async(serial: &mut SerialHandle, cmd: &str) -> Result<S
                 if len >= 9 && response_bytes[len - 9..] == *b"\r\nERROR\r\n" {
                     break;
                 }
+                // 检查更长的buffer尾部（如果一次性读入了多个OK/ERROR中间有数据）
                 if len >= 15 {
                     let tail = &response_bytes[len - 15..];
                     if tail.windows(6).any(|w| w == b"\r\nOK\r\n")
@@ -612,8 +574,10 @@ async fn hardware_polling_actor(
     let mut sys = System::new_all();
     let mut components = Components::new_with_refreshed_list();
 
+    // 打开串口（独立连接，与 fetch_static_info 互不影响）
     let mut serial = open_serial(&serial_path).await;
 
+    // SMD 通道初始化：清空残留 + 关闭回显 + 验证通信
     if let Some(ref mut port) = serial {
         drain_serial_buffer(port).await;
         let _ = send_at_command_async(port, "ATE0").await;
@@ -709,6 +673,7 @@ async fn hardware_polling_actor(
                     let mut telemetry = TelemetryData::default();
                     telemetry.sim_status = sim_status.to_string();
 
+                    // 从静态信息中读取（只获取一次的数据）
                     {
                         let guard = state.static_info.read().await;
                         telemetry.active_sim = guard.active_sim.clone();
@@ -824,6 +789,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             continue;
                         }
                         "get_static_info" => {
+                            // 返回静态信息给前端
                             let guard = state_inner.static_info.read().await;
                             let info_json = serde_json::json!({
                                 "type": "static_info",

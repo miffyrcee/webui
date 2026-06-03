@@ -1,5 +1,12 @@
 # Cline AI Change History
 
+## 2026-06-04 00:53 — 增加 AI Change History 规则：任务前必须读取 CLINE_HISTORY.md
+- **修改内容**: 在 `.clinerules` 的 `AI Change History` 节中新增第一条规则，要求 AI 在开始任何代码修改任务之前必须先读取 `CLINE_HISTORY.md` 文件，了解项目完整变更历史、已解决/未解决的问题、以及已验证生效的架构决策
+- **原因**: 避免 AI 重复已尝试过的失败方案或引入回退
+- **涉及文件**:
+  - `.clinerules`
+  - `CLINE_HISTORY.md`
+
 ## 2026-06-04 00:50 — 修复 AT 命令响应交叉污染：改用持久串口连接
 - **问题**: 每次 AT 命令 `send_at_command_async` 打开新 fd → 发送 → 关闭。但 SMD 内核缓冲区是共享的，新 fd 打开后第一个 `read()` 会先读到上一个命令残留的旧数据，导致响应错位（`AT+CGPADDR` 的响应被 `AT+QENG` 读取，反之亦然）。
 - **尝试修复（失败）**: 在 `send_at_command_inner` 开头增加 drain 清空残留数据。但 `read()` 在 SMD 通道上本身就可能阻塞，反而引入新的卡死问题。

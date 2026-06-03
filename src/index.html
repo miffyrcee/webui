@@ -636,6 +636,42 @@
         }
 
         function handleAtResponse(raw) {
+            // If this is an SMS list response (+CMGL:), parse it into the SMS inbox
+            if (raw.includes('+CMGL:')) {
+                const messages = [];
+                const lines = raw.split('\n');
+                let i = 0;
+                while (i < lines.length) {
+                    const line = lines[i].trim();
+                    if (line.startsWith('+CMGL:')) {
+                        // +CMGL: <index>,<stat>,<oa/da>,[<alpha>],[<scts>][,<tooa/toda>,<length>]
+                        const header = line.substring(6); // remove "+CMGL: "
+                        const parts = header.split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+                        const stat = parts[1] || '';
+                        const sender = parts[2] || 'Unknown';
+                        const timestamp = parts[4] || '';
+                        // Next line(s) contain the message body
+                        i++;
+                        let text = '';
+                        while (i < lines.length && !lines[i].trim().startsWith('+CMGL:') && lines[i].trim() !== 'OK' && lines[i].trim() !== '') {
+                            if (text) text += '\n';
+                            text += lines[i].trim();
+                            i++;
+                        }
+                        messages.push({ sender, stat, timestamp, text });
+                        continue;
+                    }
+                    i++;
+                }
+                const smsData = {
+                    type: 'sms_list',
+                    data: { messages }
+                };
+                handleSmsList(smsData.data);
+                return;
+            }
+
+            // Otherwise display in console
             const output = getDomElement('console_output');
             if (!output) return;
             const escaped = raw

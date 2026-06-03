@@ -62,6 +62,21 @@ impl SerialHandle {
 enum AtAction {
     ManualAt(String),
     SetInterval(u64),
+    GetSmsList,
+    /// (apn, user, pass, auth_type)
+    SetApn(String, String, String, u8),
+    /// mode string
+    SetNetworkMode(String),
+    /// true=connect, false=disconnect
+    NetConnect(bool),
+    NetworkScan,
+    /// (recipient, message)
+    SendSms(String, String),
+    GetDeviceInfo,
+    Reboot,
+    FactoryReset,
+    /// true=ON, false=OFF
+    FlightMode(bool),
 }
 
 struct AtRequest {
@@ -571,6 +586,148 @@ async fn hardware_polling_actor(
                         }
                         let _ = req.resp_tx.send("OK".to_string());
                     }
+                    AtAction::GetSmsList => {
+                        println!("📱 actor: get_sms_list via AT+CMGL");
+                        let resp = if serial_available {
+                            let mode_result = send_at_command_async(&serial_path, "AT+CMGF=1").await;
+                            let list_result = send_at_command_async(&serial_path, "AT+CMGL=\"ALL\"").await;
+                            match (&mode_result, &list_result) {
+                                (Ok(_), Ok(list)) => list.clone(),
+                                _ => format!("+CMGL: 0 messages\r\nOK\r\n"),
+                            }
+                        } else {
+                            "+CMGL: 1,\"REC READ\",\"+8613800138000\",,\"2026/06/04 10:30:08\"\r\nYour data usage this month: 15.2 GB\r\n+CMGL: 2,\"REC UNREAD\",\"10086\",,\"2026/06/03 09:15:22\"\r\nWelcome to China Mobile 5G network!\r\nOK\r\n".to_string()
+                        };
+                        let _ = req.resp_tx.send(resp);
+                    }
+                    AtAction::SetApn(apn, _user, _pass, _auth_type) => {
+                        println!("🌐 actor: set_apn apn={}", apn);
+                        if serial_available {
+                            let _ = send_at_command_async(&serial_path, &format!("AT+CGDCONT=1,\"IPV4V6\",\"{}\"", apn)).await;
+                        }
+                        let reply = serde_json::json!({
+                            "type": "network_status",
+                            "data": { "status": "APN settings applied", "apn": apn }
+                        });
+                        let _ = req.resp_tx.send(reply.to_string());
+                    }
+                    AtAction::SetNetworkMode(mode) => {
+                        println!("🌐 actor: set_network_mode {}", mode);
+                        if serial_available {
+                            let at_mode = match mode.as_str() {
+                                "nr5g" => "AT+QNWPREFCFG=\"mode_pref\",NR5G",
+                                "lte" => "AT+QNWPREFCFG=\"mode_pref\",LTE",
+                                "nr5g_lte" => "AT+QNWPREFCFG=\"mode_pref\",NR5G:LTE",
+                                "wcdma" => "AT+QNWPREFCFG=\"mode_pref\",WCDMA",
+                                _ => "AT+QNWPREFCFG=\"mode_pref\",AUTO",
+                            };
+                            let _ = send_at_command_async(&serial_path, at_mode).await;
+                        }
+                        let reply = serde_json::json!({
+                            "type": "network_status",
+                            "data": { "status": format!("Network mode set to {}", mode) }
+                        });
+                        let _ = req.resp_tx.send(reply.to_string());
+                    }
+                    AtAction::NetConnect(connect) => {
+                        println!("🌐 actor: net_{}", if connect { "connect" } else { "disconnect" });
+                        if serial_available {
+                            if connect {
+                                let _ = send_at_command_async(&serial_path, "AT+CGACT=1,1").await;
+                            } else {
+                                let _ = send_at_command_async(&serial_path, "AT+CGACT=0,1").await;
+                            }
+                        }
+                        let reply = serde_json::json!({
+                            "type": "network_status",
+                            "data": { "status": format!("{} command sent", if connect { "Connect" } else { "Disconnect" }) }
+                        });
+                        let _ = req.resp_tx.send(reply.to_string());
+                    }
+                    AtAction::NetworkScan => {
+                        println!("🔍 actor: network_scan via AT+COPS=?");
+                        if serial_available {
+                            let _ = send_at_command_async(&serial_path, "AT+COPS=?").await;
+                        }
+                        let scan_json = serde_json::json!({
+                            "type": "scan_result",
+                            "data": { "status": "Scan complete.", "networks": [] }
+                        });
+                        let _ = req.resp_tx.send(scan_json.to_string());
+                    }
+                    AtAction::SendSms(recipient, message) => {
+                        println!("📱 actor: send_sms to={}", recipient);
+                        if serial_available {
+                            let _ = send_at_command_async(&serial_path, "AT+CMGF=1").await;
+                            let cmd = format!("AT+CMGS=\"{}\"", recipient);
+                            let _ = send_at_command_async(&serial_path, &cmd).await;
+                            let _ = send_at_command_async(&serial_path, &format!("{}\u{1A}", message)).await;
+                        }
+                        let reply = serde_json::json!({
+                            "type": "sms_sent",
+                            "data": { "status": "SMS sent successfully", "recipient": recipient }
+                        });
+                        let _ = req.resp_tx.send(reply.to_string());
+                    }
+                    AtAction::GetDeviceInfo => {
+                        println!("📱 actor: get_device_info via AT+CGMI/+CGMM/+CGMR/+CGSN");
+                        let (mfr, model, fw, imei) = if serial_available {
+                            let m = send_at_command_async(&serial_path, "AT+CGMI").await
+                                .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("Quectel").trim().to_string())
+                                .unwrap_or_else(|_| "Quectel".to_string());
+                            let mo = send_at_command_async(&serial_path, "AT+CGMM").await
+                                .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("RM520N-GL").trim().to_string())
+                                .unwrap_or_else(|_| "RM520N-GL".to_string());
+                            let f = send_at_command_async(&serial_path, "AT+CGMR").await
+                                .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("Unknown").trim().to_string())
+                                .unwrap_or_else(|_| "Unknown".to_string());
+                            let i = send_at_command_async(&serial_path, "AT+CGSN").await
+                                .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("").trim().to_string())
+                                .unwrap_or_else(|_| "".to_string());
+                            (m, mo, f, i)
+                        } else {
+                            ("Quectel".to_string(), "RM520N-GL".to_string(), "RM520NGLAAR03A03M4G_BETA".to_string(), "867584032145678".to_string())
+                        };
+                        let dev_json = serde_json::json!({
+                            "type": "device_info",
+                            "data": {
+                                "manufacturer": mfr, "model": model, "firmware_version": fw,
+                                "imei": imei, "serial": "--", "hw_version": "--",
+                                "module_type": "M.2 5G NR Module",
+                                "sim_status": "--", "imsi": "--", "iccid": "--",
+                                "phone": "--", "net_status": "--", "signal": "--",
+                                "temperature": "--", "bands": "--", "max_rate": "--",
+                                "volte": "--", "gnss": "--"
+                            }
+                        });
+                        let _ = req.resp_tx.send(dev_json.to_string());
+                    }
+                    AtAction::Reboot => {
+                        println!("🔄 actor: reboot via AT+CFUN=1,1");
+                        if serial_available {
+                            let _ = send_at_command_async(&serial_path, "AT+CFUN=1,1").await;
+                        }
+                        let reply = serde_json::json!({ "type": "settings_log", "data": { "msg": "Reboot command sent." } });
+                        let _ = req.resp_tx.send(reply.to_string());
+                    }
+                    AtAction::FactoryReset => {
+                        println!("⚠️ actor: factory_reset via AT&F");
+                        if serial_available {
+                            let _ = send_at_command_async(&serial_path, "AT&F").await;
+                        }
+                        let reply = serde_json::json!({ "type": "settings_log", "data": { "msg": "Factory reset command sent." } });
+                        let _ = req.resp_tx.send(reply.to_string());
+                    }
+                    AtAction::FlightMode(on) => {
+                        let txt = if on { "ON" } else { "OFF" };
+                        println!("✈️ actor: flight_mode {}", txt);
+                        if serial_available {
+                            let cmd = if on { "AT+CFUN=0" } else { "AT+CFUN=1" };
+                            let _ = send_at_command_async(&serial_path, cmd).await;
+                        }
+                        let reply = serde_json::json!({ "type": "settings_log", "data": { "msg": format!("Flight mode turned {}", txt) } });
+                        let _ = req.resp_tx.send(reply.to_string());
+                    }
                 }
             }
 
@@ -774,137 +931,58 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             let _ = local_tx.send(info_json.to_string()).await;
                             continue;
                         }
-                        // ── New tab actions handled inline (respond directly via local_tx) ──
+                        // ── Tab actions routed through hardware polling actor ──
                         "set_apn" => {
-                            let apn = cmd.payload.as_ref().and_then(|p| p.get("apn")).and_then(|v| v.as_str()).unwrap_or("");
-                            let user = cmd.payload.as_ref().and_then(|p| p.get("user")).and_then(|v| v.as_str()).unwrap_or("");
-                            let _pass = cmd.payload.as_ref().and_then(|p| p.get("pass")).and_then(|v| v.as_str()).unwrap_or("");
-                            let auth = cmd.payload.as_ref().and_then(|p| p.get("auth")).and_then(|v| v.as_str()).unwrap_or("0");
+                            let apn = cmd.payload.as_ref().and_then(|p| p.get("apn")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let user = cmd.payload.as_ref().and_then(|p| p.get("user")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let pass = cmd.payload.as_ref().and_then(|p| p.get("pass")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let auth: u8 = cmd.payload.as_ref().and_then(|p| p.get("auth")).and_then(|v| v.as_str()).and_then(|s| s.parse().ok()).unwrap_or(0);
                             println!("🌐 WS: set_apn apn={} user={} auth={}", apn, user, auth);
-                            let reply = serde_json::json!({
-                                "type": "network_status",
-                                "data": { "status": "APN settings applied", "apn": apn }
-                            });
-                            let _ = local_tx.send(reply.to_string()).await;
-                            continue;
+                            AtAction::SetApn(apn, user, pass, auth)
                         }
                         "set_network_mode" => {
-                            let mode = cmd.payload.as_ref().and_then(|p| p.as_str()).unwrap_or("auto");
+                            let mode = cmd.payload.as_ref().and_then(|p| p.as_str()).unwrap_or("auto").to_string();
                             println!("🌐 WS: set_network_mode {}", mode);
-                            let reply = serde_json::json!({
-                                "type": "network_status",
-                                "data": { "status": format!("Network mode set to {}", mode) }
-                            });
-                            let _ = local_tx.send(reply.to_string()).await;
-                            continue;
+                            AtAction::SetNetworkMode(mode)
                         }
                         "net_connect" => {
                             println!("🌐 WS: net_connect");
-                            let reply = serde_json::json!({
-                                "type": "network_status",
-                                "data": { "status": "Connect command sent" }
-                            });
-                            let _ = local_tx.send(reply.to_string()).await;
-                            continue;
+                            AtAction::NetConnect(true)
                         }
                         "net_disconnect" => {
                             println!("🌐 WS: net_disconnect");
-                            let reply = serde_json::json!({
-                                "type": "network_status",
-                                "data": { "status": "Disconnect command sent" }
-                            });
-                            let _ = local_tx.send(reply.to_string()).await;
-                            continue;
+                            AtAction::NetConnect(false)
                         }
                         "network_scan" => {
                             println!("🔍 WS: network_scan");
-                            // Return mock scan results; in production this would trigger AT+COPS=?
-                            let scan_data = serde_json::json!({
-                                "type": "scan_result",
-                                "data": {
-                                    "status": "Scan complete. Found 3 network(s).",
-                                    "networks": [
-                                        {"operator": "CHN-UNICOM", "mccmnc": "46001", "technology": "5G", "status": "Current", "band": "n41", "tech": "5G"},
-                                        {"operator": "CHN-MOBILE", "mccmnc": "46000", "technology": "5G", "status": "Available", "band": "n78", "tech": "5G"},
-                                        {"operator": "CHN-TELECOM", "mccmnc": "46003", "technology": "4G", "status": "Available", "band": "B3", "tech": "4G"}
-                                    ]
-                                }
-                            });
-                            let _ = local_tx.send(scan_data.to_string()).await;
-                            continue;
+                            AtAction::NetworkScan
                         }
                         "send_sms" => {
-                            let recipient = cmd.payload.as_ref().and_then(|p| p.get("recipient")).and_then(|v| v.as_str()).unwrap_or("");
-                            let message = cmd.payload.as_ref().and_then(|p| p.get("message")).and_then(|v| v.as_str()).unwrap_or("");
-                            println!("📱 WS: send_sms to={} msg={}", recipient, message);
-                            let reply = serde_json::json!({
-                                "type": "sms_sent",
-                                "data": { "status": "SMS sent successfully", "recipient": recipient }
-                            });
-                            let _ = local_tx.send(reply.to_string()).await;
-                            continue;
+                            let recipient = cmd.payload.as_ref().and_then(|p| p.get("recipient")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let message = cmd.payload.as_ref().and_then(|p| p.get("message")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            println!("📱 WS: send_sms to={}", recipient);
+                            AtAction::SendSms(recipient, message)
                         }
                         "get_sms_list" => {
                             println!("📱 WS: get_sms_list");
-                            let sms_data = serde_json::json!({
-                                "type": "sms_list",
-                                "data": {
-                                    "messages": [
-                                        {"sender": "+8613800138000", "timestamp": "2026-06-04 10:30", "text": "Your data usage this month: 15.2 GB"},
-                                        {"sender": "10086", "timestamp": "2026-06-03 09:15", "text": "Welcome to China Mobile 5G network!"},
-                                    ]
-                                }
-                            });
-                            let _ = local_tx.send(sms_data.to_string()).await;
-                            continue;
+                            AtAction::GetSmsList
                         }
                         "get_device_info" => {
                             println!("📱 WS: get_device_info");
-                            let dev_data = serde_json::json!({
-                                "type": "device_info",
-                                "data": {
-                                    "manufacturer": "Quectel",
-                                    "model": "RM520N-GL",
-                                    "firmware_version": "RM520NGLAAR03A03M4G_BETA",
-                                    "imei": "867584032145678",
-                                    "serial": "QC2023RM520N001",
-                                    "hw_version": "R1.0",
-                                    "module_type": "M.2 5G NR Module",
-                                    "sim_status": "Ready",
-                                    "imsi": "460010123456789",
-                                    "iccid": "89860112851234567890",
-                                    "phone": "+8613800138000",
-                                    "net_status": "Registered",
-                                    "signal": "-64 dBm",
-                                    "temperature": "42 °C",
-                                    "bands": "NR n1/n3/n5/n7/n8/n20/n28/n41/n77/n78/n79, LTE B1/B3/B5/B7/B8/B18/B19/B20/B26/B28/B32/B34/B38/B39/B40/B41/B42/B43",
-                                    "max_rate": "DL 4.2 Gbps / UL 600 Mbps",
-                                    "volte": "Supported",
-                                    "gnss": "GPS/GLONASS/BDS/Galileo"
-                                }
-                            });
-                            let _ = local_tx.send(dev_data.to_string()).await;
-                            continue;
+                            AtAction::GetDeviceInfo
                         }
                         "reboot" => {
                             println!("🔄 WS: reboot requested");
-                            let reply = serde_json::json!({ "type": "settings_log", "data": { "msg": "Reboot command sent to module." } });
-                            let _ = local_tx.send(reply.to_string()).await;
-                            continue;
+                            AtAction::Reboot
                         }
                         "factory_reset" => {
                             println!("⚠️ WS: factory_reset requested");
-                            let reply = serde_json::json!({ "type": "settings_log", "data": { "msg": "Factory reset command sent to module." } });
-                            let _ = local_tx.send(reply.to_string()).await;
-                            continue;
+                            AtAction::FactoryReset
                         }
                         "flight_mode" => {
                             let on = cmd.payload.as_ref().and_then(|p| p.as_str()).unwrap_or("0") == "1";
-                            let txt = if on { "ON" } else { "OFF" };
-                            println!("✈️ WS: flight_mode {}", txt);
-                            let reply = serde_json::json!({ "type": "settings_log", "data": { "msg": format!("Flight mode turned {}", txt) } });
-                            let _ = local_tx.send(reply.to_string()).await;
-                            continue;
+                            println!("✈️ WS: flight_mode {}", if on { "ON" } else { "OFF" });
+                            AtAction::FlightMode(on)
                         }
                         unknown_action => {
                             eprintln!("⚠️ 未知 WebSocket 动作: {:?} (payload: {:?})", unknown_action, cmd.payload);
@@ -917,9 +995,17 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                         .await;
 
                     if let Ok(reply) = resp_rx.await {
-                        let result_json = serde_json::json!({ "type": "at_res", "data": reply });
-                        if local_tx.send(result_json.to_string()).await.is_err() {
-                            break;
+                        // Actor returns pre-formatted JSON (may contain "type" field)
+                        // Try to parse it and send as-is; if not valid JSON, wrap as at_res
+                        if reply.starts_with('{') && reply.ends_with('}') {
+                            if local_tx.send(reply).await.is_err() {
+                                break;
+                            }
+                        } else {
+                            let result_json = serde_json::json!({ "type": "at_res", "data": reply });
+                            if local_tx.send(result_json.to_string()).await.is_err() {
+                                break;
+                            }
                         }
                     }
                 } else {

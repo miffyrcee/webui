@@ -160,3 +160,13 @@
 - **涉及文件**:
   - `src/main.rs`
   - `CLINE_HISTORY.md`
+
+## 2026-06-03 23:00 — 修复 O_NONBLOCK 模式 write 返回 EBUSY 导致所有 AT 命令失败
+- **问题**: `open_serial()` 以 `O_NONBLOCK` 打开 `/dev/smd11` 后，`write_all()` 使用 `std::fs::File::write_all()` 同步写入，立即返回 `Resource busy (EBUSY, os error 16)`，导致所有 AT 命令（ATE0, AT, AT+CGMR 等）全部失败
+- **根因**: `O_NONBLOCK` 设备的 write 操作在内核层可能因流控/资源竞争返回 EBUSY，原有的 `write_all()` 将其视为硬错误直接返回失败，没有重试机制
+- **修改内容**:
+  - `SerialHandle::write_all()` 从同步 `f.write_all()` 改为异步循环：逐块 `f.write()` 写入，遇到 `WouldBlock` 或 `EBUSY` 时 `sleep(10ms)` 重试，5s 超时
+  - 相应在 `send_at_command_async()` 中 `write_all()` 调用后面补上 `.await`
+- **涉及文件**:
+  - `src/main.rs`
+  - `CLINE_HISTORY.md`

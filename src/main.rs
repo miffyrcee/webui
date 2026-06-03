@@ -36,10 +36,34 @@ enum SerialHandle {
 }
 
 impl SerialHandle {
-    /// 同步写入数据
-    fn write_all(&mut self, buf: &[u8]) -> Result<(), String> {
+    /// 带重试和超时的写入（O_NONBLOCK 模式下 write 可能返回 WouldBlock/EBUSY）
+    async fn write_all(&mut self, buf: &[u8]) -> Result<(), String> {
         match self {
-            SerialHandle::Raw(f) => f.write_all(buf).map_err(|e| format!("写失败: {}", e)),
+            SerialHandle::Raw(f) => {
+                let start = std::time::Instant::now();
+                let timeout_dur = Duration::from_secs(5);
+                let mut offset = 0usize;
+                loop {
+                    match f.write(&buf[offset..]) {
+                        Ok(n) => {
+                            offset += n;
+                            if offset >= buf.len() {
+                                return Ok(());
+                            }
+                        }
+                        Err(ref e)
+                            if e.kind() == std::io::ErrorKind::WouldBlock
+                                || e.raw_os_error() == Some(16 /* EBUSY */) =>
+                        {
+                            if start.elapsed() >= timeout_dur {
+                                return Err(format!("写超时({}ms)", timeout_dur.as_millis()));
+                            }
+                            sleep(Duration::from_millis(10)).await;
+                        }
+                        Err(e) => return Err(format!("写失败: {}", e)),
+                    }
+                }
+            }
         }
     }
 
@@ -497,9 +521,10 @@ async fn send_at_command_async(serial: &mut SerialHandle, cmd: &str) -> Result<S
     let start = std::time::Instant::now();
     let full_cmd = format!("{}\r\n", cmd);
 
-    // 转换为同步写入
+    // 写入 AT 命令（带超时和重试）
     serial
         .write_all(full_cmd.as_bytes())
+        .await
         .map_err(|e| format!("写失败: {}", e))?;
     serial
         .flush()

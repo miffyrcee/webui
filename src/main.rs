@@ -25,7 +25,6 @@ use at::parser::{parse_cgpaddr, parse_combined_response, parse_qcainfo, parse_qe
 use at::utils::{decode_hex_ucs2, format_bytes};
 
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
-const IO_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 串口句柄：RawFile（SMD设备、socat PTY桥接等非TTY设备）
 enum SerialHandle {
@@ -155,59 +154,6 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     println!("⚡ 移远 5G 终端 WebUI 服务端已就绪: http://0.0.0.0:3000");
     axum::serve(listener, app).await.unwrap();
-}
-
-/// 带短超时的串口读取（用于清空缓冲区，不依赖 IO_TIMEOUT 的 10s 超时）
-async fn read_with_short_timeout(
-    serial: &mut SerialHandle,
-    buf: &mut [u8],
-) -> Result<usize, String> {
-    match serial {
-        SerialHandle::Raw(f) => match timeout(Duration::from_millis(300), f.read(buf)).await {
-            Ok(Ok(n)) => Ok(n),
-            Ok(Err(e)) => Err(format!("读错误: {}", e)),
-            Err(_) => Err("读超时(300ms)".to_string()),
-        },
-    }
-}
-
-/// 清空串口缓冲区：读取并丢弃任何残留数据（如开机日志、前次会话残留）
-async fn drain_serial_buffer(serial: &mut SerialHandle) {
-    let mut buf = [0u8; 1024];
-    let mut total_drained = 0u32;
-    let mut first_chunk = String::new();
-    loop {
-        match read_with_short_timeout(serial, &mut buf).await {
-            Ok(n) if n > 0 => {
-                total_drained += n as u32;
-                if first_chunk.is_empty() && n > 0 {
-                    // 记录第一段残留数据的 ASCII 内容用于诊断
-                    let readable: String = buf[..n]
-                        .iter()
-                        .map(|&b| {
-                            if b.is_ascii_graphic() || b == b' ' || b == b'\n' || b == b'\r' {
-                                b as char
-                            } else {
-                                '.'
-                            }
-                        })
-                        .collect();
-                    first_chunk = readable;
-                }
-            }
-            _ => break,
-        }
-        // 防止无限循环（最多丢弃 8KB 残留数据）
-        if total_drained > 8192 {
-            break;
-        }
-    }
-    if total_drained > 0 {
-        println!(
-            "🔄 清空了串口缓冲区: {} 字节残留数据 (首段: {:?})",
-            total_drained, first_chunk
-        );
-    }
 }
 
 /// 尝试打开串口，返回 Some(SerialHandle) 或 None（模拟模式）
@@ -568,7 +514,6 @@ async fn send_at_command_async(path: &str, cmd: &str) -> Result<String, String> 
     let mut serial = open_serial(path)
         .await
         .ok_or_else(|| "无法打开串口".to_string())?;
-    drain_serial_buffer(&mut serial).await;
     send_at_command_inner(&mut serial, cmd).await
     // serial 在此 drop → 串口关闭
 }

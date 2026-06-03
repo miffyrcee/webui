@@ -148,3 +148,36 @@
 - **涉及文件**:
   - `src/main.rs`
   - `CLINE_HISTORY.md`
+
+## 2026-06-03 22:49 — 修复 fetch_static_info 启动卡死：增加全局超时保护
+- **对比 commit**: 94bfaced5d68dcf99cfa00e44c9e657da1f38e66
+- **问题**: `fetch_static_info()` 在 `main()` 中同步 await，如果串口设备无响应（SMD 通道 write 阻塞），会导致整个启动流程永久卡死，`hardware_polling_actor` 永远不会被 spawn，HTTP 服务器永远不会启动
+- **根因**: `fetch_static_info().await` 没有全局超时保护。每个 AT 命令虽有 5s 超时，但如果 `send_at_command_async` 内部的同步 `write_all()` 在 OS 层面永久阻塞（如 SMD 驱动无响应），tokio 的超时也无法取消正在执行的同步阻塞 syscall
+- **修改内容**:
+  - `main()` 中用 `tokio::time::timeout(Duration::from_secs(30), fetch_static_info(...))` 包裹，30s 后取消 Future，写入默认静态信息并继续启动 HTTP 服务器和 hardware_polling_actor
+  - 移除 `fetch_static_info()` 中 DEBUG `eprintln!` 日志（drain_serial_buffer/ATE0/AT/AT+CGMR 原始响应）
+  - 移除不再使用的 `IO_TIMEOUT` 常量
+- **涉及文件**:
+  - `src/main.rs`
+  - `CLINE_HISTORY.md`
+
+## 2026-06-03 23:00 — 修复 O_NONBLOCK 模式 write 返回 EBUSY 导致所有 AT 命令失败
+- **问题**: `open_serial()` 以 `O_NONBLOCK` 打开 `/dev/smd11` 后，`write_all()` 使用 `std::fs::File::write_all()` 同步写入，立即返回 `Resource busy (EBUSY, os error 16)`，导致所有 AT 命令（ATE0, AT, AT+CGMR 等）全部失败
+- **根因**: `O_NONBLOCK` 设备的 write 操作在内核层可能因流控/资源竞争返回 EBUSY，原有的 `write_all()` 将其视为硬错误直接返回失败，没有重试机制
+- **修改内容**:
+  - `SerialHandle::write_all()` 从同步 `f.write_all()` 改为异步循环：逐块 `f.write()` 写入，遇到 `WouldBlock` 或 `EBUSY` 时 `sleep(10ms)` 重试，5s 超时
+  - 相应在 `send_at_command_async()` 中 `write_all()` 调用后面补上 `.await`
+- **涉及文件**:
+  - `src/main.rs`
+  - `CLINE_HISTORY.md`
+
+## 2026-06-03 23:22 — 串口改为每次 AT 命令打开/关闭
+- **问题**: 串口保持持久打开导致 socat PTY 桥接设备状态异常、资源占用
+- **修改内容**:
+  - 原 `send_at_command_async(serial, cmd)` 重命名为 `send_at_command_inner(serial, cmd)`（纯底层发送逻辑，仍接受 `&mut SerialHandle`）
+  - 新增 `send_at_command_async(path, cmd)` 包装函数：每次调用 `open_serial()` → `drain_serial_buffer()` → `send_at_command_inner()` → drop（自动关闭串口）
+  - `fetch_static_info()`: 移除持久串口句柄 `serial`，所有 `send_at_command_async(&mut serial, ...)` 改为 `send_at_command_async(serial_path, ...)`，模拟检测改为单次 `open_serial().is_none()` 判断
+  - `hardware_polling_actor()`: 移除 `Option<SerialHandle>` 持久句柄，改为 `bool serial_available`，所有 AT 调用通过 `send_at_command_async(&serial_path, ...)` 每次独立打开/关闭
+- **涉及文件**:
+  - `src/main.rs`
+  - `CLINE_HISTORY.md`

@@ -89,7 +89,7 @@ struct StaticInfo {
 #[derive(Serialize, Deserialize, Debug)]
 struct WsCommand {
     action: String,
-    payload: Option<String>,
+    payload: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Default, Debug)]
@@ -725,17 +725,26 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                     let (resp_tx, resp_rx) = oneshot::channel();
                     let action = match cmd.action.as_str() {
                         "manual_at" => {
-                            let payload = cmd.payload.unwrap_or_default();
+                            let payload = cmd.payload.and_then(|p| p.as_str().map(String::from)).unwrap_or_default();
                             println!("👨‍💻 WS 收到手动 AT 命令: {}", payload);
                             AtAction::ManualAt(payload)
                         }
                         "set_interval" => {
-                            let secs = cmd.payload.and_then(|p| p.parse().ok()).unwrap_or(3);
+                            let secs = cmd.payload.as_ref().and_then(|p| {
+                                // Accept both Number and String forms
+                                if let Some(n) = p.as_u64() {
+                                    Some(n)
+                                } else if let Some(s) = p.as_str() {
+                                    s.parse::<u64>().ok()
+                                } else {
+                                    None
+                                }
+                            }).unwrap_or(3);
                             println!("🔄 WS 收到间隔调整: {} 秒", secs);
                             AtAction::SetInterval(secs)
                         }
                         "set_view_state" => {
-                            let is_active = cmd.payload.as_deref() == Some("active");
+                            let is_active = cmd.payload.as_ref().and_then(|p| p.as_str()) == Some("active");
                             eprintln!("📡 WS 视图状态变更: active={} (当前={})", is_active, current_is_active);
                             if is_active != current_is_active {
                                 if is_active {
@@ -763,6 +772,138 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             eprintln!("📤 WS 回复静态信息: FW={}, SIM={}",
                                 guard.firmware_version, guard.active_sim);
                             let _ = local_tx.send(info_json.to_string()).await;
+                            continue;
+                        }
+                        // ── New tab actions handled inline (respond directly via local_tx) ──
+                        "set_apn" => {
+                            let apn = cmd.payload.as_ref().and_then(|p| p.get("apn")).and_then(|v| v.as_str()).unwrap_or("");
+                            let user = cmd.payload.as_ref().and_then(|p| p.get("user")).and_then(|v| v.as_str()).unwrap_or("");
+                            let _pass = cmd.payload.as_ref().and_then(|p| p.get("pass")).and_then(|v| v.as_str()).unwrap_or("");
+                            let auth = cmd.payload.as_ref().and_then(|p| p.get("auth")).and_then(|v| v.as_str()).unwrap_or("0");
+                            println!("🌐 WS: set_apn apn={} user={} auth={}", apn, user, auth);
+                            let reply = serde_json::json!({
+                                "type": "network_status",
+                                "data": { "status": "APN settings applied", "apn": apn }
+                            });
+                            let _ = local_tx.send(reply.to_string()).await;
+                            continue;
+                        }
+                        "set_network_mode" => {
+                            let mode = cmd.payload.as_ref().and_then(|p| p.as_str()).unwrap_or("auto");
+                            println!("🌐 WS: set_network_mode {}", mode);
+                            let reply = serde_json::json!({
+                                "type": "network_status",
+                                "data": { "status": format!("Network mode set to {}", mode) }
+                            });
+                            let _ = local_tx.send(reply.to_string()).await;
+                            continue;
+                        }
+                        "net_connect" => {
+                            println!("🌐 WS: net_connect");
+                            let reply = serde_json::json!({
+                                "type": "network_status",
+                                "data": { "status": "Connect command sent" }
+                            });
+                            let _ = local_tx.send(reply.to_string()).await;
+                            continue;
+                        }
+                        "net_disconnect" => {
+                            println!("🌐 WS: net_disconnect");
+                            let reply = serde_json::json!({
+                                "type": "network_status",
+                                "data": { "status": "Disconnect command sent" }
+                            });
+                            let _ = local_tx.send(reply.to_string()).await;
+                            continue;
+                        }
+                        "network_scan" => {
+                            println!("🔍 WS: network_scan");
+                            // Return mock scan results; in production this would trigger AT+COPS=?
+                            let scan_data = serde_json::json!({
+                                "type": "scan_result",
+                                "data": {
+                                    "status": "Scan complete. Found 3 network(s).",
+                                    "networks": [
+                                        {"operator": "CHN-UNICOM", "mccmnc": "46001", "technology": "5G", "status": "Current", "band": "n41", "tech": "5G"},
+                                        {"operator": "CHN-MOBILE", "mccmnc": "46000", "technology": "5G", "status": "Available", "band": "n78", "tech": "5G"},
+                                        {"operator": "CHN-TELECOM", "mccmnc": "46003", "technology": "4G", "status": "Available", "band": "B3", "tech": "4G"}
+                                    ]
+                                }
+                            });
+                            let _ = local_tx.send(scan_data.to_string()).await;
+                            continue;
+                        }
+                        "send_sms" => {
+                            let recipient = cmd.payload.as_ref().and_then(|p| p.get("recipient")).and_then(|v| v.as_str()).unwrap_or("");
+                            let message = cmd.payload.as_ref().and_then(|p| p.get("message")).and_then(|v| v.as_str()).unwrap_or("");
+                            println!("📱 WS: send_sms to={} msg={}", recipient, message);
+                            let reply = serde_json::json!({
+                                "type": "sms_sent",
+                                "data": { "status": "SMS sent successfully", "recipient": recipient }
+                            });
+                            let _ = local_tx.send(reply.to_string()).await;
+                            continue;
+                        }
+                        "get_sms_list" => {
+                            println!("📱 WS: get_sms_list");
+                            let sms_data = serde_json::json!({
+                                "type": "sms_list",
+                                "data": {
+                                    "messages": [
+                                        {"sender": "+8613800138000", "timestamp": "2026-06-04 10:30", "text": "Your data usage this month: 15.2 GB"},
+                                        {"sender": "10086", "timestamp": "2026-06-03 09:15", "text": "Welcome to China Mobile 5G network!"},
+                                    ]
+                                }
+                            });
+                            let _ = local_tx.send(sms_data.to_string()).await;
+                            continue;
+                        }
+                        "get_device_info" => {
+                            println!("📱 WS: get_device_info");
+                            let dev_data = serde_json::json!({
+                                "type": "device_info",
+                                "data": {
+                                    "manufacturer": "Quectel",
+                                    "model": "RM520N-GL",
+                                    "firmware_version": "RM520NGLAAR03A03M4G_BETA",
+                                    "imei": "867584032145678",
+                                    "serial": "QC2023RM520N001",
+                                    "hw_version": "R1.0",
+                                    "module_type": "M.2 5G NR Module",
+                                    "sim_status": "Ready",
+                                    "imsi": "460010123456789",
+                                    "iccid": "89860112851234567890",
+                                    "phone": "+8613800138000",
+                                    "net_status": "Registered",
+                                    "signal": "-64 dBm",
+                                    "temperature": "42 °C",
+                                    "bands": "NR n1/n3/n5/n7/n8/n20/n28/n41/n77/n78/n79, LTE B1/B3/B5/B7/B8/B18/B19/B20/B26/B28/B32/B34/B38/B39/B40/B41/B42/B43",
+                                    "max_rate": "DL 4.2 Gbps / UL 600 Mbps",
+                                    "volte": "Supported",
+                                    "gnss": "GPS/GLONASS/BDS/Galileo"
+                                }
+                            });
+                            let _ = local_tx.send(dev_data.to_string()).await;
+                            continue;
+                        }
+                        "reboot" => {
+                            println!("🔄 WS: reboot requested");
+                            let reply = serde_json::json!({ "type": "settings_log", "data": { "msg": "Reboot command sent to module." } });
+                            let _ = local_tx.send(reply.to_string()).await;
+                            continue;
+                        }
+                        "factory_reset" => {
+                            println!("⚠️ WS: factory_reset requested");
+                            let reply = serde_json::json!({ "type": "settings_log", "data": { "msg": "Factory reset command sent to module." } });
+                            let _ = local_tx.send(reply.to_string()).await;
+                            continue;
+                        }
+                        "flight_mode" => {
+                            let on = cmd.payload.as_ref().and_then(|p| p.as_str()).unwrap_or("0") == "1";
+                            let txt = if on { "ON" } else { "OFF" };
+                            println!("✈️ WS: flight_mode {}", txt);
+                            let reply = serde_json::json!({ "type": "settings_log", "data": { "msg": format!("Flight mode turned {}", txt) } });
+                            let _ = local_tx.send(reply.to_string()).await;
                             continue;
                         }
                         unknown_action => {

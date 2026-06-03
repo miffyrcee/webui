@@ -12,7 +12,7 @@
 
     <div class="max-w-7xl mx-auto space-y-6">
 
-        <!-- 头部标题区（不再使用模板变量） -->
+        <!-- 头部标题区 -->
         <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-brandBorder gap-2">
             <div class="flex items-center space-x-3">
                 <div class="relative">
@@ -27,11 +27,21 @@
         </header>
 
         <!-- Tab 导航 -->
-        <div class="flex space-x-1 bg-brandCard/40 rounded-lg p-1 border border-brandBorder w-fit">
+        <div class="flex space-x-1 bg-brandCard/40 rounded-lg p-1 border border-brandBorder overflow-x-auto scrollbar-thin w-full">
             <button id="tab_dashboard" onclick="switchTab('dashboard')"
-                class="px-4 py-2 text-sm rounded-md font-medium transition-all bg-emerald-600 text-white shadow-lg">Dashboard</button>
-            <button id="tab_at" onclick="switchTab('at')"
-                class="px-4 py-2 text-sm rounded-md font-medium transition-all text-brandMuted hover:text-white hover:bg-brandCard/60">AT Terminal</button>
+                class="tab-btn px-3 py-2 text-xs sm:text-sm rounded-md font-medium transition-all bg-emerald-600 text-white shadow-lg whitespace-nowrap">Dashboard</button>
+            <button id="tab_network" onclick="switchTab('network')"
+                class="tab-btn px-3 py-2 text-xs sm:text-sm rounded-md font-medium transition-all text-brandMuted hover:text-white hover:bg-brandCard/60 whitespace-nowrap">Simple Network</button>
+            <button id="tab_scan" onclick="switchTab('scan')"
+                class="tab-btn px-3 py-2 text-xs sm:text-sm rounded-md font-medium transition-all text-brandMuted hover:text-white hover:bg-brandCard/60 whitespace-nowrap">Simple Scan</button>
+            <button id="tab_settings" onclick="switchTab('settings')"
+                class="tab-btn px-3 py-2 text-xs sm:text-sm rounded-md font-medium transition-all text-brandMuted hover:text-white hover:bg-brandCard/60 whitespace-nowrap">Simple Settings</button>
+            <button id="tab_sms" onclick="switchTab('sms')"
+                class="tab-btn px-3 py-2 text-xs sm:text-sm rounded-md font-medium transition-all text-brandMuted hover:text-white hover:bg-brandCard/60 whitespace-nowrap">SMS</button>
+            <button id="tab_console" onclick="switchTab('console')"
+                class="tab-btn px-3 py-2 text-xs sm:text-sm rounded-md font-medium transition-all text-brandMuted hover:text-white hover:bg-brandCard/60 whitespace-nowrap">Console</button>
+            <button id="tab_device" onclick="switchTab('device')"
+                class="tab-btn px-3 py-2 text-xs sm:text-sm rounded-md font-medium transition-all text-brandMuted hover:text-white hover:bg-brandCard/60 whitespace-nowrap">Device Information</button>
         </div>
 
         <!-- Dashboard 面板 -->
@@ -181,36 +191,313 @@
             </div>
         </div>
 
-        <!-- AT Terminal 面板 -->
-        <div id="panel_at" class="hidden space-y-4">
+        <!-- Simple Network 面板 -->
+        <div id="panel_network" class="hidden space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                <!-- APN 配置 -->
+                <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                    <div class="p-4 border-b border-brandBorder">
+                        <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">APN Configuration</h2>
+                    </div>
+                    <div class="p-4 space-y-3">
+                        <div class="flex flex-col gap-1">
+                            <label class="text-xs text-brandMuted">APN</label>
+                            <input id="net_apn_input" type="text" placeholder="e.g. 3gnet"
+                                class="bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-xs text-brandMuted">Username</label>
+                            <input id="net_user_input" type="text" placeholder="(optional)"
+                                class="bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-xs text-brandMuted">Password</label>
+                            <input id="net_pass_input" type="password" placeholder="(optional)"
+                                class="bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-xs text-brandMuted">Auth Type</label>
+                            <select id="net_auth_select"
+                                class="bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                                <option value="0">NONE</option>
+                                <option value="1">PAP</option>
+                                <option value="2">CHAP</option>
+                                <option value="3">PAP or CHAP</option>
+                            </select>
+                        </div>
+                        <button id="net_apply_btn" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20 mt-2">Apply APN Settings</button>
+                    </div>
+                </div>
+
+                <!-- 网络模式 & 连接状态 -->
+                <div class="space-y-6">
+                    <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                        <div class="p-4 border-b border-brandBorder">
+                            <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Network Mode</h2>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <select id="net_mode_select"
+                                class="w-full bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                                <option value="auto">Automatic</option>
+                                <option value="nr5g">5G NR Only</option>
+                                <option value="lte">LTE Only</option>
+                                <option value="nr5g_lte">5G NR + LTE</option>
+                                <option value="wcdma">WCDMA Only</option>
+                            </select>
+                            <button id="net_mode_btn" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Set Network Mode</button>
+                        </div>
+                    </div>
+
+                    <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                        <div class="p-4 border-b border-brandBorder">
+                            <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Connection Control</h2>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <div class="flex space-x-3">
+                                <button id="net_connect_btn" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Connect</button>
+                                <button id="net_disconnect_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg">Disconnect</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                        <div class="p-4 border-b border-brandBorder">
+                            <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Connection Info</h2>
+                        </div>
+                        <div class="divide-y divide-brandBorder/50 font-mono text-sm">
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">Status</span><span id="net_conn_status">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">Current APN</span><span id="net_current_apn">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">IPv4</span><span id="net_ipv4" class="text-emerald-400">--</span></div>
+                            <div class="flex justify-between p-3"><span class="text-brandMuted">IPv6</span><span id="net_ipv6" class="text-emerald-400 text-xs break-all">--</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Simple Scan 面板 -->
+        <div id="panel_scan" class="hidden space-y-4">
+            <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                <div class="p-4 border-b border-brandBorder flex items-center justify-between">
+                    <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Network Scan</h2>
+                    <button id="scan_start_btn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 text-xs rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">
+                        <span id="scan_btn_text">Start Scan</span>
+                    </button>
+                </div>
+                <div id="scan_status" class="px-4 py-2 text-xs text-brandMuted font-mono bg-black/20 border-b border-brandBorder/40">
+                    Ready. Press "Start Scan" to search for available networks.
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm font-mono">
+                        <thead>
+                            <tr class="border-b border-brandBorder text-brandMuted text-xs uppercase tracking-wide">
+                                <th class="p-3 text-left">#</th>
+                                <th class="p-3 text-left">Operator</th>
+                                <th class="p-3 text-left">MCC/MNC</th>
+                                <th class="p-3 text-left">Technology</th>
+                                <th class="p-3 text-left">Status</th>
+                                <th class="p-3 text-left">Band</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scan_results_body">
+                            <tr>
+                                <td colspan="6" class="p-8 text-center text-brandMuted">No scan results yet.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Simple Settings 面板 -->
+        <div id="panel_settings" class="hidden space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                <!-- 系统设置 -->
+                <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                    <div class="p-4 border-b border-brandBorder">
+                        <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">System Settings</h2>
+                    </div>
+                    <div class="divide-y divide-brandBorder/50 font-mono text-sm">
+                        <div class="flex justify-between items-center p-3">
+                            <span class="text-brandMuted">Polling Interval</span>
+                            <div class="flex items-center space-x-2">
+                                <input id="settings_interval" type="number" min="3" max="60" value="3"
+                                    class="w-16 bg-[#12141a] border border-brandBorder text-xs rounded px-2 py-1 text-white text-center focus:outline-none focus:border-emerald-500">
+                                <span class="text-xs text-brandMuted">seconds</span>
+                            </div>
+                        </div>
+                        <div class="flex justify-between items-center p-3">
+                            <span class="text-brandMuted">Serial Port</span>
+                            <span id="settings_port" class="text-xs text-emerald-400">--</span>
+                        </div>
+                        <div class="flex justify-between items-center p-3">
+                            <span class="text-brandMuted">WebSocket</span>
+                            <span id="settings_ws_status" class="text-xs">--</span>
+                        </div>
+                        <div class="flex justify-between items-center p-3">
+                            <span class="text-brandMuted">Active Views</span>
+                            <span id="settings_views" class="text-xs">--</span>
+                        </div>
+                    </div>
+                    <div class="p-4 border-t border-brandBorder/60 bg-black/10">
+                        <button id="settings_apply_btn" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Apply Interval</button>
+                    </div>
+                </div>
+
+                <!-- 设备操作 -->
+                <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                    <div class="p-4 border-b border-brandBorder">
+                        <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Device Actions</h2>
+                    </div>
+                    <div class="p-4 space-y-3">
+                        <button id="settings_reboot_btn" class="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95">Reboot Module</button>
+                        <button id="settings_reset_btn" class="w-full bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95">Factory Reset</button>
+                        <button id="settings_flight_on_btn" class="w-full bg-brandCard/60 hover:bg-brandCard border border-brandBorder text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 mt-2">Flight Mode ON</button>
+                        <button id="settings_flight_off_btn" class="w-full bg-brandCard/60 hover:bg-brandCard border border-brandBorder text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95">Flight Mode OFF</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 日志区 -->
+            <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                <div class="p-4 border-b border-brandBorder">
+                    <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Settings Log</h2>
+                </div>
+                <div id="settings_log" class="p-4 font-mono text-xs text-green-400 bg-black/30 max-h-[200px] overflow-y-auto space-y-1">
+                    <div class="text-brandMuted">Settings panel ready.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SMS 面板 -->
+        <div id="panel_sms" class="hidden space-y-4">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <!-- 收件箱列表 -->
+                <div class="lg:col-span-1 bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden max-h-[600px]">
+                    <div class="p-4 border-b border-brandBorder flex items-center justify-between">
+                        <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Inbox</h2>
+                        <button id="sms_refresh_btn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3 py-1 text-xs rounded-lg transition-all active:scale-95">Refresh</button>
+                    </div>
+                    <div id="sms_list" class="flex-1 overflow-y-auto divide-y divide-brandBorder/30">
+                        <div class="p-4 text-center text-xs text-brandMuted">No messages.</div>
+                    </div>
+                </div>
+
+                <!-- 短信详情 / 发送 -->
+                <div class="lg:col-span-2 bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden max-h-[600px]">
+                    <div class="p-4 border-b border-brandBorder">
+                        <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Send SMS</h2>
+                    </div>
+                    <div class="p-4 space-y-3">
+                        <div class="flex flex-col gap-1">
+                            <label class="text-xs text-brandMuted">Recipient Number</label>
+                            <input id="sms_recipient" type="text" placeholder="+8613800138000"
+                                class="bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-xs text-brandMuted">Message (max 160 chars)</label>
+                            <textarea id="sms_message" rows="4" maxlength="160" placeholder="Type your message..."
+                                class="bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500 resize-none"></textarea>
+                            <div class="flex justify-between items-center">
+                                <span class="text-xs text-brandMuted">Characters: <span id="sms_char_count">0</span>/160</span>
+                            </div>
+                        </div>
+                        <button id="sms_send_btn" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Send SMS</button>
+                    </div>
+                    <div id="sms_send_status" class="px-4 pb-4 text-xs font-mono text-brandMuted"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Console 面板 (原 AT Terminal) -->
+        <div id="panel_console" class="hidden space-y-4">
             <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden min-h-[500px]">
                 <div class="p-4 border-b border-brandBorder">
-                    <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">AT Command Terminal</h2>
+                    <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">AT Command Console</h2>
                 </div>
                 <!-- 输出区域 -->
-                <div id="at_output" class="flex-1 p-4 font-mono text-xs text-green-400 bg-black/30 overflow-y-auto max-h-[500px] space-y-1 whitespace-pre-wrap">
-                    <div class="text-brandMuted">┌─ AT Terminal Ready ─────────────────────────────┐</div>
+                <div id="console_output" class="flex-1 p-4 font-mono text-xs text-green-400 bg-black/30 overflow-y-auto max-h-[500px] space-y-1 whitespace-pre-wrap">
+                    <div class="text-brandMuted">┌─ AT Console Ready ───────────────────────────────┐</div>
                     <div class="text-brandMuted">│ Type AT commands below and press Send or Enter. │</div>
                     <div class="text-brandMuted">└─────────────────────────────────────────────────┘</div>
                 </div>
                 <!-- 输入区域 -->
                 <div class="p-4 border-t border-brandBorder/60 bg-black/10 flex space-x-2">
-                    <input id="at_input" type="text" placeholder="AT+CGMI"
+                    <input id="console_input" type="text" placeholder="AT+CGMI"
                         class="flex-1 bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500"
                         autocomplete="off" spellcheck="false">
-                    <button id="at_send_btn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Send</button>
+                    <button id="console_send_btn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Send</button>
                 </div>
                 <!-- 快捷命令 -->
-                <div id="at_quick_btns" class="px-4 pb-4 pt-2 flex flex-wrap gap-2">
+                <div id="console_quick_btns" class="px-4 pb-4 pt-2 flex flex-wrap gap-2">
                     <span class="text-xs text-brandMuted self-center mr-1">Quick:</span>
-                    <button class="at-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+CGMI</button>
-                    <button class="at-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+CGSN</button>
-                    <button class="at-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+CSQ</button>
-                    <button class="at-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+COPS?</button>
-                    <button class="at-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+CGPADDR</button>
-                    <button class="at-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+QENG</button>
-                    <button class="at-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+CGDCONT?</button>
+                    <button class="console-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+CGMI</button>
+                    <button class="console-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+CGSN</button>
+                    <button class="console-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+CSQ</button>
+                    <button class="console-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+COPS?</button>
+                    <button class="console-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+CGPADDR</button>
+                    <button class="console-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+QENG</button>
+                    <button class="console-quick-btn text-xs bg-brandCard/60 hover:bg-brandCard border border-brandBorder rounded px-2 py-1 text-brandMuted hover:text-white transition-colors">AT+CGDCONT?</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- Device Information 面板 -->
+        <div id="panel_device" class="hidden space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                <!-- 设备基本信息 -->
+                <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                    <div class="p-4 border-b border-brandBorder">
+                        <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Device Identity</h2>
+                    </div>
+                    <div class="divide-y divide-brandBorder/50 font-mono text-sm">
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Manufacturer</span><span id="dev_manufacturer">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Model</span><span id="dev_model">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Firmware Version</span><span id="dev_firmware">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">IMEI</span><span id="dev_imei" class="text-xs">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Serial Number</span><span id="dev_serial">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Hardware Version</span><span id="dev_hw_ver">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Module Type</span><span id="dev_type">--</span></div>
+                    </div>
+                </div>
+
+                <!-- SIM & Network Info -->
+                <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                    <div class="p-4 border-b border-brandBorder">
+                        <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">SIM & Network</h2>
+                    </div>
+                    <div class="divide-y divide-brandBorder/50 font-mono text-sm">
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">SIM Status</span><span id="dev_sim_status">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">IMSI</span><span id="dev_imsi" class="text-xs">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">ICCID</span><span id="dev_iccid" class="text-xs">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Phone Number</span><span id="dev_phone">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Network Status</span><span id="dev_net_status">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Signal Quality</span><span id="dev_signal">--</span></div>
+                        <div class="flex justify-between p-3"><span class="text-brandMuted">Temperature</span><span id="dev_temp">--</span></div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- 能力信息 -->
+            <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                <div class="p-4 border-b border-brandBorder">
+                    <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Capabilities</h2>
+                </div>
+                <div class="divide-y divide-brandBorder/50 font-mono text-sm">
+                    <div class="flex justify-between p-3"><span class="text-brandMuted">Supported Bands</span><span id="dev_bands" class="text-xs text-right max-w-[400px]">--</span></div>
+                    <div class="flex justify-between p-3"><span class="text-brandMuted">Max Data Rate</span><span id="dev_rate">--</span></div>
+                    <div class="flex justify-between p-3"><span class="text-brandMuted">VoLTE Support</span><span id="dev_volte">--</span></div>
+                    <div class="flex justify-between p-3"><span class="text-brandMuted">GNSS Support</span><span id="dev_gnss">--</span></div>
+                </div>
+            </div>
+
+            <!-- 刷新按钮 -->
+            <div class="flex justify-end">
+                <button id="dev_refresh_btn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-6 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Refresh Device Info</button>
             </div>
         </div>
 
@@ -222,6 +509,9 @@
         let socket;
         let isVisible = true;
         let currentTab = 'dashboard';
+
+        // All tab IDs in order
+        const allTabs = ['dashboard', 'network', 'scan', 'settings', 'sms', 'console', 'device'];
 
         // DOM cache
         const domElements = {};
@@ -239,28 +529,35 @@
             }
         }
 
-        // Tab switching
+        // Tab switching — generic for all tabs
         function switchTab(tab) {
             currentTab = tab;
-            const dashBtn = getDomElement('tab_dashboard');
-            const atBtn = getDomElement('tab_at');
-            const dashPanel = getDomElement('panel_dashboard');
-            const atPanel = getDomElement('panel_at');
+            allTabs.forEach(t => {
+                const btn = getDomElement(`tab_${t}`);
+                const panel = getDomElement(`panel_${t}`);
+                if (!btn || !panel) return;
+                if (t === tab) {
+                    btn.classList.remove('text-brandMuted', 'hover:text-white', 'hover:bg-brandCard/60');
+                    btn.classList.add('bg-emerald-600', 'text-white', 'shadow-lg');
+                    panel.classList.remove('hidden');
+                } else {
+                    btn.classList.remove('bg-emerald-600', 'text-white', 'shadow-lg');
+                    btn.classList.add('text-brandMuted', 'hover:text-white', 'hover:bg-brandCard/60');
+                    panel.classList.add('hidden');
+                }
+            });
 
-            if (tab === 'dashboard') {
-                dashBtn.classList.add('bg-emerald-600', 'text-white', 'shadow-lg');
-                dashBtn.classList.remove('text-brandMuted', 'hover:text-white', 'hover:bg-brandCard/60');
-                atBtn.classList.remove('bg-emerald-600', 'text-white', 'shadow-lg');
-                atBtn.classList.add('text-brandMuted', 'hover:text-white', 'hover:bg-brandCard/60');
-                dashPanel.classList.remove('hidden');
-                atPanel.classList.add('hidden');
-            } else {
-                atBtn.classList.add('bg-emerald-600', 'text-white', 'shadow-lg');
-                atBtn.classList.remove('text-brandMuted', 'hover:text-white', 'hover:bg-brandCard/60');
-                dashBtn.classList.remove('bg-emerald-600', 'text-white', 'shadow-lg');
-                dashBtn.classList.add('text-brandMuted', 'hover:text-white', 'hover:bg-brandCard/60');
-                dashPanel.classList.add('hidden');
-                atPanel.classList.remove('hidden');
+            // Request device info when switching to device tab
+            if (tab === 'device' && socket && socket.readyState === WebSocket.OPEN) {
+                sendWsCommand('get_static_info');
+            }
+        }
+
+        function sendWsCommand(action, payload) {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const msg = { action: action };
+                if (payload !== undefined) msg.payload = payload;
+                socket.send(JSON.stringify(msg));
             }
         }
 
@@ -274,6 +571,7 @@
                     dot.classList.remove('bg-red-500');
                     dot.classList.add('bg-emerald-500', 'animate-pulse');
                 }
+                updateText('settings_ws_status', 'Connected');
                 // Request static info on connect
                 socket.send(JSON.stringify({ action: "get_static_info" }));
             };
@@ -285,6 +583,16 @@
                         handleStaticInfo(data.data);
                     } else if (data.type === "at_res") {
                         handleAtResponse(data.data);
+                    } else if (data.type === "network_status") {
+                        handleNetworkStatus(data.data);
+                    } else if (data.type === "scan_result") {
+                        handleScanResult(data.data);
+                    } else if (data.type === "sms_list") {
+                        handleSmsList(data.data);
+                    } else if (data.type === "device_info") {
+                        handleDeviceInfo(data.data);
+                    } else if (data.type === "settings_info") {
+                        handleSettingsInfo(data.data);
                     } else if (data.type === "realtime" || !data.type) {
                         updateUI(data);
                     }
@@ -300,6 +608,7 @@
                     dot.classList.remove('bg-emerald-500', 'animate-pulse');
                     dot.classList.add('bg-red-500');
                 }
+                updateText('settings_ws_status', 'Disconnected');
                 setTimeout(connectWs, 3000);
             };
 
@@ -309,6 +618,7 @@
                     dot.classList.remove('bg-emerald-500', 'animate-pulse');
                     dot.classList.add('bg-red-500');
                 }
+                updateText('settings_ws_status', 'Error');
                 socket.close();
             };
         }
@@ -319,10 +629,14 @@
             updateText("info_provider", data.network_provider || "--");
             updateText("info_apn", data.apn || "--");
             updateText("sig_traffic", data.traffic_stats || "--");
+
+            // Device info tab
+            updateText("dev_firmware", data.firmware_version || "--");
+            updateText("dev_sim_status", data.active_sim || "--");
         }
 
         function handleAtResponse(raw) {
-            const output = getDomElement('at_output');
+            const output = getDomElement('console_output');
             if (!output) return;
             const escaped = raw
                 .replace(/&/g, '&')
@@ -331,6 +645,95 @@
                 .replace(/\n/g, '<br>');
             output.innerHTML += `<div class="text-emerald-300 mt-1">${escaped}</div>`;
             output.scrollTop = output.scrollHeight;
+        }
+
+        function handleNetworkStatus(data) {
+            updateText("net_conn_status", data.status || "--");
+            updateText("net_current_apn", data.apn || "--");
+            updateText("net_ipv4", data.ipv4 || "--");
+            updateText("net_ipv6", data.ipv6 || "--");
+        }
+
+        function handleScanResult(data) {
+            const tbody = getDomElement('scan_results_body');
+            const status = getDomElement('scan_status');
+            if (!tbody) return;
+            if (data.status) {
+                if (status) status.innerText = data.status;
+            }
+            if (data.networks && Array.isArray(data.networks)) {
+                if (data.networks.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-brandMuted">No networks found.</td></tr>';
+                    if (status) status.innerText = 'Scan complete. No networks found.';
+                } else {
+                    tbody.innerHTML = data.networks.map((net, i) =>
+                        `<tr class="border-b border-brandBorder/20 hover:bg-brandCard/30 transition-colors">
+                            <td class="p-3 text-brandMuted">${i + 1}</td>
+                            <td class="p-3 text-white">${net.operator || '--'}</td>
+                            <td class="p-3 text-white">${net.mccmnc || '--'}</td>
+                            <td class="p-3"><span class="px-2 py-0.5 rounded text-xs ${net.tech === '5G' ? 'bg-emerald-600/20 text-emerald-400' : net.tech === '4G' ? 'bg-blue-500/20 text-blue-400' : 'bg-brandCard text-brandMuted'}">${net.technology || '--'}</span></td>
+                            <td class="p-3"><span class="${net.stat === 'Available' ? 'text-emerald-400' : 'text-brandMuted'}">${net.status || '--'}</span></td>
+                            <td class="p-3 text-white">${net.band || '--'}</td>
+                        </tr>`
+                    ).join('');
+                    if (status) status.innerText = `Scan complete. Found ${data.networks.length} network(s).`;
+                }
+            }
+            // Restore scan button
+            const btnText = getDomElement('scan_btn_text');
+            const scanBtn = getDomElement('scan_start_btn');
+            if (btnText) btnText.innerText = 'Start Scan';
+            if (scanBtn) scanBtn.disabled = false;
+        }
+
+        function handleSmsList(data) {
+            const listEl = getDomElement('sms_list');
+            if (!listEl) return;
+            if (data.messages && Array.isArray(data.messages)) {
+                if (data.messages.length === 0) {
+                    listEl.innerHTML = '<div class="p-4 text-center text-xs text-brandMuted">No messages.</div>';
+                } else {
+                    listEl.innerHTML = data.messages.map((msg, i) =>
+                        `<div class="p-3 hover:bg-brandCard/30 transition-colors cursor-pointer select-none">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-white text-xs font-semibold">${msg.sender || 'Unknown'}</span>
+                                <span class="text-brandMuted text-[10px]">${msg.timestamp || ''}</span>
+                            </div>
+                            <div class="text-brandMuted text-xs truncate">${msg.text || ''}</div>
+                        </div>`
+                    ).join('');
+                }
+            }
+        }
+
+        function handleDeviceInfo(data) {
+            updateText("dev_manufacturer", data.manufacturer || "--");
+            updateText("dev_model", data.model || "--");
+            updateText("dev_firmware", data.firmware_version || "--");
+            updateText("dev_imei", data.imei || "--");
+            updateText("dev_serial", data.serial || "--");
+            updateText("dev_hw_ver", data.hw_version || "--");
+            updateText("dev_type", data.module_type || "--");
+            updateText("dev_sim_status", data.sim_status || "--");
+            updateText("dev_imsi", data.imsi || "--");
+            updateText("dev_iccid", data.iccid || "--");
+            updateText("dev_phone", data.phone || "--");
+            updateText("dev_net_status", data.net_status || "--");
+            updateText("dev_signal", data.signal || "--");
+            updateText("dev_temp", data.temperature || "--");
+            updateText("dev_bands", data.bands || "--");
+            updateText("dev_rate", data.max_rate || "--");
+            updateText("dev_volte", data.volte || "--");
+            updateText("dev_gnss", data.gnss || "--");
+        }
+
+        function handleSettingsInfo(data) {
+            updateText("settings_port", data.serial_port || "--");
+            updateText("settings_views", data.active_views || "--");
+            if (data.interval) {
+                const input = getDomElement('settings_interval');
+                if (input) input.value = data.interval;
+            }
         }
 
         function updateUI(payload) {
@@ -357,6 +760,15 @@
             updateText("sig_cell_id", payload.cell_id || "--");
             updateText("sig_enb", payload.enb_id || "--");
             updateText("sig_tac", payload.tac || "--");
+
+            // Network panel updates
+            updateText("net_conn_status", payload.internet_connection || "--");
+            updateText("net_current_apn", payload.apn || "--");
+            updateText("net_ipv4", payload.ipv4 || "--");
+            updateText("net_ipv6", payload.ipv6 || "--");
+
+            // Settings panel updates
+            updateText("settings_port", payload.serial_port || "--");
 
             if (payload.updated && payload.updated.trim() !== "") {
                 updateText("last_updated", payload.updated);
@@ -400,23 +812,21 @@
             }
         }
 
-        // AT Terminal functions
+        // ── Console (AT Terminal) functions ──
         function sendAtCommand(cmd) {
             if (!cmd || !cmd.trim()) return;
-            const output = getDomElement('at_output');
+            const output = getDomElement('console_output');
             if (output) {
                 output.innerHTML += `<div class="text-amber-400 mt-2">▶ ${cmd}</div>`;
                 output.scrollTop = output.scrollHeight;
             }
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({ action: "manual_at", payload: cmd }));
-            }
+            sendWsCommand('manual_at', cmd);
         }
 
-        function initAtTerminal() {
-            const input = getDomElement('at_input');
-            const btn = getDomElement('at_send_btn');
-            const quickContainer = getDomElement('at_quick_btns');
+        function initConsole() {
+            const input = getDomElement('console_input');
+            const btn = getDomElement('console_send_btn');
+            const quickContainer = getDomElement('console_quick_btns');
 
             if (input && btn) {
                 btn.addEventListener('click', () => {
@@ -434,13 +844,11 @@
                 });
             }
 
-            // Event delegation for quick buttons: use button text as command
             if (quickContainer) {
                 quickContainer.addEventListener('click', (e) => {
-                    const btnEl = e.target.closest('.at-quick-btn');
+                    const btnEl = e.target.closest('.console-quick-btn');
                     if (!btnEl) return;
                     const label = btnEl.textContent.trim();
-                    // Map known labels to full AT commands
                     const cmdMap = {
                         'AT+CGMI': 'AT+CGMI',
                         'AT+CGSN': 'AT+CGSN',
@@ -457,19 +865,189 @@
             }
         }
 
+        // ── Network panel functions ──
+        function initNetworkPanel() {
+            const applyBtn = getDomElement('net_apply_btn');
+            if (applyBtn) {
+                applyBtn.addEventListener('click', () => {
+                    const apn = getDomElement('net_apn_input')?.value.trim() || '';
+                    const user = getDomElement('net_user_input')?.value.trim() || '';
+                    const pass = getDomElement('net_pass_input')?.value.trim() || '';
+                    const auth = getDomElement('net_auth_select')?.value || '0';
+                    if (!apn) {
+                        alert('Please enter an APN.');
+                        return;
+                    }
+                    sendWsCommand('set_apn', { apn, user, pass, auth });
+                    console.log('APN settings sent:', { apn, user, auth });
+                });
+            }
+
+            const modeBtn = getDomElement('net_mode_btn');
+            if (modeBtn) {
+                modeBtn.addEventListener('click', () => {
+                    const mode = getDomElement('net_mode_select')?.value || 'auto';
+                    sendWsCommand('set_network_mode', mode);
+                    console.log('Network mode set:', mode);
+                });
+            }
+
+            const connectBtn = getDomElement('net_connect_btn');
+            if (connectBtn) {
+                connectBtn.addEventListener('click', () => {
+                    sendWsCommand('net_connect');
+                    console.log('Connect command sent');
+                });
+            }
+
+            const disconnectBtn = getDomElement('net_disconnect_btn');
+            if (disconnectBtn) {
+                disconnectBtn.addEventListener('click', () => {
+                    sendWsCommand('net_disconnect');
+                    console.log('Disconnect command sent');
+                });
+            }
+        }
+
+        // ── Scan panel functions ──
+        function initScanPanel() {
+            const scanBtn = getDomElement('scan_start_btn');
+            if (scanBtn) {
+                scanBtn.addEventListener('click', () => {
+                    const btnText = getDomElement('scan_btn_text');
+                    const status = getDomElement('scan_status');
+                    if (btnText) btnText.innerText = 'Scanning...';
+                    if (status) status.innerText = 'Scanning for available networks...';
+                    scanBtn.disabled = true;
+                    sendWsCommand('network_scan');
+                });
+            }
+        }
+
+        // ── Settings panel functions ──
+        function appendSettingsLog(msg) {
+            const log = getDomElement('settings_log');
+            if (log) {
+                log.innerHTML += `<div class="text-brandMuted">${msg}</div>`;
+                log.scrollTop = log.scrollHeight;
+            }
+        }
+
+        function initSettingsPanel() {
+            const applyBtn = getDomElement('settings_apply_btn');
+            if (applyBtn) {
+                applyBtn.addEventListener('click', () => {
+                    const interval = parseInt(getDomElement('settings_interval')?.value, 10);
+                    if (isNaN(interval) || interval < 3) {
+                        appendSettingsLog('Interval must be >= 3 seconds.');
+                        return;
+                    }
+                    sendWsCommand('set_interval', interval.toString());
+                    appendSettingsLog(`Polling interval set to ${interval}s`);
+                });
+            }
+
+            const rebootBtn = getDomElement('settings_reboot_btn');
+            if (rebootBtn) {
+                rebootBtn.addEventListener('click', () => {
+                    if (confirm('Are you sure you want to reboot the module?')) {
+                        sendWsCommand('reboot');
+                        appendSettingsLog('Reboot command sent.');
+                    }
+                });
+            }
+
+            const resetBtn = getDomElement('settings_reset_btn');
+            if (resetBtn) {
+                resetBtn.addEventListener('click', () => {
+                    if (confirm('⚠️ This will factory reset the module. Are you sure?')) {
+                        sendWsCommand('factory_reset');
+                        appendSettingsLog('Factory reset command sent.');
+                    }
+                });
+            }
+
+            const flightOn = getDomElement('settings_flight_on_btn');
+            if (flightOn) {
+                flightOn.addEventListener('click', () => {
+                    sendWsCommand('flight_mode', '1');
+                    appendSettingsLog('Flight mode ON');
+                });
+            }
+
+            const flightOff = getDomElement('settings_flight_off_btn');
+            if (flightOff) {
+                flightOff.addEventListener('click', () => {
+                    sendWsCommand('flight_mode', '0');
+                    appendSettingsLog('Flight mode OFF');
+                });
+            }
+        }
+
+        // ── SMS panel functions ──
+        function initSmsPanel() {
+            const sendBtn = getDomElement('sms_send_btn');
+            if (sendBtn) {
+                sendBtn.addEventListener('click', () => {
+                    const recipient = getDomElement('sms_recipient')?.value.trim() || '';
+                    const message = getDomElement('sms_message')?.value.trim() || '';
+                    const status = getDomElement('sms_send_status');
+                    if (!recipient || !message) {
+                        if (status) status.innerHTML = '<span class="text-red-400">Please enter recipient and message.</span>';
+                        return;
+                    }
+                    sendWsCommand('send_sms', { recipient, message });
+                    if (status) status.innerHTML = '<span class="text-emerald-400">Sending...</span>';
+                    // Clear message after send
+                    const msgInput = getDomElement('sms_message');
+                    if (msgInput) msgInput.value = '';
+                    const counter = getDomElement('sms_char_count');
+                    if (counter) counter.innerText = '0';
+                });
+            }
+
+            const msgTextarea = getDomElement('sms_message');
+            if (msgTextarea) {
+                msgTextarea.addEventListener('input', () => {
+                    const len = msgTextarea.value.length;
+                    const counter = getDomElement('sms_char_count');
+                    if (counter) counter.innerText = len;
+                });
+            }
+
+            const refreshBtn = getDomElement('sms_refresh_btn');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', () => {
+                    sendWsCommand('get_sms_list');
+                });
+            }
+        }
+
+        // ── Device Info panel functions ──
+        function initDevicePanel() {
+            const refreshBtn = getDomElement('dev_refresh_btn');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', () => {
+                    sendWsCommand('get_device_info');
+                });
+            }
+        }
+
+        // ── Interval setter (Dashboard) ──
         function initIntervalSetter() {
             const select = getDomElement('refreshRateSelect');
             const btn = getDomElement('setRefreshBtn');
             if (!select || !btn) return;
             btn.addEventListener('click', () => {
                 const seconds = parseInt(select.value, 10);
-                if (!isNaN(seconds) && socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ action: "set_interval", payload: seconds.toString() }));
+                if (!isNaN(seconds)) {
+                    sendWsCommand('set_interval', seconds.toString());
                     console.log(`设置刷新间隔为 ${seconds} 秒`);
                 }
             });
         }
 
+        // ── Visibility handler ──
         function initVisibilityHandler() {
             document.addEventListener('visibilitychange', () => {
                 isVisible = !document.hidden;
@@ -482,10 +1060,16 @@
             });
         }
 
+        // ── Initialize everything ──
         connectWs();
         initIntervalSetter();
         initVisibilityHandler();
-        initAtTerminal();
+        initConsole();
+        initNetworkPanel();
+        initScanPanel();
+        initSettingsPanel();
+        initSmsPanel();
+        initDevicePanel();
     </script>
 </body>
 

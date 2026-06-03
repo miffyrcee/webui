@@ -7,6 +7,7 @@ build/
 # --- Dependencies ---
 node_modules/
 /jspm_packages/
+templates/
 
 # --- Environment secrets ---
 .env

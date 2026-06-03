@@ -1,5 +1,32 @@
 # Cline AI Change History
 
+## 2026-06-04 00:06 — 新增 6 个 WebUI 选项卡 (Simple Network / Simple Scan / Simple Settings / SMS / Console / Device Information)
+- **修改内容**:
+  - `src/index.html`: 重构为 7 选项卡布局 (Dashboard + 6 new)
+    - **Simple Network**: APN 配置表 (apn/user/pass/auth type)、网络模式选择 (auto/5G/LTE/5G+LTE/WCDMA)、Connect/Disconnect 按钮、Connection Info 面板
+    - **Simple Scan**: 网络扫描结果表格 (#号/运营商/MCCMNC/技术/状态/频段)，Start Scan 按钮触发 mock 扫描结果返回 3 个网络
+    - **Simple Settings**: 轮询间隔设置、串口端口显示、WebSocket 状态、活跃视图计数、Reboot/Factory Reset/Flight Mode 按钮、操作日志区
+    - **SMS**: 收件箱列表 (含 Refresh)、发送 SMS 表单 (收件人/消息/字数统计 0-160)
+    - **Console**: 原 AT Terminal 迁移至此，保留 AT 命令输入和快捷命令
+    - **Device Information**: 设备标识 (制造商/型号/固件/IMEI/序列号/硬件版本/模块类型)、SIM & 网络 (SIM状态/IMSI/ICCID/电话号码/网络状态/信号/温度)、能力信息 (频段/最大速率/VoLTE/GNSS)、Refresh 按钮
+    - Tab 导航改为通用循环逻辑 (`allTabs` 数组)，支持 overflow-x-auto 水平滚动
+  - `src/main.rs`: WebSocket 后端扩展
+    - `WsCommand.payload` 类型从 `Option<String>` 改为 `Option<serde_json::Value>` 支持 JSON 对象负载
+    - `set_interval` 解析兼容 Number 和 String 两种形式
+    - 新增 12 个 WS action handler (全部通过 local_tx 直接回复):
+      - `set_apn`: 解析 apn/user/pass/auth JSON 对象
+      - `set_network_mode`: 网络模式设置
+      - `net_connect` / `net_disconnect`: 连接控制
+      - `network_scan`: 返回 mock 扫描结果 3 个网络
+      - `send_sms`: 解析 recipient/message JSON 对象
+      - `get_sms_list`: 返回 mock SMS 列表 2 条
+      - `get_device_info`: 返回 mock 设备完整信息
+      - `reboot` / `factory_reset` / `flight_mode`: 设备操作
+- **涉及文件**:
+  - `src/index.html`
+  - `src/main.rs`
+  - `CLINE_HISTORY.md`
+
 ## 2026-05-29 01:44 — 修复固件版本获取超时：SMD 通道初始化握手
 - **问题**: `fetch_static_info()` 中 `drain_serial_buffer()` 被注释掉，且缺少 ATE0 关闭回显和 AT 验证通信。对于 SMD 设备 `/dev/smd11`，开机日志或前次会话残留数据堵塞缓冲区，导致 `AT+CGMR` 的响应与预期格式不匹配，`send_at_command_async()` 读循环无法找到 `\r\nOK\r\n` 终止符，直到 10 秒 IO_TIMEOUT 触发才返回 `"读超时(10s)"`
 - **修改内容**:

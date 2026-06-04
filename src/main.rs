@@ -32,11 +32,43 @@ enum SerialHandle {
 }
 
 impl SerialHandle {
-    /// 写入数据
+    /// 写入数据 (带重试)
     async fn write_all(&mut self, buf: &[u8]) -> Result<(), String> {
-        match self {
-            SerialHandle::Raw(f) => f.write_all(buf).await.map_err(|e| format!("写失败: {}", e)),
+        let mut total_written = 0;
+        let write_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+
+        while total_written < buf.len() {
+            if tokio::time::Instant::now() >= write_deadline {
+                return Err(format!(
+                    "写入超时 (5s)，已写入 {}/{} 字节",
+                    total_written,
+                    buf.len()
+                ));
+            }
+            match self {
+                SerialHandle::Raw(f) => match f.write(&buf[total_written..]).await {
+                    Ok(0) => {
+                        // 0 bytes written, but not error. Could be temporary resource exhaustion (EBUSY).
+                        // Sleep briefly and retry.
+                        sleep(Duration::from_millis(10)).await;
+                    }
+                    Ok(n) => {
+                        total_written += n;
+                    }
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        // Non-blocking write would block, retry later
+                        sleep(Duration::from_millis(10)).await;
+                    }
+                    Err(ref e) if e.raw_os_error() == Some(16) => {
+                        // EBUSY (Resource busy) - specific to O_NONBLOCK devices like SMD
+                        // Sleep briefly and retry
+                        sleep(Duration::from_millis(10)).await;
+                    }
+                    Err(e) => return Err(format!("写失败: {}", e)),
+                },
+            }
         }
+        Ok(())
     }
 
     /// flush
@@ -51,6 +83,7 @@ impl SerialHandle {
         match self {
             SerialHandle::Raw(f) => match timeout(Duration::from_millis(500), f.read(buf)).await {
                 Ok(Ok(n)) => Ok(n),
+                Ok(Err(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(0), // Non-blocking read would block, treat as 0 bytes for now
                 Ok(Err(e)) => Err(format!("读错误: {}", e)),
                 Err(_) => Err("读超时(500ms)".to_string()),
             },
@@ -328,7 +361,11 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     if let Ok(resp) = send_at_command_inner(&mut serial, "AT+CGDCONT?").await {
         for line in resp.lines() {
             if line.contains("+CGDCONT: 1,") {
-                let after_prefix = line.trim().strip_prefix("+CGDCONT: 1,").unwrap_or(line).trim();
+                let after_prefix = line
+                    .trim()
+                    .strip_prefix("+CGDCONT: 1,")
+                    .unwrap_or(line)
+                    .trim();
                 let parts: Vec<&str> = after_prefix.split(',').collect();
                 if parts.len() >= 2 {
                     info.apn = parts[1].trim().trim_matches('"').to_string();
@@ -447,18 +484,24 @@ async fn send_at_command_inner(serial: &mut SerialHandle, cmd: &str) -> Result<S
                 consecutive_zeros = 0;
                 response_bytes.extend_from_slice(&buf[..n]);
 
-                // 优化后的尾部终结符校验，避免手动索引越界 panic
-                if response_bytes.ends_with(b"\r\nOK\r\n") || response_bytes.ends_with(b"\r\nERROR\r\n") {
+                // 尝试一次性读取全部响应，减少循环次数
+                // 检查是否以 "\r\nOK\r\n" 或 "\r\nERROR\r\n" 结尾
+                if response_bytes.len() >= 6
+                    && response_bytes[response_bytes.len() - 6..] == *b"\r\nOK\r\n"
+                {
                     break;
                 }
-                if response_bytes.len() >= 15 {
-                    let tail = &response_bytes[response_bytes.len() - 15..];
-                    if tail.windows(6).any(|w| w == b"\r\nOK\r\n")
-                        || tail.windows(9).any(|w| w == b"\r\nERROR\r\n")
-                    {
-                        break;
-                    }
+                if response_bytes.len() >= 9
+                    && response_bytes[response_bytes.len() - 9..] == *b"\r\nERROR\r\n"
+                {
+                    break;
                 }
+
+                // 对于某些特殊命令，如 AT+COPS=? 可能会返回大量数据，
+                // 且不一定立即以 OK/ERROR 结尾，需要额外的判断条件
+                // 这里我们简化为等待一段时间，如果不再有数据，则认为响应结束
+                // 实际生产环境中可能需要更复杂的逻辑，例如根据命令类型判断结束符
+                sleep(Duration::from_millis(10)).await;
             }
             Err(e) => return Err(format!("读错误: {}", e)),
         }
@@ -841,7 +884,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
             while let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
                 if let Ok(cmd) = serde_json::from_str::<WsCommand>(&text) {
                     let (resp_tx, resp_rx) = oneshot::channel();
-                    
+
                     let action = match cmd.action.as_str() {
                         "manual_at" => {
                             let payload = cmd.payload.and_then(|p| p.as_str().map(String::from)).unwrap_or_default();

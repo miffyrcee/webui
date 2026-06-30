@@ -588,7 +588,7 @@
                     } else if (data.type === "scan_result") {
                         handleScanResult(data.data);
                     } else if (data.type === "sms_list") {
-                        handleSmsList(data.data);
+                        typeof data.data === 'string' ? handleAtResponse(data.data) : handleSmsList(data.data);
                     } else if (data.type === "device_info") {
                         handleDeviceInfo(data.data);
                     } else if (data.type === "settings_info") {

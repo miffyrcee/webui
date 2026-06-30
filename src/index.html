@@ -635,6 +635,22 @@
             updateText("dev_sim_status", data.active_sim || "--");
         }
 
+        function decodeUcs2Hex(hex) {
+            if (/^[0-9A-Fa-f]+$/.test(hex) && hex.length % 4 === 0) {
+                try {
+                    let str = '';
+                    for (let i = 0; i < hex.length; i += 4) {
+                        const code = parseInt(hex.substring(i, i + 4), 16);
+                        str += String.fromCharCode(code);
+                    }
+                    return str;
+                } catch (e) {
+                    return hex;
+                }
+            }
+            return hex;
+        }
+
         function handleAtResponse(raw) {
             // If this is an SMS list response (+CMGL:), parse it into the SMS inbox
             if (raw.includes('+CMGL:')) {
@@ -658,7 +674,7 @@
                             text += lines[i].trim();
                             i++;
                         }
-                        messages.push({ sender, stat, timestamp, text });
+                        messages.push({ sender, stat, timestamp, text: decodeUcs2Hex(text) });
                         continue;
                     }
                     i++;

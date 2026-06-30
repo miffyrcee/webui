@@ -583,7 +583,8 @@ async fn hardware_polling_actor(
                         } else {
                             "+CMGL: 1,\"REC READ\",\"+8613800138000\",,\"2026/06/04 10:30:08\"\r\nYour data usage this month: 15.2 GB\r\n+CMGL: 2,\"REC UNREAD\",\"10086\",,\"2026/06/03 09:15:22\"\r\nWelcome to China Mobile 5G network!\r\nOK\r\n".to_string()
                         };
-                        let _ = req.resp_tx.send(serde_json::json!({ "type": "sms_list", "data": resp }));
+                        let decoded = decode_cmgl_body(&resp);
+                        let _ = req.resp_tx.send(serde_json::json!({ "type": "sms_list", "data": decoded }));
                     }
                     AtAction::SetApn(apn, user, pass, auth_type) => {
                         println!("🌐 actor: set_apn apn={} user={} auth={}", apn, user, auth_type);
@@ -974,4 +975,38 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
 
 async fn style_handler() -> impl IntoResponse {
     static_file_response(include_str!("../templates/style.css"), "text/css; charset=utf-8")
+}
+
+/// Decode UCS-2 hex-encoded SMS body text in +CMGL AT responses
+fn decode_cmgl_body(response: &str) -> String {
+    let mut result = String::new();
+    let mut in_body = false;
+
+    for line in response.lines() {
+        if line.starts_with("+CMGL:") {
+            in_body = true;
+            result.push_str(line);
+            result.push('\n');
+        } else if in_body {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed == "OK" {
+                in_body = false;
+                result.push_str(line);
+                result.push('\n');
+            } else {
+                let decoded = decode_hex_ucs2(trimmed);
+                if decoded.is_empty() {
+                    result.push_str(line);
+                } else {
+                    result.push_str(&decoded);
+                }
+                result.push('\n');
+            }
+        } else {
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+
+    result
 }

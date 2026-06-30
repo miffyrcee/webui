@@ -6,13 +6,12 @@
 ## Key Technical Decisions
 
 ### Serial Port Communication
-- 默认端口: `/dev/ttyIN`（socat PTY 桥接 AT 通道），可通过 `AT_SERIAL_PORT` 环境变量覆盖
-- **设备发现**: 实际设备上运行 `socat-at-bridge`（socat-armel-static），桥接 `/dev/ttyIN` ↔ `/dev/ttyOUT`
-  - `/dev/ttyIN`: 写入 AT 命令（echo=0 关闭回显）
-  - `/dev/ttyOUT`: 读取响应（echo=1）
-  - 可通过 `adb shell "echo -ne 'AT\\r\\n' > /dev/ttyIN && sleep 0.3 && timeout 2 cat /dev/ttyOUT"` 测试
-- **其他 AT 端口备选**: `/dev/ttyIN2`（第二路 socat 桥接）、`/dev/smd11`（SMD 通道，需确认使用哪个）
-- AT 命令通过 `send_at_command_async()` 函数发送，自动检测 `\r\nOK\r\n` / `\r\nERROR\r\n` 结束标志
+- **Windows 默认端口**: `COM3`（USB 串口转接），可通过 `AT_SERIAL_PORT` 环境变量覆盖，例如 `$env:AT_SERIAL_PORT="COM5"`
+- **设备发现**: 实际设备上通过 ADB 桥接 AT 通道（参考 ADB Deployment 章节）
+  - AT 命令写入 `/dev/ttyIN`（echo=0 关闭回显）
+  - 响应从 `/dev/ttyOUT` 读取（echo=1）
+  - Windows 端测试 ADB 串口: `adb shell "echo -ne 'AT\\r\\n' > /dev/ttyIN && sleep 0.3 && timeout 2 cat /dev/ttyOUT"`
+- **AT 命令通过 `send_at_command_async()` 函数发送**，自动检测 `\r\nOK\r\n` / `\r\nERROR\r\n` 结束标志
 - **socat PTY 桥接设备注意事项**: `tokio_serial::tcsetattr` 会破坏 socat 的 raw 配置，代码中通过 `skip_tty_mode()` 函数自动跳过 TTY 模式直接使用 Raw 文件模式
 
 ### Architecture
@@ -40,6 +39,8 @@
 
 ## Testing
 - 没有硬件的环境可以通过 `AT_SERIAL_PORT` 指向不存在的端口触发模拟模式
+  - PowerShell: `$env:AT_SERIAL_PORT="COM99"; cargo run`
+  - CMD: `set AT_SERIAL_PORT=COM99 && cargo run`
 - 模拟模式下所有 AT 命令返回预定义 mock 数据
 
 ## AI Change History
@@ -52,12 +53,12 @@
 ## Cross-compilation (armv7 / armhf)
 
 ### Target Setup
-```bash
+```powershell
 rustup target add armv7-unknown-linux-musleabihf
 ```
 
 ### Build
-```bash
+```powershell
 # 开发构建（快速，带调试符号）
 cargo build --target armv7-unknown-linux-musleabihf
 
@@ -65,14 +66,16 @@ cargo build --target armv7-unknown-linux-musleabihf
 cargo build --target armv7-unknown-linux-musleabihf --release
 ```
 
-- 编译产物位于 `target/armv7-unknown-linux-musleabihf/release/quectel-webui`
+- 编译产物位于 `target/armv7-unknown-linux-musleabihf/release/quectel-webui.exe`
 - 使用 musl 静态链接，无需目标设备安装额外依赖
 - 适用于 Android 设备上运行的 Linux 环境（如 Qualcomm MDM 平台）
+
+> **注意**: musl 交叉编译工具链在 Windows 上需要通过 `mingw` 或 WSL 环境搭建。推荐使用 WSL 2 进行交叉编译，或使用 Windows 上的 `armv7-unknown-linux-musleabihf` 工具链。
 
 ## ADB Deployment
 
 ### 前置条件
-- 安装 `adb`（Android Debug Bridge）
+- 安装 `adb`（Android Debug Bridge），确保 `adb.exe` 在 `PATH` 中
 - 设备通过 USB 连接或网络 ADB 连接到开发机
 - 设备已 root 或有足够权限写入 `/opt/bin`
 
@@ -86,47 +89,67 @@ cargo build --target armv7-unknown-linux-musleabihf --release
 | `adb pull <remote> <local>` | 从设备拉取文件 |
 | `adb shell "pkill -9 -f webui"` | 杀掉正在运行的 webui 进程 |
 
-### 一键构建部署测试
-```bash
+### 一键构建部署测试（PowerShell）
+```powershell
 # 完整流程：构建 → 杀掉旧进程 → 推送 → 运行测试（12秒超时）
-cargo build --target armv7-unknown-linux-musleabihf --release 2>&1 && \
-  adb shell "pkill -9 -f webui" 2>/dev/null; \
-  adb push target/armv7-unknown-linux-musleabihf/release/quectel-webui /opt/bin && \
-  adb shell "chmod 755 /opt/bin/quectel-webui && RUST_BACKTRACE=1 timeout 12 /opt/bin/quectel-webui"
+cargo build --target armv7-unknown-linux-musleabihf --release; `
+adb shell "pkill -9 -f webui" 2>$null; `
+adb push target/armv7-unknown-linux-musleabihf/release/quectel-webui /opt/bin; `
+adb shell "chmod 755 /opt/bin/quectel-webui && RUST_BACKTRACE=1 timeout 12 /opt/bin/quectel-webui"
 ```
 
-### 只推送不运行
-```bash
-cargo build --target armv7-unknown-linux-musleabihf --release 2>&1 && \
-  adb push target/armv7-unknown-linux-musleabihf/release/quectel-webui /opt/bin
+### 只推送不运行（PowerShell）
+```powershell
+cargo build --target armv7-unknown-linux-musleabihf --release; `
+adb push target/armv7-unknown-linux-musleabihf/release/quectel-webui /opt/bin
 ```
 
 ### 设备端手动运行（后台常驻）
-```bash
+```powershell
 adb shell "/opt/bin/quectel-webui &"
 ```
 
 ### 查看设备端日志
-```bash
+```powershell
 adb shell "logcat | grep webui"           # Android logcat
 adb shell "tail -f /var/log/webui.log"    # 文件日志（如有）
 ```
 
 ### 串口设备排查
-```bash
+```powershell
 adb shell "ls -la /dev/smd* /dev/tty*"    # 列出可用串口设备
 adb shell "stty -F /dev/smd11"            # 检查串口属性（如支持）
+
+# Windows 本地串口排查
+# 设备管理器中查看"端口(COM 和 LPT)"列出可用 COM 端口
+# 或使用 mode 命令: mode
 ```
 
 ## Run Commands
-```bash
-# 本地开发运行
-cargo run                                                  # 默认使用 /dev/ttyMSM0
-AT_SERIAL_PORT=/dev/ttyUSB2 cargo run                      # 自定义串口
+
+### PowerShell
+```powershell
+# 本地开发运行（默认 COM3）
+cargo run
+
+# 自定义串口
+$env:AT_SERIAL_PORT="COM5"; cargo run
 
 # 交叉编译 + ADB 部署（一键）
-cargo build --target armv7-unknown-linux-musleabihf --release 2>&1 && \
-  adb shell "pkill -9 -f webui" 2>/dev/null; \
-  adb push target/armv7-unknown-linux-musleabihf/release/quectel-webui /opt/bin && \
-  adb shell "chmod 755 /opt/bin/quectel-webui && RUST_BACKTRACE=1 timeout 12 /opt/bin/quectel-webui"
+cargo build --target armv7-unknown-linux-musleabihf --release; `
+adb shell "pkill -9 -f webui" 2>$null; `
+adb push target/armv7-unknown-linux-musleabihf/release/quectel-webui /opt/bin; `
+adb shell "chmod 755 /opt/bin/quectel-webui && RUST_BACKTRACE=1 timeout 12 /opt/bin/quectel-webui"
+```
+
+### CMD
+```cmd
+REM 自定义串口
+set AT_SERIAL_PORT=COM5 && cargo run
+```
+
+### WSL / Git Bash
+```bash
+# 自定义串口
+AT_SERIAL_PORT=COM5 cargo run
 ```

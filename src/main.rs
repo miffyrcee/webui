@@ -234,6 +234,91 @@ async fn open_serial(path: &str) -> Option<SerialHandle> {
     }
 }
 
+/// 如果字段为空则设为默认值
+fn set_default(field: &mut String, default: &str) {
+    if field.is_empty() {
+        *field = default.to_string();
+    }
+}
+
+/// 解析流量统计单行（支持 QGDNRCNT 和 QGDAT 两种格式）
+fn parse_traffic_line(line: &str, prefix: &str, quoted: bool) -> Option<String> {
+    let parts: Vec<&str> = line
+        .trim()
+        .strip_prefix(prefix)?
+        .trim()
+        .split(',')
+        .collect();
+    if parts.len() >= 2 {
+        let parse_val = |s: &str| -> u64 {
+            let s = if quoted { s.trim().trim_matches('"') } else { s.trim() };
+            s.parse().unwrap_or(0)
+        };
+        Some(format!("TX {} / RX {}", format_bytes(parse_val(parts[0])), format_bytes(parse_val(parts[1]))))
+    } else {
+        None
+    }
+}
+
+/// 三段式回退获取运营商名称：QSPN → COPS → QENG MCC/MNC
+async fn fetch_network_provider(serial: &mut SerialHandle) -> String {
+    // 1. AT+QSPN
+    if let Ok(resp) = send_at_command_inner(serial, "AT+QSPN").await {
+        for line in resp.lines() {
+            if line.contains("+QSPN:") {
+                let after_prefix = line.trim().strip_prefix("+QSPN:").unwrap_or(line).trim();
+                let parts: Vec<&str> = after_prefix.split(',').collect();
+                if let Some(raw) = parts.first() {
+                    let raw = raw.trim().trim_matches('"').trim();
+                    if !raw.is_empty() && raw != "????" {
+                        let decoded = decode_hex_ucs2(raw);
+                        return if decoded.is_empty() { raw.to_string() } else { decoded };
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. AT+COPS?
+    if let Ok(resp) = send_at_command_inner(serial, "AT+COPS?").await {
+        for line in resp.lines() {
+            if line.contains("+COPS:") {
+                let after_prefix = line.trim().strip_prefix("+COPS:").unwrap_or(line).trim();
+                let parts: Vec<&str> = after_prefix.split(',').collect();
+                if parts.len() >= 2 {
+                    let raw = parts[1].trim().trim_matches('"').trim();
+                    if !raw.is_empty() && raw != "????" {
+                        let decoded = decode_hex_ucs2(raw);
+                        return if decoded.is_empty() { raw.to_string() } else { decoded };
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. AT+QENG="servingcell" 通过 MCC/MNC 映射
+    if let Ok(resp) = send_at_command_inner(serial, "AT+QENG=\"servingcell\"").await {
+        for line in resp.lines() {
+            if line.contains("+QENG: \"servingcell\"") {
+                let parts: Vec<&str> = line.split(',')
+                    .map(|s| s.trim().trim_matches('"'))
+                    .collect();
+                if parts.len() >= 6 {
+                    return match format!("{}{}", parts[4], parts[5]).as_str() {
+                        "46000" | "46002" | "46007" => "中国移动".to_string(),
+                        "46001" => "中国联通".to_string(),
+                        "46003" | "46011" => "中国电信".to_string(),
+                        _ => "Unknown".to_string(),
+                    };
+                }
+                break;
+            }
+        }
+    }
+
+    "Unknown".to_string()
+}
+
 /// 启动时一次性获取静态信息：固件版本、SIM槽位、运营商、APN
 /// 使用持久串口连接避免每次 open/close 导致的 SMD 缓冲区交叉污染
 async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
@@ -268,9 +353,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
             }
         }
     }
-    if info.firmware_version.is_empty() {
-        info.firmware_version = "Unknown".to_string();
-    }
+    set_default(&mut info.firmware_version, "Unknown");
 
     // 2. SIM 槽位
     println!("📋 [2/5] 获取 SIM 槽位 (AT+QUIMSLOT?)...");
@@ -284,77 +367,11 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
             }
         }
     }
-    if info.active_sim.is_empty() {
-        info.active_sim = "SIM 1".to_string();
-    }
+    set_default(&mut info.active_sim, "SIM 1");
 
-    // 3. 运营商 — 先 QSPN 其次 COPS
-    println!("📋 [3/5] 获取运营商 (AT+QSPN / AT+COPS?)...");
-    if let Ok(resp) = send_at_command_inner(&mut serial, "AT+QSPN").await {
-        for line in resp.lines() {
-            if line.contains("+QSPN:") {
-                let after_prefix = line.trim().strip_prefix("+QSPN:").unwrap_or(line).trim();
-                let parts: Vec<&str> = after_prefix.split(',').collect();
-                if !parts.is_empty() {
-                    let raw = parts[0].trim().trim_matches('"').trim();
-                    if !raw.is_empty() && raw != "????" {
-                        let decoded = decode_hex_ucs2(raw);
-                        info.network_provider = if decoded.is_empty() {
-                            raw.to_string()
-                        } else {
-                            decoded
-                        };
-                    }
-                }
-            }
-        }
-    }
-    if info.network_provider.is_empty() {
-        if let Ok(resp) = send_at_command_inner(&mut serial, "AT+COPS?").await {
-            for line in resp.lines() {
-                if line.contains("+COPS:") {
-                    let after_prefix = line.trim().strip_prefix("+COPS:").unwrap_or(line).trim();
-                    let parts: Vec<&str> = after_prefix.split(',').collect();
-                    if parts.len() >= 2 {
-                        let raw = parts[1].trim().trim_matches('"').trim();
-                        if !raw.is_empty() && raw != "????" {
-                            let decoded = decode_hex_ucs2(raw);
-                            info.network_provider = if decoded.is_empty() {
-                                raw.to_string()
-                            } else {
-                                decoded
-                            };
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if info.network_provider.is_empty() {
-        if let Ok(resp) = send_at_command_inner(&mut serial, "AT+QENG=\"servingcell\"").await {
-            for line in resp.lines() {
-                if line.contains("+QENG: \"servingcell\"") {
-                    let parts: Vec<&str> = line
-                        .split(',')
-                        .map(|s| s.trim().trim_matches('"'))
-                        .collect();
-                    if parts.len() >= 6 {
-                        let mccmnc = format!("{}{}", parts[4], parts[5]);
-                        info.network_provider = match mccmnc.as_str() {
-                            "46000" | "46002" | "46007" => "中国移动".to_string(),
-                            "46001" => "中国联通".to_string(),
-                            "46003" | "46011" => "中国电信".to_string(),
-                            _ => "Unknown".to_string(),
-                        };
-                    }
-                    break;
-                }
-            }
-        }
-    }
-    if info.network_provider.is_empty() || info.network_provider == "????" {
-        info.network_provider = "Unknown".to_string();
-    }
+    // 3. 运营商（三段回退：QSPN → COPS → QENG MCC/MNC）
+    println!("📋 [3/5] 获取运营商...");
+    info.network_provider = fetch_network_provider(&mut serial).await;
 
     // 4. APN
     println!("📋 [4/5] 获取 APN (AT+CGDCONT?)...");
@@ -374,61 +391,24 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
             }
         }
     }
-    if info.apn.is_empty() {
-        info.apn = "N/A".to_string();
-    }
+    set_default(&mut info.apn, "N/A");
 
-    // 5. 流量统计
-    println!("📋 [5/5] 获取流量统计 (AT+QGDNRCNT?)...");
+    // 5. 流量统计（QGDNRCNT → QGDAT 回退）
+    println!("📋 [5/5] 获取流量统计...");
     info.traffic_stats = send_at_command_inner(&mut serial, "AT+QGDNRCNT?")
         .await
         .ok()
-        .and_then(|r| {
-            r.lines()
-                .find(|l| l.contains("+QGDNRCNT:"))
-                .and_then(|line| {
-                    let parts: Vec<&str> = line
-                        .trim()
-                        .strip_prefix("+QGDNRCNT:")?
-                        .trim()
-                        .split(',')
-                        .collect();
-                    if parts.len() >= 2 {
-                        let tx: u64 = parts[0].trim().parse().unwrap_or(0);
-                        let rx: u64 = parts[1].trim().parse().unwrap_or(0);
-                        Some(format!("TX {} / RX {}", format_bytes(tx), format_bytes(rx)))
-                    } else {
-                        None
-                    }
-                })
-        })
+        .and_then(|r| r.lines().find(|l| l.contains("+QGDNRCNT:")).and_then(|l| parse_traffic_line(l, "+QGDNRCNT:", false)))
         .unwrap_or_default();
 
     if info.traffic_stats.is_empty() {
-        if let Ok(resp) = send_at_command_inner(&mut serial, "AT+QGDAT?").await {
-            for line in resp.lines() {
-                if line.contains("+QGDAT:") {
-                    let parts: Vec<&str> = line
-                        .trim()
-                        .strip_prefix("+QGDAT:")
-                        .unwrap_or(line)
-                        .trim()
-                        .split(',')
-                        .collect();
-                    if parts.len() >= 2 {
-                        let tx: u64 = parts[0].trim().trim_matches('"').parse().unwrap_or(0);
-                        let rx: u64 = parts[1].trim().trim_matches('"').parse().unwrap_or(0);
-                        info.traffic_stats =
-                            format!("TX {} / RX {}", format_bytes(tx), format_bytes(rx));
-                    }
-                    break;
-                }
-            }
-        }
+        info.traffic_stats = send_at_command_inner(&mut serial, "AT+QGDAT?")
+            .await
+            .ok()
+            .and_then(|r| r.lines().find(|l| l.contains("+QGDAT:")).and_then(|l| parse_traffic_line(l, "+QGDAT:", true)))
+            .unwrap_or_default();
     }
-    if info.traffic_stats.is_empty() {
-        info.traffic_stats = "N/A".to_string();
-    }
+    set_default(&mut info.traffic_stats, "N/A");
     // serial 在此函数结束时 drop，自动关闭连接
 
     println!(
@@ -530,12 +510,15 @@ async fn send_at_command_async(path: &str, cmd: &str) -> Result<String, String> 
     send_at_command_inner(&mut serial, cmd).await
 }
 
-async fn index_handler() -> impl IntoResponse {
-    let html = include_str!("index.html");
+fn static_file_response(body: &'static str, content_type: &'static str) -> Response<axum::body::Body> {
     Response::builder()
-        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-        .body(axum::body::Body::from(html))
+        .header(header::CONTENT_TYPE, content_type)
+        .body(axum::body::Body::from(body))
         .unwrap()
+}
+
+async fn index_handler() -> impl IntoResponse {
+    static_file_response(include_str!("index.html"), "text/html; charset=utf-8")
 }
 
 async fn hardware_polling_actor(
@@ -986,9 +969,5 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
 }
 
 async fn style_handler() -> impl IntoResponse {
-    let css_content = include_str!("../templates/style.css");
-    Response::builder()
-        .header(header::CONTENT_TYPE, "text/css; charset=utf-8")
-        .body(axum::body::Body::from(css_content))
-        .unwrap()
+    static_file_response(include_str!("../templates/style.css"), "text/css; charset=utf-8")
 }

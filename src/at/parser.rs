@@ -43,8 +43,7 @@ pub enum ParsedLine {
     Qspn(QspnResponse),
     Cops(CopsResponse),
     Cgdcont(CgdcontEntry),
-    Qgdnrcnt(QgdnrcntResponse),
-    Qgdat(QgdatResponse),
+    TrafficStats(TrafficStats),
     Cgpaddr(CgpaddrEntry),
     QengServingCell(QengServingCell),
     Qcainfo(QcainfoEntry),
@@ -157,40 +156,18 @@ fn parse_single_line(line: &str) -> Option<ParsedLine> {
         return Some(ParsedLine::Cgdcont(entry));
     }
 
-    // +QGDNRCNT:
-    if line.starts_with("+QGDNRCNT:") {
-        let rest = line.strip_prefix("+QGDNRCNT:").unwrap_or("").trim();
+    // +QGDNRCNT: / +QGDAT: — both parsed into TrafficStats
+    if line.starts_with("+QGDNRCNT:") || line.starts_with("+QGDAT:") {
+        let prefix = if line.starts_with("+QGDNRCNT:") { "+QGDNRCNT:" } else { "+QGDAT:" };
+        let rest = line.strip_prefix(prefix).unwrap_or("").trim();
         let parts: Vec<&str> = rest.split(',').collect();
-        let tx = parts
-            .first()
-            .and_then(|s| s.trim().parse::<u64>().ok())
-            .unwrap_or(0);
-        let rx = parts
-            .get(1)
-            .and_then(|s| s.trim().parse::<u64>().ok())
-            .unwrap_or(0);
-        return Some(ParsedLine::Qgdnrcnt(QgdnrcntResponse {
-            tx_bytes: tx,
-            rx_bytes: rx,
-        }));
-    }
-
-    // +QGDAT:
-    if line.starts_with("+QGDAT:") {
-        let rest = line.strip_prefix("+QGDAT:").unwrap_or("").trim();
-        let parts: Vec<&str> = rest.split(',').collect();
-        let tx = parts
-            .first()
-            .and_then(|s| extract_value(s).parse::<u64>().ok())
-            .unwrap_or(0);
-        let rx = parts
-            .get(1)
-            .and_then(|s| extract_value(s).parse::<u64>().ok())
-            .unwrap_or(0);
-        return Some(ParsedLine::Qgdat(QgdatResponse {
-            tx_bytes: tx,
-            rx_bytes: rx,
-        }));
+        let quoted = prefix == "+QGDAT:";
+        let parse_val = |s: &str| -> u64 {
+            if quoted { s.trim().trim_matches('"') } else { s.trim() }.parse().unwrap_or(0)
+        };
+        let tx = parts.first().map(|s| parse_val(s)).unwrap_or(0);
+        let rx = parts.get(1).map(|s| parse_val(s)).unwrap_or(0);
+        return Some(ParsedLine::TrafficStats(TrafficStats { tx_bytes: tx, rx_bytes: rx }));
     }
 
     // +CGPADDR:
@@ -635,7 +612,7 @@ mod tests {
     fn test_parse_qgdnrcnt() {
         let result = parse_single_line("+QGDNRCNT: 123456,789012");
         assert!(
-            matches!(result, Some(ParsedLine::Qgdnrcnt(ref r)) if r.tx_bytes == 123456 && r.rx_bytes == 789012)
+            matches!(result, Some(ParsedLine::TrafficStats(ref r)) if r.tx_bytes == 123456 && r.rx_bytes == 789012)
         );
     }
 
@@ -643,7 +620,7 @@ mod tests {
     fn test_parse_qgdat() {
         let result = parse_single_line("+QGDAT: \"123456\",\"789012\"");
         assert!(
-            matches!(result, Some(ParsedLine::Qgdat(ref r)) if r.tx_bytes == 123456 && r.rx_bytes == 789012)
+            matches!(result, Some(ParsedLine::TrafficStats(ref r)) if r.tx_bytes == 123456 && r.rx_bytes == 789012)
         );
     }
 

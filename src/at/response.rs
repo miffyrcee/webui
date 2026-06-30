@@ -43,16 +43,9 @@ pub struct CgdcontEntry {
     pub h_comp: String,
 }
 
-/// Parsed +QGDNRCNT traffic stats
+/// Parsed traffic stats (used by both +QGDNRCNT and +QGDAT)
 #[derive(Debug, Clone, Serialize)]
-pub struct QgdnrcntResponse {
-    pub tx_bytes: u64,
-    pub rx_bytes: u64,
-}
-
-/// Parsed +QGDAT traffic stats
-#[derive(Debug, Clone, Serialize)]
-pub struct QgdatResponse {
+pub struct TrafficStats {
     pub tx_bytes: u64,
     pub rx_bytes: u64,
 }

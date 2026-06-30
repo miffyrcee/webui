@@ -15,86 +15,78 @@ use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-use std::sync::Arc;
+use std::{env, sync::Arc};
 use sysinfo::{Components, System};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 
 use at::parser::{parse_cgpaddr, parse_qcainfo, parse_qeng};
 use at::utils::{decode_hex_ucs2, format_bytes};
 
-/// 通过 atcmd 命令行工具执行 AT 命令（模块内置命令）
-async fn atcmd_exec(cmd: &str) -> Result<String, String> {
-    let start = std::time::Instant::now();
-    let output = tokio::process::Command::new("atcmd")
-        .arg(cmd)
-        .output()
-        .await
-        .map_err(|e| {
-            eprintln!("❌ atcmd 进程启动失败: {} (命令: {})", e, cmd);
-            format!("atcmd 启动失败: {}", e)
-        })?;
+const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        eprintln!("❌ atcmd 返回错误 (命令: {}): {}", cmd, stderr);
-        return Err(format!("atcmd 返回非零退出码: {}", stderr));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let elapsed = start.elapsed();
-
-    if stdout.contains("ERROR") {
-        println!(
-            "⚠️ [AT] {} 返回 ERROR ({}ms)",
-            cmd,
-            elapsed.as_millis()
-        );
-    } else {
-        println!(
-            "✅ [AT] {} 成功 ({}ms):\n{}",
-            cmd,
-            elapsed.as_millis(),
-            stdout
-        );
-    }
-
-    Ok(stdout)
+/// 串口句柄：RawFile（SMD设备、socat PTY桥接等非TTY设备）
+enum SerialHandle {
+    Raw(tokio::fs::File),
 }
 
-/// 检测 atcmd 工具是否可用
-async fn check_atcmd_available() -> bool {
-    match tokio::process::Command::new("which")
-        .arg("atcmd")
-        .output()
-        .await
-    {
-        Ok(output) if output.status.success() => {
-            // 再验证实际执行
-            match tokio::process::Command::new("atcmd")
-                .arg("AT")
-                .output()
-                .await
-            {
-                Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                        if stdout.contains("OK") || output.status.success() {
-                        println!("✅ atcmd 工具可用，使用命令行模式发送 AT 命令");
-                        true
-                    } else {
-                        eprintln!("❌ atcmd 工具执行测试失败，将使用模拟模式");
-                        false
+impl SerialHandle {
+    /// 写入数据 (带重试)
+    async fn write_all(&mut self, buf: &[u8]) -> Result<(), String> {
+        let mut total_written = 0;
+        let write_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+
+        while total_written < buf.len() {
+            if tokio::time::Instant::now() >= write_deadline {
+                return Err(format!(
+                    "写入超时 (5s)，已写入 {}/{} 字节",
+                    total_written,
+                    buf.len()
+                ));
+            }
+            match self {
+                SerialHandle::Raw(f) => match f.write(&buf[total_written..]).await {
+                    Ok(0) => {
+                        // 0 bytes written, but not error. Could be temporary resource exhaustion (EBUSY).
+                        // Sleep briefly and retry.
+                        sleep(Duration::from_millis(10)).await;
                     }
-                }
-                Err(_) => {
-                    eprintln!("❌ atcmd 工具不可执行，将使用模拟模式");
-                    false
-                }
+                    Ok(n) => {
+                        total_written += n;
+                    }
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        // Non-blocking write would block, retry later
+                        sleep(Duration::from_millis(10)).await;
+                    }
+                    Err(ref e) if e.raw_os_error() == Some(16) => {
+                        // EBUSY (Resource busy) - specific to O_NONBLOCK devices like SMD
+                        // Sleep briefly and retry
+                        sleep(Duration::from_millis(10)).await;
+                    }
+                    Err(e) => return Err(format!("写失败: {}", e)),
+                },
             }
         }
-        _ => {
-            eprintln!("❌ atcmd 工具未找到，将使用模拟模式");
-            false
+        Ok(())
+    }
+
+    /// flush
+    async fn flush(&mut self) -> Result<(), String> {
+        match self {
+            SerialHandle::Raw(f) => f.flush().await.map_err(|e| format!("flush失败: {}", e)),
+        }
+    }
+
+    /// 读取数据（带超时）- 用于 AT 命令响应读取（快速轮询）
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, String> {
+        match self {
+            SerialHandle::Raw(f) => match timeout(Duration::from_millis(500), f.read(buf)).await {
+                Ok(Ok(n)) => Ok(n),
+                Ok(Err(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(0), // Non-blocking read would block, treat as 0 bytes for now
+                Ok(Err(e)) => Err(format!("读错误: {}", e)),
+                Err(_) => Err("读超时(500ms)".to_string()),
+            },
         }
     }
 }
@@ -179,12 +171,9 @@ struct TelemetryData {
 
 #[tokio::main]
 async fn main() {
-    // 检测 atcmd 工具是否可用
-    let atcmd_available = check_atcmd_available().await;
-
-    if !atcmd_available {
-        println!("⚠️ atcmd 工具不可用，将运行在模拟模式（所有 AT 命令返回预设模拟数据）");
-    }
+    let serial_path =
+        env::var("AT_SERIAL_PORT").unwrap_or_else(|_| DEFAULT_SERIAL_PORT.to_string());
+    println!("🔌 使用串口设备: {}", serial_path);
 
     let (tx, _) = broadcast::channel(100);
     let (actor_tx, actor_rx) = mpsc::channel(32);
@@ -197,11 +186,11 @@ async fn main() {
     });
 
     // 获取一次静态信息
-    fetch_static_info(&app_state, atcmd_available).await;
+    fetch_static_info(&app_state, &serial_path).await;
 
     tokio::spawn({
         let state = app_state.clone();
-        async move { hardware_polling_actor(state, actor_rx, atcmd_available).await }
+        async move { hardware_polling_actor(state, actor_rx, serial_path).await }
     });
 
     let app = Router::new()
@@ -215,12 +204,43 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
+/// 尝试打开串口，返回 Some(SerialHandle) 或 None（模拟模式）
+async fn open_serial(path: &str) -> Option<SerialHandle> {
+    println!("🔌 正在尝试打开串口设备: {} ...", path);
+    let start = std::time::Instant::now();
+    match tokio::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .await
+    {
+        Ok(file) => {
+            println!(
+                "✅ 串口已打开(Raw文件模式): {} (耗时: {}ms)",
+                path,
+                start.elapsed().as_millis()
+            );
+            Some(SerialHandle::Raw(file))
+        }
+        Err(e) => {
+            eprintln!(
+                "❌ 打开串口失败: {} (路径: {}, 耗时: {}ms)，将运行在模拟模式",
+                e,
+                path,
+                start.elapsed().as_millis()
+            );
+            None
+        }
+    }
+}
+
 /// 启动时一次性获取静态信息：固件版本、SIM槽位、运营商、APN
-async fn fetch_static_info(state: &Arc<AppState>, atcmd_available: bool) {
-    println!("📋 开始获取静态信息...");
+/// 使用持久串口连接避免每次 open/close 导致的 SMD 缓冲区交叉污染
+async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
+    println!("📋 开始获取静态信息（持久串口连接）...");
     let mut info = StaticInfo::default();
 
-    if !atcmd_available {
+    let Some(mut serial) = open_serial(serial_path).await else {
         eprintln!("⚠️ 使用模拟静态数据");
         info.firmware_version = "RM520NGLAAR03A03M4G_BETA".to_string();
         info.active_sim = "SIM 1".to_string();
@@ -235,7 +255,7 @@ async fn fetch_static_info(state: &Arc<AppState>, atcmd_available: bool) {
 
     // 1. 固件版本
     println!("📋 [1/5] 获取固件版本 (AT+CGMR)...");
-    if let Ok(resp) = atcmd_exec("AT+CGMR").await {
+    if let Ok(resp) = send_at_command_inner(&mut serial, "AT+CGMR").await {
         for line in resp.lines() {
             let trimmed = line.trim();
             if !trimmed.is_empty()
@@ -254,7 +274,7 @@ async fn fetch_static_info(state: &Arc<AppState>, atcmd_available: bool) {
 
     // 2. SIM 槽位
     println!("📋 [2/5] 获取 SIM 槽位 (AT+QUIMSLOT?)...");
-    if let Ok(resp) = atcmd_exec("AT+QUIMSLOT?").await {
+    if let Ok(resp) = send_at_command_inner(&mut serial, "AT+QUIMSLOT?").await {
         for line in resp.lines() {
             if line.contains("+QUIMSLOT:") {
                 let parts: Vec<&str> = line.split(':').collect();
@@ -270,7 +290,7 @@ async fn fetch_static_info(state: &Arc<AppState>, atcmd_available: bool) {
 
     // 3. 运营商 — 先 QSPN 其次 COPS
     println!("📋 [3/5] 获取运营商 (AT+QSPN / AT+COPS?)...");
-    if let Ok(resp) = atcmd_exec("AT+QSPN").await {
+    if let Ok(resp) = send_at_command_inner(&mut serial, "AT+QSPN").await {
         for line in resp.lines() {
             if line.contains("+QSPN:") {
                 let after_prefix = line.trim().strip_prefix("+QSPN:").unwrap_or(line).trim();
@@ -290,7 +310,7 @@ async fn fetch_static_info(state: &Arc<AppState>, atcmd_available: bool) {
         }
     }
     if info.network_provider.is_empty() {
-        if let Ok(resp) = atcmd_exec("AT+COPS?").await {
+        if let Ok(resp) = send_at_command_inner(&mut serial, "AT+COPS?").await {
             for line in resp.lines() {
                 if line.contains("+COPS:") {
                     let after_prefix = line.trim().strip_prefix("+COPS:").unwrap_or(line).trim();
@@ -311,7 +331,7 @@ async fn fetch_static_info(state: &Arc<AppState>, atcmd_available: bool) {
         }
     }
     if info.network_provider.is_empty() {
-        if let Ok(resp) = atcmd_exec("AT+QENG=\"servingcell\"").await {
+        if let Ok(resp) = send_at_command_inner(&mut serial, "AT+QENG=\"servingcell\"").await {
             for line in resp.lines() {
                 if line.contains("+QENG: \"servingcell\"") {
                     let parts: Vec<&str> = line
@@ -338,7 +358,7 @@ async fn fetch_static_info(state: &Arc<AppState>, atcmd_available: bool) {
 
     // 4. APN
     println!("📋 [4/5] 获取 APN (AT+CGDCONT?)...");
-    if let Ok(resp) = atcmd_exec("AT+CGDCONT?").await {
+    if let Ok(resp) = send_at_command_inner(&mut serial, "AT+CGDCONT?").await {
         for line in resp.lines() {
             if line.contains("+CGDCONT: 1,") {
                 let after_prefix = line
@@ -360,7 +380,7 @@ async fn fetch_static_info(state: &Arc<AppState>, atcmd_available: bool) {
 
     // 5. 流量统计
     println!("📋 [5/5] 获取流量统计 (AT+QGDNRCNT?)...");
-    info.traffic_stats = atcmd_exec("AT+QGDNRCNT?")
+    info.traffic_stats = send_at_command_inner(&mut serial, "AT+QGDNRCNT?")
         .await
         .ok()
         .and_then(|r| {
@@ -385,7 +405,7 @@ async fn fetch_static_info(state: &Arc<AppState>, atcmd_available: bool) {
         .unwrap_or_default();
 
     if info.traffic_stats.is_empty() {
-        if let Ok(resp) = atcmd_exec("AT+QGDAT?").await {
+        if let Ok(resp) = send_at_command_inner(&mut serial, "AT+QGDAT?").await {
             for line in resp.lines() {
                 if line.contains("+QGDAT:") {
                     let parts: Vec<&str> = line
@@ -409,6 +429,7 @@ async fn fetch_static_info(state: &Arc<AppState>, atcmd_available: bool) {
     if info.traffic_stats.is_empty() {
         info.traffic_stats = "N/A".to_string();
     }
+    // serial 在此函数结束时 drop，自动关闭连接
 
     println!(
         "📋 静态信息已获取: FW={}, SIM={}, Provider={}, APN={}, Traffic={}",
@@ -417,6 +438,96 @@ async fn fetch_static_info(state: &Arc<AppState>, atcmd_available: bool) {
 
     let mut guard = state.static_info.write().await;
     *guard = info;
+}
+
+/// 底层 AT 命令发送（使用已打开的串口句柄）
+async fn send_at_command_inner(serial: &mut SerialHandle, cmd: &str) -> Result<String, String> {
+    let start = std::time::Instant::now();
+    let full_cmd = format!("{}\r\n", cmd);
+
+    serial
+        .write_all(full_cmd.as_bytes())
+        .await
+        .map_err(|e| format!("写失败: {}", e))?;
+    serial
+        .flush()
+        .await
+        .map_err(|e| format!("flush失败: {}", e))?;
+
+    sleep(Duration::from_millis(200)).await;
+
+    let overall_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut buf = [0u8; 1024];
+    let mut response_bytes = Vec::with_capacity(2048);
+
+    let mut consecutive_zeros = 0u32;
+    loop {
+        if tokio::time::Instant::now() >= overall_deadline {
+            let partial = String::from_utf8_lossy(&response_bytes);
+            return Err(format!(
+                "AT命令总超时(5s)，已读取 {} 字节: {:?}",
+                response_bytes.len(),
+                &partial[..partial.len().min(100)]
+            ));
+        }
+
+        match serial.read(&mut buf).await {
+            Ok(0) => {
+                consecutive_zeros += 1;
+                if consecutive_zeros > 3 {
+                    break;
+                }
+                sleep(Duration::from_millis(50)).await;
+                continue;
+            }
+            Ok(n) => {
+                consecutive_zeros = 0;
+                response_bytes.extend_from_slice(&buf[..n]);
+
+                // 尝试一次性读取全部响应，减少循环次数
+                // 检查是否以 "\r\nOK\r\n" 或 "\r\nERROR\r\n" 结尾
+                if response_bytes.len() >= 6
+                    && response_bytes[response_bytes.len() - 6..] == *b"\r\nOK\r\n"
+                {
+                    break;
+                }
+                if response_bytes.len() >= 9
+                    && response_bytes[response_bytes.len() - 9..] == *b"\r\nERROR\r\n"
+                {
+                    break;
+                }
+
+                // 对于某些特殊命令，如 AT+COPS=? 可能会返回大量数据，
+                // 且不一定立即以 OK/ERROR 结尾，需要额外的判断条件
+                // 这里我们简化为等待一段时间，如果不再有数据，则认为响应结束
+                // 实际生产环境中可能需要更复杂的逻辑，例如根据命令类型判断结束符
+                sleep(Duration::from_millis(10)).await;
+            }
+            Err(e) => return Err(format!("读错误: {}", e)),
+        }
+    }
+
+    let response = String::from_utf8_lossy(&response_bytes).into_owned();
+    let elapsed = start.elapsed();
+    if response.contains("ERROR") {
+        println!("⚠️ [AT] {} 返回 ERROR ({}ms)", cmd, elapsed.as_millis());
+    } else {
+        println!(
+            "✅ [AT] {} 成功 ({}ms):\n{}",
+            cmd,
+            elapsed.as_millis(),
+            response
+        );
+    }
+    Ok(response)
+}
+
+/// 异步发送 AT 命令（打开->发送->关闭）
+async fn send_at_command_async(path: &str, cmd: &str) -> Result<String, String> {
+    let mut serial = open_serial(path)
+        .await
+        .ok_or_else(|| "无法打开串口".to_string())?;
+    send_at_command_inner(&mut serial, cmd).await
 }
 
 async fn index_handler() -> impl IntoResponse {
@@ -430,13 +541,16 @@ async fn index_handler() -> impl IntoResponse {
 async fn hardware_polling_actor(
     state: Arc<AppState>,
     mut actor_rx: mpsc::Receiver<AtRequest>,
-    atcmd_available: bool,
+    serial_path: String,
 ) {
     let mut _sys = System::new_all();
     let mut components = Components::new_with_refreshed_list();
 
-    if !atcmd_available {
-        println!("⚠️ 硬件轮询 actor 运行在模拟模式（atcmd 不可用）");
+    // 持久串口连接：同一 fd 上读写序列化，避免 SMD 缓冲区交叉污染
+    let mut serial = open_serial(&serial_path).await;
+    let serial_available = serial.is_some();
+    if !serial_available {
+        println!("⚠️ 硬件轮询 actor 运行在模拟模式（串口不可用）");
     }
 
     let mut interval_secs = 3;
@@ -449,8 +563,8 @@ async fn hardware_polling_actor(
                 match req.action {
                     AtAction::ManualAt(cmd) => {
                         println!("👨‍💻 用户手动执行 AT: {}", cmd);
-                        let response = if atcmd_available {
-                            match atcmd_exec(&cmd).await {
+                        let response = if let Some(ref mut s) = serial {
+                            match send_at_command_inner(s, &cmd).await {
                                 Ok(resp) => resp,
                                 Err(e) => format!("ERROR: {}", e),
                             }
@@ -475,9 +589,9 @@ async fn hardware_polling_actor(
                     }
                     AtAction::GetSmsList => {
                         println!("📱 actor: get_sms_list via AT+CMGL");
-                        let resp = if atcmd_available {
-                            let _ = atcmd_exec("AT+CMGF=1").await;
-                            atcmd_exec("AT+CMGL=\"ALL\"").await
+                        let resp = if let Some(ref mut s) = serial {
+                            let _ = send_at_command_inner(s, "AT+CMGF=1").await;
+                            send_at_command_inner(s, "AT+CMGL=\"ALL\"").await
                                 .unwrap_or_else(|_| "+CMGL: 0 messages\r\nOK\r\n".to_string())
                         } else {
                             "+CMGL: 1,\"REC READ\",\"+8613800138000\",,\"2026/06/04 10:30:08\"\r\nYour data usage this month: 15.2 GB\r\n+CMGL: 2,\"REC UNREAD\",\"10086\",,\"2026/06/03 09:15:22\"\r\nWelcome to China Mobile 5G network!\r\nOK\r\n".to_string()
@@ -486,10 +600,10 @@ async fn hardware_polling_actor(
                     }
                     AtAction::SetApn(apn, user, pass, auth_type) => {
                         println!("🌐 actor: set_apn apn={} user={} auth={}", apn, user, auth_type);
-                        if atcmd_available {
-                            let _ = atcmd_exec(&format!("AT+CGDCONT=1,\"IPV4V6\",\"{}\"", apn)).await;
+                        if let Some(ref mut s) = serial {
+                            let _ = send_at_command_inner(s, &format!("AT+CGDCONT=1,\"IPV4V6\",\"{}\"", apn)).await;
                             if !user.is_empty() {
-                                let _ = atcmd_exec(&format!("AT+QGAUTH=1,{},\"{}\",\"{}\"", auth_type, user, pass)).await;
+                                let _ = send_at_command_inner(s, &format!("AT+QGAUTH=1,{},\"{}\",\"{}\"", auth_type, user, pass)).await;
                             }
                         }
                         let _ = req.resp_tx.send(serde_json::json!({
@@ -499,7 +613,7 @@ async fn hardware_polling_actor(
                     }
                     AtAction::SetNetworkMode(mode) => {
                         println!("🌐 actor: set_network_mode {}", mode);
-                        if atcmd_available {
+                        if let Some(ref mut s) = serial {
                             let at_mode = match mode.as_str() {
                                 "nr5g" => "AT+QNWPREFCFG=\"mode_pref\",NR5G",
                                 "lte" => "AT+QNWPREFCFG=\"mode_pref\",LTE",
@@ -507,7 +621,7 @@ async fn hardware_polling_actor(
                                 "wcdma" => "AT+QNWPREFCFG=\"mode_pref\",WCDMA",
                                 _ => "AT+QNWPREFCFG=\"mode_pref\",AUTO",
                             };
-                            let _ = atcmd_exec(at_mode).await;
+                            let _ = send_at_command_inner(s, at_mode).await;
                         }
                         let _ = req.resp_tx.send(serde_json::json!({
                             "type": "network_status",
@@ -516,9 +630,9 @@ async fn hardware_polling_actor(
                     }
                     AtAction::NetConnect(connect) => {
                         println!("🌐 actor: net_{}", if connect { "connect" } else { "disconnect" });
-                        if atcmd_available {
+                        if let Some(ref mut s) = serial {
                             let action_val = if connect { "1" } else { "0" };
-                            let _ = atcmd_exec(&format!("AT+CGACT={},1", action_val)).await;
+                            let _ = send_at_command_inner(s, &format!("AT+CGACT={},1", action_val)).await;
                         }
                         let _ = req.resp_tx.send(serde_json::json!({
                             "type": "network_status",
@@ -528,8 +642,8 @@ async fn hardware_polling_actor(
                     AtAction::NetworkScan => {
                         println!("🔍 actor: network_scan via AT+COPS=?");
                         let mut networks = Vec::new();
-                        if atcmd_available {
-                            if let Ok(_resp) = atcmd_exec("AT+COPS=?").await {
+                        if let Some(ref mut s) = serial {
+                            if let Ok(_resp) = send_at_command_inner(s, "AT+COPS=?").await {
                                 // 实际项目中解析 _resp 并在 networks 中填充，此处作为示例放置模拟返回
                             }
                         }
@@ -548,10 +662,10 @@ async fn hardware_polling_actor(
                     AtAction::SendSms(recipient, message) => {
                         println!("📱 actor: send_sms to={}", recipient);
                         let mut success = false;
-                        if atcmd_available {
-                            if atcmd_exec("AT+CMGF=1").await.is_ok() {
-                                if atcmd_exec(&format!("AT+CMGS=\"{}\"", recipient)).await.is_ok() {
-                                    if atcmd_exec(&format!("{}\u{001A}", message)).await.is_ok() {
+                        if let Some(ref mut s) = serial {
+                            if send_at_command_inner(s, "AT+CMGF=1").await.is_ok() {
+                                if send_at_command_inner(s, &format!("AT+CMGS=\"{}\"", recipient)).await.is_ok() {
+                                    if send_at_command_inner(s, &format!("{}\u{001A}", message)).await.is_ok() {
                                         success = true;
                                     }
                                 }
@@ -566,17 +680,17 @@ async fn hardware_polling_actor(
                     }
                     AtAction::GetDeviceInfo => {
                         println!("📱 actor: get_device_info via AT+CGMI/+CGMM/+CGMR/+CGSN");
-                        let (mfr, model, fw, imei) = if atcmd_available {
-                            let m = atcmd_exec("AT+CGMI").await
+                        let (mfr, model, fw, imei) = if let Some(ref mut s) = serial {
+                            let m = send_at_command_inner(s, "AT+CGMI").await
                                 .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("Quectel").trim().to_string())
                                 .unwrap_or_else(|_| "Quectel".to_string());
-                            let mo = atcmd_exec("AT+CGMM").await
+                            let mo = send_at_command_inner(s, "AT+CGMM").await
                                 .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("RM520N-GL").trim().to_string())
                                 .unwrap_or_else(|_| "RM520N-GL".to_string());
-                            let f = atcmd_exec("AT+CGMR").await
+                            let f = send_at_command_inner(s, "AT+CGMR").await
                                 .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("Unknown").trim().to_string())
                                 .unwrap_or_else(|_| "Unknown".to_string());
-                            let i = atcmd_exec("AT+CGSN").await
+                            let i = send_at_command_inner(s, "AT+CGSN").await
                                 .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("Unknown").trim().to_string())
                                 .unwrap_or_else(|_| "Unknown".to_string());
                             (m, mo, f, i)
@@ -610,8 +724,8 @@ async fn hardware_polling_actor(
                     }
                     AtAction::Reboot => {
                         println!("🔄 actor: rebooting module...");
-                        if atcmd_available {
-                            let _ = atcmd_exec("AT+CFUN=1,1").await;
+                        if let Some(ref mut s) = serial {
+                            let _ = send_at_command_inner(s, "AT+CFUN=1,1").await;
                         }
                         let _ = req.resp_tx.send(serde_json::json!({
                             "type": "settings_log",
@@ -620,8 +734,8 @@ async fn hardware_polling_actor(
                     }
                     AtAction::FactoryReset => {
                         println!("⚠️ actor: factory reset module...");
-                        if atcmd_available {
-                            let _ = atcmd_exec("AT&F0").await;
+                        if let Some(ref mut s) = serial {
+                            let _ = send_at_command_inner(s, "AT&F0").await;
                         }
                         let _ = req.resp_tx.send(serde_json::json!({
                             "type": "settings_log",
@@ -631,8 +745,8 @@ async fn hardware_polling_actor(
                     AtAction::FlightMode(on) => {
                         let cfun_val = if on { "4" } else { "1" };
                         println!("✈️ actor: setting flight mode to {}", if on { "ON" } else { "OFF" });
-                        if atcmd_available {
-                            let _ = atcmd_exec(&format!("AT+CFUN={}", cfun_val)).await;
+                        if let Some(ref mut s) = serial {
+                            let _ = send_at_command_inner(s, &format!("AT+CFUN={}", cfun_val)).await;
                         }
                         let _ = req.resp_tx.send(serde_json::json!({
                             "type": "settings_log",
@@ -648,14 +762,14 @@ async fn hardware_polling_actor(
 
                     let mut telemetry = TelemetryData::default();
 
-                    if atcmd_available {
-                        if let Ok(cgpaddr_resp) = atcmd_exec("AT+CGPADDR").await {
+                    if let Some(ref mut s) = serial {
+                        if let Ok(cgpaddr_resp) = send_at_command_inner(s, "AT+CGPADDR").await {
                             parse_cgpaddr(&cgpaddr_resp, &mut telemetry);
                         }
-                        if let Ok(qeng_resp) = atcmd_exec("AT+QENG=\"servingcell\"").await {
+                        if let Ok(qeng_resp) = send_at_command_inner(s, "AT+QENG=\"servingcell\"").await {
                             parse_qeng(&qeng_resp, &mut telemetry);
                         }
-                        if let Ok(qcainfo_resp) = atcmd_exec("AT+QCAINFO").await {
+                        if let Ok(qcainfo_resp) = send_at_command_inner(s, "AT+QCAINFO").await {
                             parse_qcainfo(&qcainfo_resp, &mut telemetry);
                         }
                         if telemetry.signal_percentage.is_empty() {

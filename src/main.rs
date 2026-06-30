@@ -788,9 +788,9 @@ async fn hardware_polling_actor(
                             let label = c.label();
                             label.contains("CPU") || label.contains("cpu") || label.contains("Package") || label.contains("package")
                         })
-                        .map_or(46.0, |c| c.temperature().unwrap_or(46.0));
+                        .and_then(|c| c.temperature());
 
-                    telemetry.temperature = format!("{:.0} °C", cpu_temp);
+                    telemetry.temperature = cpu_temp.map_or("--".to_string(), |t| format!("{:.0} °C", t));
                     telemetry.internet_connection = if !telemetry.ipv4.is_empty() && telemetry.ipv4 != "--" {
                         "Connected".to_string()
                     } else {

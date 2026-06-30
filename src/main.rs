@@ -71,10 +71,17 @@ impl SerialHandle {
         Ok(())
     }
 
-    /// flush
+    /// flush（对不可寻址设备如 SMD 字符设备，ESPIPE 错误可安全忽略）
     async fn flush(&mut self) -> Result<(), String> {
         match self {
-            SerialHandle::Raw(f) => f.flush().await.map_err(|e| format!("flush失败: {}", e)),
+            SerialHandle::Raw(f) => match f.flush().await {
+                Ok(()) => Ok(()),
+                Err(ref e) if e.raw_os_error() == Some(29) => {
+                    // ESPIPE (Illegal seek): 字符设备不支持 fsync，可安全忽略
+                    Ok(())
+                }
+                Err(e) => Err(format!("flush失败: {}", e)),
+            },
         }
     }
 
@@ -429,10 +436,7 @@ async fn send_at_command_inner(serial: &mut SerialHandle, cmd: &str) -> Result<S
         .write_all(full_cmd.as_bytes())
         .await
         .map_err(|e| format!("写失败: {}", e))?;
-    serial
-        .flush()
-        .await
-        .map_err(|e| format!("flush失败: {}", e))?;
+    serial.flush().await?;
 
     sleep(Duration::from_millis(200)).await;
 

@@ -89,19 +89,24 @@ cargo build --target armv7-unknown-linux-musleabihf --release
 | `adb pull <remote> <local>` | 从设备拉取文件 |
 | `adb shell "pkill -9 -f webui"` | 杀掉正在运行的 webui 进程 |
 
-### 一键构建部署测试（PowerShell）
+### 一键构建部署测试
 ```powershell
-# 完整流程：构建 → 杀掉旧进程 → 推送 → 运行测试（12秒超时）
-cargo build --target armv7-unknown-linux-musleabihf --release; `
-adb shell "pkill -9 -f webui" 2>$null; `
-adb push target/armv7-unknown-linux-musleabihf/release/quectel-webui /opt/bin; `
-adb shell "chmod 755 /opt/bin/quectel-webui && RUST_BACKTRACE=1 timeout 12 /opt/bin/quectel-webui"
+# PowerShell（完整流程）
+.\scripts\deploy-test.ps1
+```
+```bash
+# Git Bash / WSL
+./scripts/deploy-test.sh
 ```
 
-### 只推送不运行（PowerShell）
+### 只推送不运行
 ```powershell
-cargo build --target armv7-unknown-linux-musleabihf --release; `
-adb push target/armv7-unknown-linux-musleabihf/release/quectel-webui /opt/bin
+# PowerShell
+.\scripts\deploy-test.ps1 -SkipKill -Timeout 0
+```
+```bash
+# Git Bash / WSL
+./scripts/deploy-test.sh -p
 ```
 
 ### 设备端手动运行（后台常驻）

@@ -90,7 +90,7 @@ impl SerialHandle {
         match self {
             SerialHandle::Raw(f) => match timeout(Duration::from_millis(500), f.read(buf)).await {
                 Ok(Ok(n)) => Ok(n),
-                Ok(Err(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(0), // Non-blocking read would block, treat as 0 bytes for now
+                Ok(Err(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(0),
                 Ok(Err(e)) => Err(format!("读错误: {}", e)),
                 Err(_) => Err("读超时(500ms)".to_string()),
             },
@@ -438,7 +438,7 @@ async fn send_at_command_inner(serial: &mut SerialHandle, cmd: &str) -> Result<S
         .map_err(|e| format!("写失败: {}", e))?;
     serial.flush().await?;
 
-    sleep(Duration::from_millis(200)).await;
+    sleep(Duration::from_millis(500)).await;
 
     let overall_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     let mut buf = [0u8; 1024];
@@ -577,13 +577,25 @@ async fn hardware_polling_actor(
                     AtAction::GetSmsList => {
                         println!("📱 actor: get_sms_list via AT+CMGL");
                         let resp = if let Some(ref mut s) = serial {
-                            let _ = send_at_command_inner(s, "AT+CMGF=1").await;
-                            send_at_command_inner(s, "AT+CMGL=\"ALL\"").await
-                                .unwrap_or_else(|_| "+CMGL: 0 messages\r\nOK\r\n".to_string())
+                            // 必须先设置文本模式，否则 CMGL 参数 "ALL" 无效
+                            let cmgf_ok = send_at_command_inner(s, "AT+CMGF=1").await
+                                .map(|r| r.contains("OK"))
+                                .unwrap_or(false);
+                            if cmgf_ok {
+                                send_at_command_inner(s, "AT+CMGL=\"ALL\"").await
+                                    .unwrap_or_else(|_| "+CMGL: 0 messages\r\nOK\r\n".to_string())
+                            } else {
+                                eprintln!("❌ AT+CMGF=1 失败，SMS 文本模式不可用");
+                                serde_json::json!({"error": "SMS文本模式设置失败，请检查SIM卡"}).to_string()
+                            }
                         } else {
                             "+CMGL: 1,\"REC READ\",\"+8613800138000\",,\"2026/06/04 10:30:08\"\r\nYour data usage this month: 15.2 GB\r\n+CMGL: 2,\"REC UNREAD\",\"10086\",,\"2026/06/03 09:15:22\"\r\nWelcome to China Mobile 5G network!\r\nOK\r\n".to_string()
                         };
-                        let decoded = decode_cmgl_body(&resp);
+                        let decoded = if resp.contains("\"error\"") {
+                            resp
+                        } else {
+                            decode_cmgl_body(&resp)
+                        };
                         let _ = req.resp_tx.send(serde_json::json!({ "type": "sms_list", "data": decoded }));
                     }
                     AtAction::SetApn(apn, user, pass, auth_type) => {

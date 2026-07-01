@@ -381,20 +381,58 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     info.network_provider = fetch_network_provider(&mut serial).await;
 
     // 4. APN
-    println!("📋 [4/5] 获取 APN (AT+CGDCONT?)...");
-    if let Ok(resp) = send_at_command_inner(&mut serial, "AT+CGDCONT?").await {
+    // 优先用 AT+CGCONTRDP 获取活动 PDN 的实际 APN
+    // 回退：遍历 AT+CGDCONT? 所有上下文，跳过占位符
+    println!("📋 [4/5] 获取 APN (AT+CGCONTRDP)...");
+    let mut found_apn = false;
+    if let Ok(resp) = send_at_command_inner(&mut serial, "AT+CGCONTRDP").await {
         for line in resp.lines() {
-            if line.contains("+CGDCONT: 1,") {
-                let after_prefix = line
-                    .trim()
-                    .strip_prefix("+CGDCONT: 1,")
-                    .unwrap_or(line)
-                    .trim();
+            if line.contains("+CGCONTRDP:") {
+                let after_prefix = line.trim().strip_prefix("+CGCONTRDP:").unwrap_or(line).trim();
                 let parts: Vec<&str> = after_prefix.split(',').collect();
-                if parts.len() >= 2 {
-                    info.apn = parts[1].trim().trim_matches('"').to_string();
+                if parts.len() >= 3 {
+                    let apn = parts[2].trim().trim_matches('"').to_string();
+                    if !apn.is_empty() {
+                        info.apn = apn;
+                        found_apn = true;
+                        break;
+                    }
                 }
-                break;
+            }
+        }
+    }
+    if !found_apn {
+        println!("📋 [4/5] 回退 AT+CGDCONT? 获取 APN...");
+        if let Ok(resp) = send_at_command_inner(&mut serial, "AT+CGDCONT?").await {
+            for line in resp.lines() {
+                if line.contains("+CGDCONT:") {
+                    let after_prefix = line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
+                    let parts: Vec<&str> = after_prefix.split(',').collect();
+                    if parts.len() >= 3 {
+                        let apn = parts[2].trim().trim_matches('"').to_string();
+                        if !apn.is_empty() && !apn.contains("placeholder") && !apn.starts_with("apn") {
+                            info.apn = apn;
+                            found_apn = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            // 如果所有上下文都是占位符，取第一个非空值
+            if !found_apn {
+                for line in resp.lines() {
+                    if line.contains("+CGDCONT:") {
+                        let after_prefix = line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
+                        let parts: Vec<&str> = after_prefix.split(',').collect();
+                        if parts.len() >= 3 {
+                            let apn = parts[2].trim().trim_matches('"').to_string();
+                            if !apn.is_empty() {
+                                info.apn = apn;
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -771,6 +809,23 @@ async fn hardware_polling_actor(
                         }
                         if let Ok(qcainfo_resp) = send_at_command_inner(s, "AT+QCAINFO").await {
                             parse_qcainfo(&qcainfo_resp, &mut telemetry);
+                        }
+                        if let Ok(qtemp_resp) = send_at_command_inner(s, "AT+QTEMP").await {
+                            if let Some(temp) = qtemp_resp.lines()
+                                .find_map(|l| {
+                                    if l.contains("+QTEMP:") {
+                                        l.split(',')
+                                            .collect::<Vec<_>>()
+                                            .windows(2)
+                                            .find(|w| w[0].trim().trim_matches('"').eq_ignore_ascii_case("CPU"))
+                                            .and_then(|w| w[1].trim().trim_matches('"').parse::<f64>().ok())
+                                    } else {
+                                        None
+                                    }
+                                })
+                            {
+                                telemetry.temperature = format!("{:.0} °C", temp);
+                            }
                         }
                         if telemetry.signal_percentage.is_empty() {
                             telemetry.signal_percentage = "85%".to_string();

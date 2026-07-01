@@ -138,7 +138,6 @@ struct StaticInfo {
     active_sim: String,
     network_provider: String,
     apn: String,
-    traffic_stats: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -338,7 +337,6 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
         info.active_sim = "SIM 1".to_string();
         info.network_provider = "CHN-UNICOM".to_string();
         info.apn = "3gnet".to_string();
-        info.traffic_stats = "N/A".to_string();
         let mut guard = state.static_info.write().await;
         *guard = info;
         println!("📋 模拟静态数据已写入 AppState");
@@ -346,7 +344,7 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     };
 
     // 1. 固件版本
-    println!("📋 [1/5] 获取固件版本 (AT+CGMR)...");
+    println!("📋 [1/4] 获取固件版本 (AT+CGMR)...");
     if let Ok(resp) = send_at_command_inner(&mut serial, "AT+CGMR").await {
         for line in resp.lines() {
             let trimmed = line.trim();
@@ -438,27 +436,9 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     }
     set_default(&mut info.apn, "N/A");
 
-    // 5. 流量统计（QGDNRCNT → QGDAT 回退）
-    println!("📋 [5/5] 获取流量统计...");
-    info.traffic_stats = send_at_command_inner(&mut serial, "AT+QGDNRCNT?")
-        .await
-        .ok()
-        .and_then(|r| r.lines().find(|l| l.contains("+QGDNRCNT:")).and_then(|l| parse_traffic_line(l, "+QGDNRCNT:", false)))
-        .unwrap_or_default();
-
-    if info.traffic_stats.is_empty() {
-        info.traffic_stats = send_at_command_inner(&mut serial, "AT+QGDAT?")
-            .await
-            .ok()
-            .and_then(|r| r.lines().find(|l| l.contains("+QGDAT:")).and_then(|l| parse_traffic_line(l, "+QGDAT:", true)))
-            .unwrap_or_default();
-    }
-    set_default(&mut info.traffic_stats, "N/A");
-    // serial 在此函数结束时 drop，自动关闭连接
-
     println!(
-        "📋 静态信息已获取: FW={}, SIM={}, Provider={}, APN={}, Traffic={}",
-        info.firmware_version, info.active_sim, info.network_provider, info.apn, info.traffic_stats
+        "📋 静态信息已获取: FW={}, SIM={}, Provider={}, APN={}",
+        info.firmware_version, info.active_sim, info.network_provider, info.apn
     );
 
     let mut guard = state.static_info.write().await;
@@ -803,6 +783,20 @@ async fn hardware_polling_actor(
                                 telemetry.temperature = temp;
                             }
                         }
+                        // 实时获取流量统计（QGDNRCNT → QGDAT 回退）
+                        telemetry.traffic_stats = send_at_command_inner(s, "AT+QGDNRCNT?")
+                            .await
+                            .ok()
+                            .and_then(|r| r.lines().find(|l| l.contains("+QGDNRCNT:")).and_then(|l| parse_traffic_line(l, "+QGDNRCNT:", false)))
+                            .unwrap_or_default();
+                        if telemetry.traffic_stats.is_empty() {
+                            telemetry.traffic_stats = send_at_command_inner(s, "AT+QGDAT?")
+                                .await
+                                .ok()
+                                .and_then(|r| r.lines().find(|l| l.contains("+QGDAT:")).and_then(|l| parse_traffic_line(l, "+QGDAT:", true)))
+                                .unwrap_or_default();
+                        }
+                        set_default(&mut telemetry.traffic_stats, "N/A");
                         if telemetry.signal_percentage.is_empty() {
                             telemetry.signal_percentage = "85%".to_string();
                         }
@@ -827,6 +821,7 @@ async fn hardware_polling_actor(
                         telemetry.ss_rsrq = "-11 dB".to_string();
                         telemetry.ss_rsrp = "-85 dBm".to_string();
                         telemetry.sinr = "18 dB".to_string();
+                        telemetry.traffic_stats = "TX 1.23 GB / RX 4.56 GB".to_string();
                     }
 
                     // 获取 CPU 物理温度（仅当 AT+QTEMP 未提供模块温度时作为 fallback）
@@ -852,7 +847,6 @@ async fn hardware_polling_actor(
                         telemetry.active_sim = guard.active_sim.clone();
                         telemetry.network_provider = guard.network_provider.clone();
                         telemetry.apn = guard.apn.clone();
-                        telemetry.traffic_stats = guard.traffic_stats.clone();
                     }
 
                     let uptime_sec = System::uptime();
@@ -953,7 +947,6 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                                     "active_sim": guard.active_sim,
                                     "network_provider": guard.network_provider,
                                     "apn": guard.apn,
-                                    "traffic_stats": guard.traffic_stats,
                                 }
                             });
                             let _ = local_tx.send(info_json.to_string()).await;

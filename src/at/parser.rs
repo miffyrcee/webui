@@ -570,6 +570,31 @@ pub fn parse_cgpaddr(gpad_res: &str, telemetry: &mut crate::TelemetryData) {
     }
 }
 
+/// Parse AT+QTEMP response and extract module temperature from cpuss/mdmss sensors
+pub fn parse_qtemp_temperature(qtemp_res: &str) -> Option<String> {
+    qtemp_res
+        .lines()
+        .find_map(|l| {
+            let l = l.trim();
+            if let Some(rest) = l.strip_prefix("+QTEMP:") {
+                let rest = rest.trim();
+                let parts: Vec<&str> = rest.split(',').collect();
+                if parts.len() >= 2 {
+                    let name = parts[0].trim().trim_matches('"');
+                    let val = parts[1].trim().trim_matches('"');
+                    (name.contains("cpuss") || name.contains("mdmss"))
+                        .then(|| val.parse::<f64>().ok())
+                        .flatten()
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .map(|t| format!("{:.0} °C", t))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -681,5 +706,35 @@ OK\r\n";
             parse_single_line("+CME ERROR: 50"),
             Some(ParsedLine::Error)
         ));
+    }
+
+    #[test]
+    fn test_parse_qtemp_temperature_cpuss() {
+        let resp = "+QTEMP:\"modem-lte-sub6-pa1\",\"40\"\r\n+QTEMP:\"cpuss-0-usr\",\"42\"\r\n+QTEMP:\"mdmss-0-usr\",\"42\"";
+        assert_eq!(parse_qtemp_temperature(resp), Some("42 °C".to_string()));
+    }
+
+    #[test]
+    fn test_parse_qtemp_temperature_mdmss_first() {
+        let resp = "+QTEMP:\"mdmss-0-usr\",\"41\"\r\n+QTEMP:\"cpuss-0-usr\",\"43\"";
+        // find_map returns first match: mdmss
+        assert_eq!(parse_qtemp_temperature(resp), Some("41 °C".to_string()));
+    }
+
+    #[test]
+    fn test_parse_qtemp_temperature_no_match() {
+        let resp = "+QTEMP:\"modem-lte-sub6-pa1\",\"40\"\r\n+QTEMP:\"modem-ambient-usr\",\"42\"";
+        assert_eq!(parse_qtemp_temperature(resp), None);
+    }
+
+    #[test]
+    fn test_parse_qtemp_temperature_empty() {
+        assert_eq!(parse_qtemp_temperature(""), None);
+    }
+
+    #[test]
+    fn test_parse_qtemp_temperature_invalid_value() {
+        let resp = "+QTEMP:\"cpuss-0-usr\",\"--\"";
+        assert_eq!(parse_qtemp_temperature(resp), None);
     }
 }

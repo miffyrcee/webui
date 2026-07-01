@@ -21,7 +21,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 use tokio::time::{sleep, timeout};
 
-use at::parser::{parse_cgpaddr, parse_qcainfo, parse_qeng};
+use at::parser::{parse_cgpaddr, parse_qcainfo, parse_qeng, parse_qtemp_temperature};
 use at::utils::{decode_hex_ucs2, format_bytes};
 
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
@@ -799,31 +799,15 @@ async fn hardware_polling_actor(
                             parse_qcainfo(&qcainfo_resp, &mut telemetry);
                         }
                         if let Ok(qtemp_resp) = send_at_command_inner(s, "AT+QTEMP").await {
-                            if let Some(temp) = qtemp_resp.lines()
-                                .find_map(|l| {
-                                    let l = l.trim();
-                                    if let Some(rest) = l.strip_prefix("+QTEMP:") {
-                                        let rest = rest.trim();
-                                        let parts: Vec<&str> = rest.split(',').collect();
-                                        if parts.len() >= 2 {
-                                            let name = parts[0].trim().trim_matches('"');
-                                            let val = parts[1].trim().trim_matches('"');
-                                            (name.contains("cpuss") || name.contains("mdmss"))
-                                                .then(|| val.parse::<f64>().ok())
-                                                .flatten()
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                })
-                            {
-                                telemetry.temperature = format!("{:.0} °C", temp);
+                            if let Some(temp) = parse_qtemp_temperature(&qtemp_resp) {
+                                telemetry.temperature = temp;
                             }
                         }
                         if telemetry.signal_percentage.is_empty() {
                             telemetry.signal_percentage = "85%".to_string();
+                        }
+                        if telemetry.network_mode.is_empty() {
+                            telemetry.network_mode = "--".to_string();
                         }
                         telemetry.sim_status = "Ready".to_string();
                     } else {
@@ -845,15 +829,17 @@ async fn hardware_polling_actor(
                         telemetry.sinr = "18 dB".to_string();
                     }
 
-                    // 获取 CPU 物理温度
-                    let cpu_temp = components.iter()
-                        .find(|c| {
-                            let label = c.label();
-                            label.contains("CPU") || label.contains("cpu") || label.contains("Package") || label.contains("package")
-                        })
-                        .and_then(|c| c.temperature());
+                    // 获取 CPU 物理温度（仅当 AT+QTEMP 未提供模块温度时作为 fallback）
+                    if telemetry.temperature.is_empty() {
+                        let cpu_temp = components.iter()
+                            .find(|c| {
+                                let label = c.label();
+                                label.contains("CPU") || label.contains("cpu") || label.contains("Package") || label.contains("package")
+                            })
+                            .and_then(|c| c.temperature());
 
-                    telemetry.temperature = cpu_temp.map_or("--".to_string(), |t| format!("{:.0} °C", t));
+                        telemetry.temperature = cpu_temp.map_or("--".to_string(), |t| format!("{:.0} °C", t));
+                    }
                     telemetry.internet_connection = if !telemetry.ipv4.is_empty() && telemetry.ipv4 != "--" {
                         "Connected".to_string()
                     } else {

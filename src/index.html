@@ -547,9 +547,9 @@
                 }
             });
 
-            // Request device info when switching to device tab
+            // Request full device info when switching to device tab
             if (tab === 'device' && socket && socket.readyState === WebSocket.OPEN) {
-                sendWsCommand('get_static_info');
+                sendWsCommand('get_device_info');
             }
         }
 

@@ -524,6 +524,56 @@ async fn send_at_command_inner(serial: &mut SerialHandle, cmd: &str) -> Result<S
     Ok(response)
 }
 
+/// 发送 AT 命令并返回首行有效响应（自动去除 AT echo、OK/ERROR、空行）
+async fn send_at_get_line(serial: &mut SerialHandle, cmd: &str) -> Option<String> {
+    send_at_command_inner(serial, cmd).await.ok().and_then(|resp| {
+        resp.lines().find_map(|l| {
+            let trimmed = l.trim();
+            if !trimmed.is_empty()
+                && !trimmed.contains("OK")
+                && !trimmed.contains("ERROR")
+                && !trimmed.starts_with("AT+")
+                && !trimmed.starts_with("+CME ERROR:")
+            {
+                Some(trimmed.to_string())
+            } else {
+                None
+            }
+        })
+    })
+}
+
+/// 从 AT 命令的至少一次查询结果中获取网络状态
+fn parse_net_status(creg_raw: &str) -> String {
+    if let Some(rest) = creg_raw.strip_prefix("+CREG:") {
+        let parts: Vec<&str> = rest.trim().split(',').collect();
+        if parts.len() >= 2 {
+            return match parts[1].trim().trim_matches('"') {
+                "1" => "Registered (home)",
+                "5" => "Registered (roaming)",
+                "2" | "3" | "4" => "Not registered",
+                _ => "Unknown",
+            }.to_string();
+        }
+    }
+    "Unknown".to_string()
+}
+
+/// 从 AT+CSQ 响应解析信号质量 (dBm)
+fn parse_signal_quality(csq_raw: &str) -> String {
+    if let Some(rest) = csq_raw.strip_prefix("+CSQ:") {
+        let rssi_str = rest.trim().split(',').next().unwrap_or("99").trim();
+        if let Ok(rssi) = rssi_str.parse::<i32>() {
+            if rssi == 99 {
+                return "Unknown".to_string();
+            }
+            let dbm = -113 + (rssi * 2);
+            return format!("{} dBm", dbm);
+        }
+    }
+    "Unknown".to_string()
+}
+
 /// 异步发送 AT 命令（打开->发送->关闭）
 async fn send_at_command_async(path: &str, cmd: &str) -> Result<String, String> {
     let mut serial = open_serial(path)
@@ -685,23 +735,94 @@ async fn hardware_polling_actor(
                         }));
                     }
                     AtAction::GetDeviceInfo => {
-                        println!("📱 actor: get_device_info via AT+CGMI/+CGMM/+CGMR/+CGSN");
-                        let (mfr, model, fw, imei) = if let Some(ref mut s) = serial {
-                            let m = send_at_command_inner(s, "AT+CGMI").await
-                                .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("Quectel").trim().to_string())
-                                .unwrap_or_else(|_| "Quectel".to_string());
-                            let mo = send_at_command_inner(s, "AT+CGMM").await
-                                .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("RM520N-GL").trim().to_string())
-                                .unwrap_or_else(|_| "RM520N-GL".to_string());
-                            let f = send_at_command_inner(s, "AT+CGMR").await
-                                .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("Unknown").trim().to_string())
-                                .unwrap_or_else(|_| "Unknown".to_string());
-                            let i = send_at_command_inner(s, "AT+CGSN").await
-                                .map(|r| r.lines().find(|l| !l.contains("AT+") && !l.contains("OK") && !l.trim().is_empty()).unwrap_or("Unknown").trim().to_string())
-                                .unwrap_or_else(|_| "Unknown".to_string());
-                            (m, mo, f, i)
+                        println!("📱 actor: get_device_info via AT commands");
+                        let (mfr, model, fw, imei, serial, hw_ver, module_type,
+                             sim_status, imsi, iccid, phone, net_status,
+                             signal_quality, temperature) = if let Some(ref mut s) = serial {
+                            let mfr = send_at_get_line(s, "AT+CGMI").await.unwrap_or_else(|| "Quectel".to_string());
+                            let model = send_at_get_line(s, "AT+CGMM").await.unwrap_or_else(|| "Unknown".to_string());
+                            let fw = send_at_get_line(s, "AT+CGMR").await.unwrap_or_else(|| "Unknown".to_string());
+                            let imei = send_at_get_line(s, "AT+CGSN").await.unwrap_or_else(|| "Unknown".to_string());
+                            let serial = imei.clone(); // IMEI 作为唯一序列号
+
+                            // 硬件版本
+                            let hw_ver = send_at_get_line(s, "AT+QIMPVER").await
+                                .and_then(|r| r.strip_prefix("+QIMPVER:")
+                                    .map(|s| s.trim().trim_matches('"').to_string()))
+                                .unwrap_or_else(|| {
+                                    // 回退：从 ATI 中提取
+                                    "Unknown".to_string()
+                                });
+
+                            let module_type = model.clone();
+
+                            // SIM 状态 (AT+CPIN?)
+                            let sim_status = send_at_get_line(s, "AT+CPIN?").await
+                                .and_then(|r| r.strip_prefix("+CPIN:")
+                                    .map(|s| s.trim().trim_matches('"').to_string()))
+                                .unwrap_or_else(|| "Unknown".to_string());
+
+                            // IMSI (AT+CIMI)
+                            let imsi = send_at_get_line(s, "AT+CIMI").await
+                                .and_then(|r| r.strip_prefix("+CIMI:")
+                                    .map(|s| s.trim().to_string()))
+                                .unwrap_or_default();
+
+                            // ICCID (AT+QCCID)
+                            let iccid = send_at_get_line(s, "AT+QCCID").await
+                                .and_then(|r| r.strip_prefix("+QCCID:")
+                                    .map(|s| s.trim().trim_matches('"').to_string()))
+                                .unwrap_or_else(|| "Unknown".to_string());
+
+                            // 电话号码（AT+CNUM 多未配置，静默处理）
+                            let phone = send_at_get_line(s, "AT+CNUM").await
+                                .and_then(|r| {
+                                    let r = r.trim();
+                                    if r.starts_with("+CNUM:") {
+                                        r.split(',').nth(1)
+                                            .map(|s| s.trim().trim_matches('"').to_string())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or_default();
+
+                            // 网络注册状态 (AT+CREG?)
+                            let net_status = send_at_get_line(s, "AT+CREG?").await
+                                .map(|r| parse_net_status(&r))
+                                .unwrap_or_else(|| "Unknown".to_string());
+
+                            // 信号质量 (AT+CSQ)
+                            let signal_quality = send_at_get_line(s, "AT+CSQ").await
+                                .map(|r| parse_signal_quality(&r))
+                                .unwrap_or_else(|| "Unknown".to_string());
+
+                            // 模块温度 (AT+QTEMP)
+                            let temperature = send_at_get_line(s, "AT+QTEMP").await
+                                .and_then(|r| parse_qtemp_temperature(&r))
+                                .unwrap_or_else(|| "-- °C".to_string());
+
+                            (mfr, model, fw, imei, serial, hw_ver, module_type,
+                             sim_status, imsi, iccid, phone, net_status,
+                             signal_quality, temperature)
                         } else {
-                            ("Quectel".to_string(), "RM520N-GL".to_string(), "RM520NGLAAR03A03M4G_BETA".to_string(), "867584032145678".to_string())
+                            ("Quectel".to_string(), "RM520N-GL".to_string(),
+                             "RM520NGLAAR03A03M4G_BETA".to_string(), "867584032145678".to_string(),
+                             "QC2023RM520N001".to_string(), "R1.0".to_string(),
+                             "M.2 5G NR Module".to_string(), "Ready".to_string(),
+                             "460010123456789".to_string(), "89860112851234567890".to_string(),
+                             "+8613800138000".to_string(), "Registered".to_string(),
+                             "-64 dBm".to_string(), "42 °C".to_string())
+                        };
+
+                        // 静态能力信息（基于型号的常量）
+                        let (bands, max_rate, volte, gnss) = if model.contains("RG520N") || model.contains("RM5") {
+                            ("NR n1/n3/n5/n7/n8/n20/n28/n41/n77/n78/n79, LTE B1/B3/B5/B7/B8/B18/B19/B20/B26/B28/B32/B34/B38/B39/B40/B41/B42/B43".to_string(),
+                             "DL 4.2 Gbps / UL 600 Mbps".to_string(),
+                             "Supported".to_string(),
+                             "GPS/GLONASS/BDS/Galileo".to_string())
+                        } else {
+                            ("--".to_string(), "--".to_string(), "--".to_string(), "--".to_string())
                         };
 
                         let _ = req.resp_tx.send(serde_json::json!({
@@ -711,20 +832,20 @@ async fn hardware_polling_actor(
                                 "model": model,
                                 "firmware_version": fw,
                                 "imei": imei,
-                                "serial": "QC2023RM520N001",
-                                "hw_version": "R1.0",
-                                "module_type": "M.2 5G NR Module",
-                                "sim_status": "Ready",
-                                "imsi": "460010123456789",
-                                "iccid": "89860112851234567890",
-                                "phone": "+8613800138000",
-                                "net_status": "Registered",
-                                "signal": "-64 dBm",
-                                "temperature": "42 °C",
-                                "bands": "NR n1/n3/n5/n7/n8/n20/n28/n41/n77/n78/n79, LTE B1/B3/B5/B7/B8/B18/B19/B20/B26/B28/B32/B34/B38/B39/B40/B41/B42/B43",
-                                "max_rate": "DL 4.2 Gbps / UL 600 Mbps",
-                                "volte": "Supported",
-                                "gnss": "GPS/GLONASS/BDS/Galileo"
+                                "serial": serial,
+                                "hw_version": hw_ver,
+                                "module_type": module_type,
+                                "sim_status": sim_status,
+                                "imsi": imsi,
+                                "iccid": iccid,
+                                "phone": phone,
+                                "net_status": net_status,
+                                "signal": signal_quality,
+                                "temperature": temperature,
+                                "bands": bands,
+                                "max_rate": max_rate,
+                                "volte": volte,
+                                "gnss": gnss
                             }
                         }));
                     }

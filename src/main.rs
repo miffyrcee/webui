@@ -801,12 +801,19 @@ async fn hardware_polling_actor(
                         if let Ok(qtemp_resp) = send_at_command_inner(s, "AT+QTEMP").await {
                             if let Some(temp) = qtemp_resp.lines()
                                 .find_map(|l| {
-                                    if l.contains("+QTEMP:") {
-                                        l.split(',')
-                                            .collect::<Vec<_>>()
-                                            .windows(2)
-                                            .find(|w| w[0].trim().trim_matches('"').eq_ignore_ascii_case("CPU"))
-                                            .and_then(|w| w[1].trim().trim_matches('"').parse::<f64>().ok())
+                                    let l = l.trim();
+                                    if let Some(rest) = l.strip_prefix("+QTEMP:") {
+                                        let rest = rest.trim();
+                                        let parts: Vec<&str> = rest.split(',').collect();
+                                        if parts.len() >= 2 {
+                                            let name = parts[0].trim().trim_matches('"');
+                                            let val = parts[1].trim().trim_matches('"');
+                                            (name.contains("cpuss") || name.contains("mdmss"))
+                                                .then(|| val.parse::<f64>().ok())
+                                                .flatten()
+                                        } else {
+                                            None
+                                        }
                                     } else {
                                         None
                                     }

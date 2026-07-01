@@ -150,4 +150,20 @@ mod tests {
         // not 16 bytes, returns original
         assert_eq!(convert_dotted_ipv6_to_standard("not-ipv6"), "not-ipv6");
     }
+
+    #[test]
+    fn test_convert_dotted_ipv6_real_cid1() {
+        // 真实设备 CID 1 的点分 IPv6 → "36.9.137.112.11.104.29.156.24.190.51.35.28.252.89.150"
+        let input = "36.9.137.112.11.104.29.156.24.190.51.35.28.252.89.150";
+        let expected = "2409:8970:b68:1d9c:18be:3323:1cfc:5996";
+        assert_eq!(convert_dotted_ipv6_to_standard(input), expected);
+    }
+
+    #[test]
+    fn test_convert_dotted_ipv6_real_cid2() {
+        // 真实设备 CID 2 的点分 IPv6（IPv6 被放入 IPv4 字段）
+        let input = "36.9.129.112.11.10.92.211.24.190.51.33.74.23.82.57";
+        let expected = "2409:8170:b0a:5cd3:18be:3321:4a17:5239";
+        assert_eq!(convert_dotted_ipv6_to_standard(input), expected);
+    }
 }

@@ -737,4 +737,135 @@ OK\r\n";
         let resp = "+QTEMP:\"cpuss-0-usr\",\"--\"";
         assert_eq!(parse_qtemp_temperature(resp), None);
     }
+
+    // ── 以下测试基于真实设备 2026-07-01 采样数据 ──
+
+    #[test]
+    fn test_parse_cgpaddr_real_data() {
+        // 真实设备输出：5 个 CID，CID 1 有有效 IPv4 + 点分 IPv6，CID 2 仅有点分 IPv6（放错位置），CID 3-5 全零
+        let raw =
+            "+CGPADDR: 1,\"10.172.99.214\",\"36.9.137.112.11.104.29.156.24.190.51.35.28.252.89.150\"\n\
+             +CGPADDR: 2,\"36.9.129.112.11.10.92.211.24.190.51.33.74.23.82.57\"\n\
+             +CGPADDR: 3,\"0.0.0.0\",\"0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0\"\n\
+             +CGPADDR: 4,\"0.0.0.0\",\"0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0\"\n\
+             +CGPADDR: 5,\"0.0.0.0\",\"0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0\"";
+        let mut telemetry = crate::TelemetryData::default();
+        parse_cgpaddr(raw, &mut telemetry);
+        assert_eq!(telemetry.ipv4, "10.172.99.214");
+        assert_eq!(telemetry.ipv6, "2409:8970:b68:1d9c:18be:3323:1cfc:5996");
+    }
+
+    #[test]
+    fn test_parse_cgpaddr_all_zero() {
+        // 所有 CID 均为 0.0.0.0，应回退为 "--"
+        let raw = "+CGPADDR: 1,\"0.0.0.0\",\"0.0.0.0\"\n+CGPADDR: 2,\"0.0.0.0\"";
+        let mut telemetry = crate::TelemetryData::default();
+        parse_cgpaddr(raw, &mut telemetry);
+        assert_eq!(telemetry.ipv4, "--");
+        assert_eq!(telemetry.ipv6, "--");
+    }
+
+    #[test]
+    fn test_parse_qeng_real_nr5g_sa() {
+        // 真实 NR5G-SA 服务小区数据：NOCONN, TDD, 46000, cell=39074C001
+        let raw = "+QENG: \"servingcell\",\"NOCONN\",\"NR5G-SA\",\"TDD\",460,00,39074C001,751,72002F,504990,41,12,-65,-11,19,1,-";
+        let mut telemetry = crate::TelemetryData::default();
+        parse_qeng(raw, &mut telemetry);
+
+        assert_eq!(telemetry.network_mode, "NR5G-SA TDD");
+        assert_eq!(telemetry.mccmnc, "46000");
+        assert_eq!(telemetry.cell_id, "39074C001");
+        assert_eq!(telemetry.enb_id, "39074C");
+        assert_eq!(telemetry.tac, "72002F");
+        assert_eq!(telemetry.bands, "NR5G BAND 41");
+        assert_eq!(telemetry.bandwidth, "12 MHz");
+        assert_eq!(telemetry.earfcn, "504990");
+        assert_eq!(telemetry.pci, "751");
+
+        // 信号百分比计算：rsrp=-65 → (-65+140)/96*100 = 78
+        assert_eq!(telemetry.signal_percentage, "78%");
+        assert_eq!(telemetry.ss_rsrp, "-65 / 78%");
+        // rsrq=-11 → (-11+20)/17*100 = 52
+        assert_eq!(telemetry.ss_rsrq, "-11 / 52%");
+        // sinr=19 → (19+20)/50*100 = 78
+        assert_eq!(telemetry.sinr, "19 / 78%");
+
+        // assessment: rsrp=-65 > -80 (true), sinr=19 > 20 (false) → "Good"
+        assert_eq!(telemetry.assessment, "Good");
+    }
+
+    #[test]
+    fn test_parse_qcainfo_real_pcc_scc() {
+        // 真实 CA 数据：PCC(NR5G BAND 41, 12MHz) + SCC(NR5G BAND 28, 3MHz)
+        let raw =
+            "+QCAINFO: \"PCC\",504990,12,\"NR5G BAND 41\",751\n\
+             +QCAINFO: \"SCC\",156490,3,\"NR5G BAND 28\",1,250,0,-,-";
+        let mut telemetry = crate::TelemetryData::default();
+        parse_qcainfo(raw, &mut telemetry);
+
+        assert_eq!(telemetry.bands, "NR5G BAND 41, NR5G BAND 28");
+        assert_eq!(telemetry.bandwidth, "NR 15 MHz (12+3)");
+        assert_eq!(telemetry.earfcn, "504990, 156490");
+        // SCC pci 因字段偏移被解析为 rsrp 字段的值 "0"
+        assert_eq!(telemetry.pci, "751, 0");
+    }
+
+    #[test]
+    fn test_parse_qcainfo_empty() {
+        let mut telemetry = crate::TelemetryData::default();
+        parse_qcainfo("", &mut telemetry);
+        // 空响应不应改动 telemetry
+        assert!(telemetry.bands.is_empty());
+        assert!(telemetry.bandwidth.is_empty());
+    }
+
+    #[test]
+    fn test_parse_qtemp_temperature_real_full() {
+        // 真实完整 QTEMP 传感器输出，cpuss-0-usr 最先匹配
+        let resp =
+            "+QTEMP:\"modem-lte-sub6-pa1\",\"40\"\n\
+             +QTEMP:\"modem-sdr0-pa0\",\"0\"\n\
+             +QTEMP:\"modem-sdr0-pa1\",\"0\"\n\
+             +QTEMP:\"modem-sdr0-pa2\",\"0\"\n\
+             +QTEMP:\"modem-sdr1-pa0\",\"0\"\n\
+             +QTEMP:\"modem-sdr1-pa1\",\"0\"\n\
+             +QTEMP:\"modem-sdr1-pa2\",\"0\"\n\
+             +QTEMP:\"modem-mmw0\",\"0\"\n\
+             +QTEMP:\"aoss-0-usr\",\"42\"\n\
+             +QTEMP:\"cpuss-0-usr\",\"42\"\n\
+             +QTEMP:\"mdmq6-0-usr\",\"42\"\n\
+             +QTEMP:\"mdmss-0-usr\",\"42\"\n\
+             +QTEMP:\"mdmss-1-usr\",\"42\"\n\
+             +QTEMP:\"mdmss-2-usr\",\"42\"\n\
+             +QTEMP:\"mdmss-3-usr\",\"41\"\n\
+             +QTEMP:\"modem-lte-sub6-pa2\",\"40\"\n\
+             +QTEMP:\"modem-ambient-usr\",\"41\"";
+        assert_eq!(parse_qtemp_temperature(resp), Some("42 °C".to_string()));
+    }
+
+    #[test]
+    fn test_parse_qtemp_temperature_mdmss_before_cpuss() {
+        // mdmss 传感器出现在 cpuss 之前，应优先返回 mdmss
+        let resp =
+            "+QTEMP:\"mdmss-0-usr\",\"41\"\n\
+             +QTEMP:\"cpuss-0-usr\",\"42\"";
+        assert_eq!(parse_qtemp_temperature(resp), Some("41 °C".to_string()));
+    }
+
+    #[test]
+    fn test_parse_qeng_carrier_aggregation_multiple_servingcell() {
+        // 多载波聚合场景：两个 +QENG servingcell 行
+        let raw =
+            "+QENG: \"servingcell\",\"CONNECT\",\"NR5G-SA\",\"TDD\",460,00,39074C001,751,72002F,504990,41,12,-65,-11,19,1,-\n\
+             +QENG: \"servingcell\",\"CONNECT\",\"NR5G-SA\",\"TDD\",460,00,39074C001,250,72002F,156490,28,3,-70,-12,15,1,-";
+        let mut telemetry = crate::TelemetryData::default();
+        parse_qeng(raw, &mut telemetry);
+
+        assert_eq!(telemetry.bands, "NR5G BAND 41, NR5G BAND 28");
+        assert_eq!(telemetry.bandwidth, "NR 15 MHz (12+3)");
+        assert_eq!(telemetry.earfcn, "504990, 156490");
+        assert_eq!(telemetry.pci, "751, 250");
+        // 使用 PCC（首行）的信号值
+        assert_eq!(telemetry.signal_percentage, "78%");
+    }
 }

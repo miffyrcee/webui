@@ -445,17 +445,22 @@ async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, S
 
     let _lock = get_at_lock().lock().await;
 
-    let output = tokio::time::timeout(
-        Duration::from_secs(10),
-        tokio::process::Command::new("/opt/atcmd_rs")
-            .arg("-p")
-            .arg(serial_path)
-            .arg(cmd)
-            .output(),
-    )
-    .await
-    .map_err(|_| format!("AT命令超时(10s): {}", cmd))?
-    .map_err(|e| format!("atcmd_rs执行失败: {}", e))?;
+    let child = tokio::process::Command::new("/opt/atcmd_rs")
+        .arg("-p")
+        .arg(serial_path)
+        .arg(cmd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("atcmd_rs启动失败: {}", e))?;
+
+    let output = match tokio::time::timeout(Duration::from_secs(10), child.wait_with_output()).await
+    {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => return Err(format!("atcmd_rs执行失败: {}", e)),
+        Err(_) => return Err(format!("AT命令超时(10s): {}", cmd)),
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

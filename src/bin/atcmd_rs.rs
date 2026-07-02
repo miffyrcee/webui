@@ -1,4 +1,4 @@
-use std::env;
+use clap::Parser;
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
 use std::process;
@@ -16,67 +16,44 @@ const TERMINATORS: &[&str] = &[
     "OK\r\n",
 ];
 
-fn print_usage(program_name: &str) {
-    println!("Usage for {program_name}: ");
-    println!("-p, --path: smd port");
-    println!("-h, --help: usage help");
-    println!("e.g. {program_name} 'at cmd' (default /dev/smd11)");
-    println!("     {program_name} -p <smd port> 'at cmd'");
+#[derive(Parser)]
+#[command(name = "atcmd_rs", about = "AT command tool for Quectel modem")]
+struct Cli {
+    /// AT command to send to the modem
+    at_command: String,
+
+    /// SMD device path
+    #[arg(short = 'p', long = "path", default_value = "/dev/smd11")]
+    device_path: String,
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    let program_name = args.first().map_or("atcmd_rs", |s| s.as_str());
-
-    // OPTIMIZATION: We avoid heavy external CLI parsing crates (like `clap`)
-    // to keep the compiled binary size as small as possible for embedded devices.
-    let (device_path, at_command) = match args.len() {
-        2 => {
-            let arg = &args[1];
-            if arg == "-h" || arg == "--help" || arg == "help" {
-                print_usage(program_name);
-                process::exit(0);
-            }
-            ("/dev/smd11", arg.as_str())
-        }
-        4 => {
-            if args[1] == "-p" || args[1] == "--path" || args[1] == "path" {
-                (args[2].as_str(), args[3].as_str())
-            } else {
-                print_usage(program_name);
-                process::exit(1);
-            }
-        }
-        _ => {
-            print_usage(program_name);
-            process::exit(1);
-        }
-    };
+    let cli = Cli::parse();
 
     // Open the serial device. Linux TTY drivers natively handle the RTS/CTS
     // flow control upon opening, bypassing the need for manual ioctl hacks
-    // seen in the original `atcmd_rs` binary.
-    let mut file = match OpenOptions::new().read(true).write(true).open(device_path) {
+    // seen in the original `atcmd` binary.
+    let mut file = match OpenOptions::new().read(true).write(true).open(&cli.device_path) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("fopen({}) failed: {}", device_path, e);
+            eprintln!("fopen({}) failed: {}", cli.device_path, e);
             process::exit(1);
         }
     };
 
     // Send the command + CRLF in a single write to prevent interleaving from
     // other processes on the same SMD device (a real concern on multi-actor systems).
-    let mut cmd_buf = at_command.as_bytes().to_vec();
+    let mut cmd_buf = cli.at_command.as_bytes().to_vec();
     cmd_buf.extend_from_slice(b"\r\n");
     if let Err(e) = file.write_all(&cmd_buf) {
-        eprintln!("failed to send '{}' to modem: {}", at_command, e);
+        eprintln!("failed to send '{}' to modem: {}", cli.at_command, e);
         process::exit(1);
     }
     let _ = file.flush();
 
     // SAFETY & FIX: The original Compal `atcli` used a 4096-byte global buffer (`byte_2410`)
     // and `stpcpy`, causing buffer overflows on large responses.
-    // The original `atcmd_rs` used `read` + `strstr`, causing serial fragmentation bugs.
+    // The original `atcmd` used `read` + `strstr`, causing serial fragmentation bugs.
     //
     // We fix both by using a streaming `BufReader` that reads exactly up to the `\n` byte.
     // This prevents memory bloat (O(1) memory usage) and guarantees string completeness.
@@ -93,14 +70,7 @@ fn main() {
             Ok(_) => {
                 print!("{}", line);
 
-                let mut break_loop = false;
-                for &terminator in TERMINATORS {
-                    if line.starts_with(terminator) {
-                        break_loop = true;
-                        break;
-                    }
-                }
-                if break_loop {
+                if TERMINATORS.iter().any(|&t| line.starts_with(t)) {
                     break;
                 }
             }

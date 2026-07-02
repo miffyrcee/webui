@@ -15,6 +15,7 @@ use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::{env, sync::Arc};
 use sysinfo::{Components, System};
@@ -375,6 +376,69 @@ fn get_at_lock() -> &'static tokio::sync::Mutex<()> {
     AT_CMD_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
+/// AT 命令队列 - 合并相同请求避免重复执行
+struct AtCommandQueue {
+    inner: tokio::sync::Mutex<HashMap<String, AtPendingCmd>>,
+}
+
+struct AtPendingCmd {
+    waiters: Vec<oneshot::Sender<Result<String, String>>>,
+}
+
+static AT_CMD_QUEUE: OnceLock<AtCommandQueue> = OnceLock::new();
+
+fn get_at_queue() -> &'static AtCommandQueue {
+    AT_CMD_QUEUE.get_or_init(|| AtCommandQueue::new())
+}
+
+impl AtCommandQueue {
+    fn new() -> Self {
+        AtCommandQueue {
+            inner: tokio::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// 提交 AT 命令到队列并等待结果。
+    /// 如果相同命令已在执行中，则合并请求共享相同的结果。
+    async fn execute(&self, serial_path: &str, cmd: &str) -> Result<String, String> {
+        use std::collections::hash_map::Entry;
+
+        let mut guard = self.inner.lock().await;
+
+        match guard.entry(cmd.to_string()) {
+            Entry::Occupied(mut entry) => {
+                // 相同命令已在执行中，订阅其结果
+                let (tx, rx) = oneshot::channel();
+                entry.get_mut().waiters.push(tx);
+                drop(guard);
+                rx.await.unwrap_or(Err("AT命令队列等待被取消".to_string()))
+            }
+            Entry::Vacant(entry) => {
+                // 首次请求，我们负责执行
+                entry.insert(AtPendingCmd { waiters: vec![] });
+                drop(guard);
+
+                let result = send_at_command_inner(serial_path, cmd).await;
+
+                // 广播结果给所有等待者
+                let mut guard = self.inner.lock().await;
+                if let Some(pending) = guard.remove(cmd) {
+                    for waiter in pending.waiters {
+                        let _ = waiter.send(result.clone());
+                    }
+                }
+                result
+            }
+        }
+    }
+}
+
+/// 带队列去重的 AT 命令发送。
+/// 相同命令同时请求时会被合并，避免重复执行。
+async fn send_at_command_dedup(serial_path: &str, cmd: &str) -> Result<String, String> {
+    get_at_queue().execute(serial_path, cmd).await
+}
+
 /// 底层 AT 命令发送（使用已打开的串口句柄）
 async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, String> {
     let start = std::time::Instant::now();
@@ -461,7 +525,7 @@ async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, S
 
 /// 发送 AT 命令并返回首行有效响应（自动去除 AT echo、OK/ERROR、空行）
 async fn send_at_get_line(serial_path: &str, cmd: &str) -> Option<String> {
-    send_at_command_inner(serial_path, cmd)
+    send_at_command_dedup(serial_path, cmd)
         .await
         .ok()
         .and_then(|resp| {
@@ -551,7 +615,7 @@ async fn hardware_polling_actor(
                     AtAction::ManualAt(cmd) => {
                         println!("👨‍💻 用户手动执行 AT: {}", cmd);
                         let response = if serial_available {
-                            match send_at_command_inner(&serial_path, &cmd).await {
+                            match send_at_command_dedup(&serial_path, &cmd).await {
                                 Ok(resp) => resp,
                                 Err(e) => format!("ERROR: {}", e),
                             }
@@ -822,33 +886,36 @@ async fn hardware_polling_actor(
                     let mut telemetry = TelemetryData::default();
 
                     if serial_available {
-                        if let Ok(cgpaddr_resp) = send_at_command_inner(&serial_path, "AT+CGPADDR").await {
+                        // 非轮询任务优先级最高：有待处理的用户请求时跳过本轮 AT 轮询
+                        if actor_rx.is_empty() {
+                            if let Ok(cgpaddr_resp) = send_at_command_dedup(&serial_path, "AT+CGPADDR").await {
                             parse_cgpaddr(&cgpaddr_resp, &mut telemetry);
                         }
-                        if let Ok(qeng_resp) = send_at_command_inner(&serial_path, "AT+QENG=\"servingcell\"").await {
+                        if let Ok(qeng_resp) = send_at_command_dedup(&serial_path, "AT+QENG=\"servingcell\"").await {
                             parse_qeng(&qeng_resp, &mut telemetry);
                         }
-                        if let Ok(qcainfo_resp) = send_at_command_inner(&serial_path, "AT+QCAINFO").await {
+                        if let Ok(qcainfo_resp) = send_at_command_dedup(&serial_path, "AT+QCAINFO").await {
                             parse_qcainfo(&qcainfo_resp, &mut telemetry);
                         }
-                        if let Ok(qtemp_resp) = send_at_command_inner(&serial_path, "AT+QTEMP").await {
+                        if let Ok(qtemp_resp) = send_at_command_dedup(&serial_path, "AT+QTEMP").await {
                             if let Some(temp) = parse_qtemp_temperature(&qtemp_resp) {
                                 telemetry.temperature = temp;
                             }
                         }
                         // 实时获取流量统计（QGDNRCNT → QGDAT 回退）
-                        telemetry.traffic_stats = send_at_command_inner(&serial_path, "AT+QGDNRCNT?")
+                        telemetry.traffic_stats = send_at_command_dedup(&serial_path, "AT+QGDNRCNT?")
                             .await
                             .ok()
                             .and_then(|r| r.lines().find(|l| l.contains("+QGDNRCNT:")).and_then(|l| parse_traffic_line(l, "+QGDNRCNT:", false)))
                             .unwrap_or_default();
                         if telemetry.traffic_stats.is_empty() {
-                            telemetry.traffic_stats = send_at_command_inner(&serial_path, "AT+QGDAT?")
+                            telemetry.traffic_stats = send_at_command_dedup(&serial_path, "AT+QGDAT?")
                                 .await
                                 .ok()
                                 .and_then(|r| r.lines().find(|l| l.contains("+QGDAT:")).and_then(|l| parse_traffic_line(l, "+QGDAT:", true)))
                                 .unwrap_or_default();
                         }
+                        } // end if actor_rx.is_empty()
                         set_default(&mut telemetry.traffic_stats, "N/A");
                         if telemetry.signal_percentage.is_empty() {
                             telemetry.signal_percentage = "85%".to_string();

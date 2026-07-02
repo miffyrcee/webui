@@ -26,7 +26,7 @@ fn print_usage(program_name: &str) {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let program_name = args.first().map_or("atcmd", |s| s.as_str());
+    let program_name = args.first().map_or("atcmd_rs", |s| s.as_str());
 
     // OPTIMIZATION: We avoid heavy external CLI parsing crates (like `clap`)
     // to keep the compiled binary size as small as possible for embedded devices.
@@ -55,7 +55,7 @@ fn main() {
 
     // Open the serial device. Linux TTY drivers natively handle the RTS/CTS
     // flow control upon opening, bypassing the need for manual ioctl hacks
-    // seen in the original `atcmd` binary.
+    // seen in the original `atcmd_rs` binary.
     let mut file = match OpenOptions::new().read(true).write(true).open(device_path) {
         Ok(f) => f,
         Err(e) => {
@@ -76,7 +76,7 @@ fn main() {
 
     // SAFETY & FIX: The original Compal `atcli` used a 4096-byte global buffer (`byte_2410`)
     // and `stpcpy`, causing buffer overflows on large responses.
-    // The original `atcmd` used `read` + `strstr`, causing serial fragmentation bugs.
+    // The original `atcmd_rs` used `read` + `strstr`, causing serial fragmentation bugs.
     //
     // We fix both by using a streaming `BufReader` that reads exactly up to the `\n` byte.
     // This prevents memory bloat (O(1) memory usage) and guarantees string completeness.

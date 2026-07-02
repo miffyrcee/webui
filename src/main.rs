@@ -383,7 +383,7 @@ async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, S
 
     let output = tokio::time::timeout(
         Duration::from_secs(10),
-        tokio::process::Command::new("/opt/bin/atcmd_rs")
+        tokio::process::Command::new("/opt/atcmd_rs")
             .arg("-p")
             .arg(serial_path)
             .arg(cmd)

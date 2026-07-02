@@ -1,197 +1,114 @@
 use std::env;
-use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::time::sleep;
+use std::fs::OpenOptions;
+use std::io::{BufRead, BufReader, Write};
+use std::process;
 
-const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
+// These are the exact terminators extracted from the original Compal firmware.
+// The original code iterated through these to know when the modem finished replying.
+const TERMINATORS: &[&str] = &[
+    "+CME ERROR:",
+    "+CMS ERROR:",
+    "BUSY\r\n",
+    "ERROR\r\n",
+    "NO ANSWER\r\n",
+    "NO CARRIER\r\n",
+    "NO DIALTONE\r\n",
+    "OK\r\n",
+];
 
-/// Serial device handle wrapping a raw tokio file descriptor.
-enum SerialHandle {
-    Raw(tokio::fs::File),
+fn print_usage(program_name: &str) {
+    println!("Usage for {program_name}: ");
+    println!("-p, --path: smd port");
+    println!("-h, --help: usage help");
+    println!("e.g. {program_name} 'at cmd' (default /dev/smd11)");
+    println!("     {program_name} -p <smd port> 'at cmd'");
 }
 
-impl SerialHandle {
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    let program_name = args.first().map_or("atcmd", |s| s.as_str());
+
+    // OPTIMIZATION: We avoid heavy external CLI parsing crates (like `clap`)
+    // to keep the compiled binary size as small as possible for embedded devices.
+    let (device_path, at_command) = match args.len() {
+        2 => {
+            let arg = &args[1];
+            if arg == "-h" || arg == "--help" || arg == "help" {
+                print_usage(program_name);
+                process::exit(0);
+            }
+            ("/dev/smd11", arg.as_str())
+        }
+        4 => {
+            if args[1] == "-p" || args[1] == "--path" || args[1] == "path" {
+                (args[2].as_str(), args[3].as_str())
+            } else {
+                print_usage(program_name);
+                process::exit(1);
+            }
+        }
+        _ => {
+            print_usage(program_name);
+            process::exit(1);
+        }
+    };
+
     // Open the serial device. Linux TTY drivers natively handle the RTS/CTS
     // flow control upon opening, bypassing the need for manual ioctl hacks
     // seen in the original `atcmd` binary.
-    async fn open(path: &str) -> Option<Self> {
-        match tokio::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)
-            .await
-        {
-            Ok(file) => Some(SerialHandle::Raw(file)),
-            Err(e) => {
-                eprintln!("❌ 打开串口设备失败: {} ({})", path, e);
-                None
-            }
-        }
-    }
-
-    async fn write_all(&mut self, buf: &[u8]) -> Result<(), String> {
-        let mut written = 0;
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-
-        while written < buf.len() {
-            if tokio::time::Instant::now() >= deadline {
-                return Err(format!(
-                    "写入超时 (5s)，已写入 {}/{} 字节",
-                    written,
-                    buf.len()
-                ));
-            }
-            match self {
-                SerialHandle::Raw(f) => match f.write(&buf[written..]).await {
-                    Ok(0) => sleep(Duration::from_millis(10)).await,
-                    Ok(n) => written += n,
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        sleep(Duration::from_millis(10)).await;
-                    }
-                    Err(ref e) if e.raw_os_error() == Some(16) => {
-                        sleep(Duration::from_millis(10)).await;
-                    }
-                    Err(e) => return Err(format!("写入失败: {}", e)),
-                },
-            }
-        }
-        Ok(())
-    }
-
-    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, String> {
-        match self {
-            SerialHandle::Raw(f) => {
-                match tokio::time::timeout(Duration::from_millis(500), f.read(buf)).await {
-                    Ok(Ok(n)) => Ok(n),
-                    Ok(Err(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(0),
-                    Ok(Err(e)) => Err(format!("读取失败: {}", e)),
-                    Err(_) => Err("读取超时 (500ms)".to_string()),
-                }
-            }
-        }
-    }
-}
-
-#[tokio::main]
-async fn main() {
-    let args: Vec<String> = env::args().collect();
-    let serial_path =
-        env::var("AT_SERIAL_PORT").unwrap_or_else(|_| DEFAULT_SERIAL_PORT.to_string());
-
-    if args.len() < 2 {
-        eprintln!("用法: atcmd_rs <AT 命令>");
-        eprintln!("  或:  atcmd_rs -i               (交互模式)");
-        eprintln!("  或:  AT_SERIAL_PORT=/dev/smd11 atcmd_rs AT+CSQ");
-        std::process::exit(1);
-    }
-
-    // Interactive mode
-    if args[1] == "-i" {
-        println!("🔌 AT Command Interactive Mode");
-        println!("   设备: {}", serial_path);
-        println!("   输入 AT 命令并回车，输入 exit 或 quit 退出");
-        interactive_mode(&serial_path).await;
-        return;
-    }
-
-    // One-shot mode: join all positional args as one command
-    let cmd = args[1..].join(" ");
-
-    let Some(mut serial) = SerialHandle::open(&serial_path).await else {
-        std::process::exit(1);
-    };
-
-    match send_at_command(&mut serial, &cmd).await {
-        Ok(resp) => {
-            println!("{}", resp);
-            if resp.contains("ERROR") {
-                std::process::exit(2);
-            }
-        }
+    let mut file = match OpenOptions::new().read(true).write(true).open(device_path) {
+        Ok(f) => f,
         Err(e) => {
-            eprintln!("❌ AT 命令失败: {}", e);
-            std::process::exit(1);
+            eprintln!("fopen({}) failed: {}", device_path, e);
+            process::exit(1);
         }
-    }
-}
-
-/// 交互模式：循环读取用户输入并发送 AT 命令
-async fn interactive_mode(serial_path: &str) {
-    let Some(mut serial) = SerialHandle::open(serial_path).await else {
-        return;
     };
 
+    // Send the command directly as bytes.
+    if let Err(e) = file.write_all(at_command.as_bytes()) {
+        eprintln!("failed to send '{}' to modem (res = {})", at_command, e);
+        process::exit(1);
+    }
+    if let Err(e) = file.write_all(b"\r\n") {
+        eprintln!("failed to send CRLF to modem: {}", e);
+        process::exit(1);
+    }
+    let _ = file.flush();
+
+    // SAFETY & FIX: The original Compal `atcli` used a 4096-byte global buffer (`byte_2410`)
+    // and `stpcpy`, causing buffer overflows on large responses.
+    // The original `atcmd` used `read` + `strstr`, causing serial fragmentation bugs.
+    //
+    // We fix both by using a streaming `BufReader` that reads exactly up to the `\n` byte.
+    // This prevents memory bloat (O(1) memory usage) and guarantees string completeness.
+    let mut reader = BufReader::new(file);
     let mut line = String::new();
+
     loop {
         line.clear();
-        print!("atcmd> ");
-        use std::io::Write;
-        let _ = std::io::stdout().flush();
-
-        if std::io::stdin().read_line(&mut line).is_err() || line.trim().is_empty() {
-            continue;
-        }
-
-        let cmd = line.trim();
-        match cmd {
-            "exit" | "quit" => {
-                println!("再见！");
+        match reader.read_line(&mut line) {
+            Ok(0) => {
+                eprintln!("EOF from modem");
                 break;
             }
-            _ => {}
-        }
+            Ok(_) => {
+                print!("{}", line);
 
-        match send_at_command(&mut serial, cmd).await {
-            Ok(resp) => print!("{}", resp),
-            Err(e) => eprintln!("❌ {}", e),
+                let mut break_loop = false;
+                for &terminator in TERMINATORS {
+                    if line.starts_with(terminator) {
+                        break_loop = true;
+                        break;
+                    }
+                }
+                if break_loop {
+                    break;
+                }
+            }
+            Err(e) => {
+                eprintln!("Error reading from modem: {}", e);
+                break;
+            }
         }
     }
-}
-
-/// 发送 AT 命令并返回完整响应
-async fn send_at_command(serial: &mut SerialHandle, cmd: &str) -> Result<String, String> {
-    let full_cmd = format!("{}\r\n", cmd);
-
-    serial.write_all(full_cmd.as_bytes()).await?;
-
-    sleep(Duration::from_millis(200)).await;
-
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    let mut buf = [0u8; 1024];
-    let mut response = Vec::with_capacity(2048);
-    let mut consecutive_zeros = 0u32;
-
-    loop {
-        if tokio::time::Instant::now() >= deadline {
-            return Err(format!(
-                "AT 命令总超时 (5s)，已读取 {} 字节",
-                response.len()
-            ));
-        }
-
-        match serial.read(&mut buf).await {
-            Ok(0) => {
-                consecutive_zeros += 1;
-                if consecutive_zeros > 3 {
-                    break;
-                }
-                sleep(Duration::from_millis(50)).await;
-            }
-            Ok(n) => {
-                consecutive_zeros = 0;
-                response.extend_from_slice(&buf[..n]);
-
-                if response.len() >= 6 && response[response.len() - 6..] == *b"\r\nOK\r\n" {
-                    break;
-                }
-                if response.len() >= 9 && response[response.len() - 9..] == *b"\r\nERROR\r\n" {
-                    break;
-                }
-                sleep(Duration::from_millis(10)).await;
-            }
-            Err(e) => return Err(e),
-        }
-    }
-
-    Ok(String::from_utf8_lossy(&response).into_owned())
 }

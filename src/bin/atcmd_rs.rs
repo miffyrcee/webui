@@ -64,13 +64,12 @@ fn main() {
         }
     };
 
-    // Send the command directly as bytes.
-    if let Err(e) = file.write_all(at_command.as_bytes()) {
-        eprintln!("failed to send '{}' to modem (res = {})", at_command, e);
-        process::exit(1);
-    }
-    if let Err(e) = file.write_all(b"\r\n") {
-        eprintln!("failed to send CRLF to modem: {}", e);
+    // Send the command + CRLF in a single write to prevent interleaving from
+    // other processes on the same SMD device (a real concern on multi-actor systems).
+    let mut cmd_buf = at_command.as_bytes().to_vec();
+    cmd_buf.extend_from_slice(b"\r\n");
+    if let Err(e) = file.write_all(&cmd_buf) {
+        eprintln!("failed to send '{}' to modem: {}", at_command, e);
         process::exit(1);
     }
     let _ = file.flush();

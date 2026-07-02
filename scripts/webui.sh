@@ -10,7 +10,7 @@ Description=webui.service
 After=network.target port_bridge.service dnsmasq.service lighttpd.service
 
 [Service]
-ExecStart=/opt/bin/quectel-webui
+ExecStart=/opt/quectel-webui
 ExecStop=/usr/bin/kill -s HUP \$MAINPID
 Restart=on-failure
 RestartSec=60s

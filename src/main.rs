@@ -15,6 +15,7 @@ use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use std::sync::OnceLock;
 use std::{env, sync::Arc};
 use sysinfo::{Components, System};
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
@@ -367,17 +368,30 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     *guard = info;
 }
 
+/// 全局 AT 命令互斥锁，防止并发写入 SMD 设备
+static AT_CMD_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+fn get_at_lock() -> &'static tokio::sync::Mutex<()> {
+    AT_CMD_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 /// 底层 AT 命令发送（使用已打开的串口句柄）
 async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, String> {
     let start = std::time::Instant::now();
 
-    let output = tokio::process::Command::new("/opt/bin/atcmd_rs")
-        .arg("-p")
-        .arg(serial_path)
-        .arg(cmd)
-        .output()
-        .await
-        .map_err(|e| format!("atcmd_rs执行失败: {}", e))?;
+    let _lock = get_at_lock().lock().await;
+
+    let output = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::process::Command::new("/opt/bin/atcmd_rs")
+            .arg("-p")
+            .arg(serial_path)
+            .arg(cmd)
+            .output(),
+    )
+    .await
+    .map_err(|_| format!("AT命令超时(10s): {}", cmd))?
+    .map_err(|e| format!("atcmd_rs执行失败: {}", e))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

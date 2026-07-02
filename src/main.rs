@@ -25,7 +25,6 @@ use at::utils::{decode_hex_ucs2, format_bytes};
 
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
 
-
 #[derive(Debug)]
 enum AtAction {
     ManualAt(String),
@@ -138,7 +137,6 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-
 /// 如果字段为空则设为默认值
 fn set_default(field: &mut String, default: &str) {
     if field.is_empty() {
@@ -156,10 +154,18 @@ fn parse_traffic_line(line: &str, prefix: &str, quoted: bool) -> Option<String> 
         .collect();
     if parts.len() >= 2 {
         let parse_val = |s: &str| -> u64 {
-            let s = if quoted { s.trim().trim_matches('"') } else { s.trim() };
+            let s = if quoted {
+                s.trim().trim_matches('"')
+            } else {
+                s.trim()
+            };
             s.parse().unwrap_or(0)
         };
-        Some(format!("TX {} / RX {}", format_bytes(parse_val(parts[0])), format_bytes(parse_val(parts[1]))))
+        Some(format!(
+            "TX {} / RX {}",
+            format_bytes(parse_val(parts[0])),
+            format_bytes(parse_val(parts[1]))
+        ))
     } else {
         None
     }
@@ -177,7 +183,11 @@ async fn fetch_network_provider(serial_path: &str) -> String {
                     let raw = raw.trim().trim_matches('"').trim();
                     if !raw.is_empty() && raw != "????" {
                         let decoded = decode_hex_ucs2(raw);
-                        return if decoded.is_empty() { raw.to_string() } else { decoded };
+                        return if decoded.is_empty() {
+                            raw.to_string()
+                        } else {
+                            decoded
+                        };
                     }
                 }
             }
@@ -194,7 +204,11 @@ async fn fetch_network_provider(serial_path: &str) -> String {
                     let raw = parts[1].trim().trim_matches('"').trim();
                     if !raw.is_empty() && raw != "????" {
                         let decoded = decode_hex_ucs2(raw);
-                        return if decoded.is_empty() { raw.to_string() } else { decoded };
+                        return if decoded.is_empty() {
+                            raw.to_string()
+                        } else {
+                            decoded
+                        };
                     }
                 }
             }
@@ -205,7 +219,8 @@ async fn fetch_network_provider(serial_path: &str) -> String {
     if let Ok(resp) = send_at_command_inner(serial_path, "AT+QENG=\"servingcell\"").await {
         for line in resp.lines() {
             if line.contains("+QENG: \"servingcell\"") {
-                let parts: Vec<&str> = line.split(',')
+                let parts: Vec<&str> = line
+                    .split(',')
                     .map(|s| s.trim().trim_matches('"'))
                     .collect();
                 if parts.len() >= 6 {
@@ -285,7 +300,11 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     if let Ok(resp) = send_at_command_inner(serial_path, "AT+CGCONTRDP").await {
         for line in resp.lines() {
             if line.contains("+CGCONTRDP:") {
-                let after_prefix = line.trim().strip_prefix("+CGCONTRDP:").unwrap_or(line).trim();
+                let after_prefix = line
+                    .trim()
+                    .strip_prefix("+CGCONTRDP:")
+                    .unwrap_or(line)
+                    .trim();
                 let parts: Vec<&str> = after_prefix.split(',').collect();
                 if parts.len() >= 3 {
                     let apn = parts[2].trim().trim_matches('"').to_string();
@@ -307,7 +326,10 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
                     let parts: Vec<&str> = after_prefix.split(',').collect();
                     if parts.len() >= 3 {
                         let apn = parts[2].trim().trim_matches('"').to_string();
-                        if !apn.is_empty() && !apn.contains("placeholder") && !apn.starts_with("apn") {
+                        if !apn.is_empty()
+                            && !apn.contains("placeholder")
+                            && !apn.starts_with("apn")
+                        {
                             info.apn = apn;
                             found_apn = true;
                             break;
@@ -319,7 +341,8 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
             if !found_apn {
                 for line in resp.lines() {
                     if line.contains("+CGDCONT:") {
-                        let after_prefix = line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
+                        let after_prefix =
+                            line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
                         let parts: Vec<&str> = after_prefix.split(',').collect();
                         if parts.len() >= 3 {
                             let apn = parts[2].trim().trim_matches('"').to_string();
@@ -382,21 +405,24 @@ async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, S
 
 /// 发送 AT 命令并返回首行有效响应（自动去除 AT echo、OK/ERROR、空行）
 async fn send_at_get_line(serial_path: &str, cmd: &str) -> Option<String> {
-    send_at_command_inner(serial_path, cmd).await.ok().and_then(|resp| {
-        resp.lines().find_map(|l| {
-            let trimmed = l.trim();
-            if !trimmed.is_empty()
-                && !trimmed.contains("OK")
-                && !trimmed.contains("ERROR")
-                && !trimmed.starts_with("AT+")
-                && !trimmed.starts_with("+CME ERROR:")
-            {
-                Some(trimmed.to_string())
-            } else {
-                None
-            }
+    send_at_command_inner(serial_path, cmd)
+        .await
+        .ok()
+        .and_then(|resp| {
+            resp.lines().find_map(|l| {
+                let trimmed = l.trim();
+                if !trimmed.is_empty()
+                    && !trimmed.contains("OK")
+                    && !trimmed.contains("ERROR")
+                    && !trimmed.starts_with("AT+")
+                    && !trimmed.starts_with("+CME ERROR:")
+                {
+                    Some(trimmed.to_string())
+                } else {
+                    None
+                }
+            })
         })
-    })
 }
 
 /// 从 AT 命令的至少一次查询结果中获取网络状态
@@ -409,7 +435,8 @@ fn parse_net_status(creg_raw: &str) -> String {
                 "5" => "Registered (roaming)",
                 "2" | "3" | "4" => "Not registered",
                 _ => "Unknown",
-            }.to_string();
+            }
+            .to_string();
         }
     }
     "Unknown".to_string()
@@ -430,12 +457,10 @@ fn parse_signal_quality(csq_raw: &str) -> String {
     "Unknown".to_string()
 }
 
-/// 异步发送 AT 命令（打开->发送->关闭）
-async fn send_at_command_async(path: &str, cmd: &str) -> Result<String, String> {
-    send_at_command_inner(path, cmd).await
-}
-
-fn static_file_response(body: &'static str, content_type: &'static str) -> Response<axum::body::Body> {
+fn static_file_response(
+    body: &'static str,
+    content_type: &'static str,
+) -> Response<axum::body::Body> {
     Response::builder()
         .header(header::CONTENT_TYPE, content_type)
         .body(axum::body::Body::from(body))
@@ -987,7 +1012,10 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
 }
 
 async fn style_handler() -> impl IntoResponse {
-    static_file_response(include_str!("../templates/style.css"), "text/css; charset=utf-8")
+    static_file_response(
+        include_str!("../templates/style.css"),
+        "text/css; charset=utf-8",
+    )
 }
 
 /// Decode UCS-2 hex-encoded SMS body text in +CMGL AT responses

@@ -14,3 +14,4 @@ chrono = "0.4.44"
 pest = "2.7"
 pest_derive = "2.7"
 clap = { version = "4", features = ["derive"] }
+async-trait = "0.1"

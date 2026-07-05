@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::{env, sync::Arc};
 use sysinfo::{Components, System};
-use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
+use tokio::sync::{RwLock, broadcast, mpsc, oneshot, watch};
 use tokio::time::sleep;
 
 use at::parser::{parse_cgpaddr, parse_qcainfo, parse_qeng, parse_qtemp_temperature};
@@ -196,40 +196,517 @@ struct TelemetryData {
     updated: String,
 }
 
-#[tokio::main]
-async fn main() {
-    let serial_path =
-        env::var("AT_SERIAL_PORT").unwrap_or_else(|_| DEFAULT_SERIAL_PORT.to_string());
-    println!("🔌 使用串口设备: {}", serial_path);
+// ============================================================================
+// 第一步：解耦真机/仿真 — HardwareBackend trait + RealBackend + SimBackend
+// ============================================================================
 
-    let (tx, _) = broadcast::channel(100);
-    let (actor_tx, actor_rx) = mpsc::channel(32);
-
-    let app_state = Arc::new(AppState {
-        tx: tx.clone(),
-        actor_tx,
-        active_views: AtomicUsize::new(0),
-        global: RwLock::new(GlobalTelemetry::default()),
-    });
-
-    // 获取一次静态信息
-    fetch_static_info(&app_state, &serial_path).await;
-
-    tokio::spawn({
-        let state = app_state.clone();
-        async move { hardware_polling_actor(state, actor_rx, serial_path).await }
-    });
-
-    let app = Router::new()
-        .route("/", get(index_handler))
-        .route("/ws", get(ws_handler))
-        .route("/style.css", get(style_handler))
-        .with_state(app_state);
-
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    println!("⚡ 移远 5G 终端 WebUI 服务端已就绪: http://0.0.0.0:3000");
-    axum::serve(listener, app).await.unwrap();
+/// 设备信息（HardwareBackend::read_device_info 返回值）
+#[derive(Default)]
+struct DeviceInfoData {
+    manufacturer: String,
+    model: String,
+    firmware: String,
+    imei: String,
+    serial: String,
+    hw_version: String,
+    module_type: String,
+    sim_status: String,
+    imsi: String,
+    iccid: String,
+    phone: String,
+    net_status: String,
+    signal_quality: String,
+    temperature: String,
 }
+
+#[async_trait::async_trait]
+trait HardwareBackend: Send + Sync {
+    /// 手动执行 AT 命令（ManualAt）
+    async fn exec_raw_at(&self, cmd: &str) -> String;
+
+    /// 获取 SMS 列表（原始 CMGL 响应）
+    async fn read_sms_list(&self) -> String;
+
+    /// 配置 APN
+    async fn configure_apn(&self, apn: &str, user: &str, pass: &str, auth_type: u8);
+
+    /// 设置网络模式偏好
+    async fn set_network_mode_pref(&self, mode: &str);
+
+    /// 设置数据会话连接/断开
+    async fn set_data_session(&self, connect: bool);
+
+    /// 执行网络扫描，返回可用网络列表
+    async fn scan_available_networks(&self) -> Vec<serde_json::Value>;
+
+    /// 发送 SMS，返回成功与否
+    async fn send_sms_msg(&self, recipient: &str, message: &str) -> bool;
+
+    /// 读取设备详细信息
+    async fn read_device_info(&self) -> DeviceInfoData;
+
+    /// 发送重启命令
+    async fn send_reboot(&self);
+
+    /// 发送恢复出厂设置命令
+    async fn send_factory_reset(&self);
+
+    /// 设置飞行模式
+    async fn set_airplane_mode(&self, on: bool);
+
+    /// 轮询采集遥测数据
+    async fn poll_telemetry(&self) -> TelemetryData;
+
+    /// 启动时读取静态信息 (fw, sim, provider, apn)
+    async fn read_static_info(&self) -> (String, String, String, String);
+}
+
+// ---------------------------------------------------------------------------
+// 真机后端
+// ---------------------------------------------------------------------------
+
+struct RealBackend {
+    serial_path: String,
+}
+
+#[async_trait::async_trait]
+impl HardwareBackend for RealBackend {
+    async fn exec_raw_at(&self, cmd: &str) -> String {
+        match send_at_command_dedup(&self.serial_path, cmd).await {
+            Ok(resp) => resp,
+            Err(e) => format!("ERROR: {}", e),
+        }
+    }
+
+    async fn read_sms_list(&self) -> String {
+        let _ = send_at_command_inner(&self.serial_path, "AT+CMGF=1").await;
+        send_at_command_inner(&self.serial_path, "AT+CMGL=\"ALL\"")
+            .await
+            .unwrap_or_else(|_| "+CMGL: 0 messages\r\nOK\r\n".to_string())
+    }
+
+    async fn configure_apn(&self, apn: &str, user: &str, pass: &str, auth_type: u8) {
+        let _ = send_at_command_inner(
+            &self.serial_path,
+            &format!("AT+CGDCONT=1,\"IPV4V6\",\"{}\"", apn),
+        )
+        .await;
+        if !user.is_empty() {
+            let _ = send_at_command_inner(
+                &self.serial_path,
+                &format!("AT+QGAUTH=1,{},\"{}\",\"{}\"", auth_type, user, pass),
+            )
+            .await;
+        }
+    }
+
+    async fn set_network_mode_pref(&self, mode: &str) {
+        let at_mode = match mode {
+            "nr5g" => "AT+QNWPREFCFG=\"mode_pref\",NR5G",
+            "lte" => "AT+QNWPREFCFG=\"mode_pref\",LTE",
+            "nr5g_lte" => "AT+QNWPREFCFG=\"mode_pref\",NR5G:LTE",
+            "wcdma" => "AT+QNWPREFCFG=\"mode_pref\",WCDMA",
+            _ => "AT+QNWPREFCFG=\"mode_pref\",AUTO",
+        };
+        let _ = send_at_command_inner(&self.serial_path, at_mode).await;
+    }
+
+    async fn set_data_session(&self, connect: bool) {
+        let action_val = if connect { "1" } else { "0" };
+        let _ = send_at_command_inner(
+            &self.serial_path,
+            &format!("AT+CGACT={},1", action_val),
+        )
+        .await;
+    }
+
+    async fn scan_available_networks(&self) -> Vec<serde_json::Value> {
+        // 发送真实扫描命令（结果解析留作占位，与重构前行为一致）
+        let _ = send_at_command_inner(&self.serial_path, "AT+COPS=?").await;
+        vec![
+            serde_json::json!({"operator": "CHN-UNICOM", "mccmnc": "46001", "technology": "5G", "status": "Current", "band": "n41", "tech": "5G"}),
+            serde_json::json!({"operator": "CHN-MOBILE", "mccmnc": "46000", "technology": "5G", "status": "Available", "band": "n78", "tech": "5G"}),
+            serde_json::json!({"operator": "CHN-TELECOM", "mccmnc": "46003", "technology": "4G", "status": "Available", "band": "B3", "tech": "4G"}),
+        ]
+    }
+
+    async fn send_sms_msg(&self, recipient: &str, message: &str) -> bool {
+        let mut success = false;
+        if send_at_command_inner(&self.serial_path, "AT+CMGF=1").await.is_ok() {
+            if send_at_command_inner(
+                &self.serial_path,
+                &format!("AT+CMGS=\"{}\"", recipient),
+            )
+            .await
+            .is_ok()
+            {
+                if send_at_command_inner(
+                    &self.serial_path,
+                    &format!("{}\u{001A}", message),
+                )
+                .await
+                .is_ok()
+                {
+                    success = true;
+                }
+            }
+        }
+        success
+    }
+
+    async fn read_device_info(&self) -> DeviceInfoData {
+        let mfr = send_at_get_line(&self.serial_path, "AT+CGMI")
+            .await
+            .unwrap_or_else(|| "Quectel".to_string());
+        let model = send_at_get_line(&self.serial_path, "AT+CGMM")
+            .await
+            .unwrap_or_else(|| "Unknown".to_string());
+        let fw = send_at_get_line(&self.serial_path, "AT+CGMR")
+            .await
+            .unwrap_or_else(|| "Unknown".to_string());
+        let imei = send_at_get_line(&self.serial_path, "AT+CGSN")
+            .await
+            .unwrap_or_else(|| "Unknown".to_string());
+        let serial = imei.clone();
+        let hw_ver = send_at_get_line(&self.serial_path, "AT+QIMPVER")
+            .await
+            .and_then(|r| {
+                r.strip_prefix("+QIMPVER:")
+                    .map(|s| s.trim().trim_matches('"').to_string())
+            })
+            .unwrap_or_else(|| "Unknown".to_string());
+        let module_type = model.clone();
+        let sim_status = send_at_get_line(&self.serial_path, "AT+CPIN?")
+            .await
+            .and_then(|r| {
+                r.strip_prefix("+CPIN:")
+                    .map(|s| s.trim().trim_matches('"').to_string())
+            })
+            .unwrap_or_else(|| "Unknown".to_string());
+        let imsi = send_at_get_line(&self.serial_path, "AT+CIMI")
+            .await
+            .and_then(|r| r.strip_prefix("+CIMI:").map(|s| s.trim().to_string()))
+            .unwrap_or_default();
+        let iccid = send_at_get_line(&self.serial_path, "AT+QCCID")
+            .await
+            .and_then(|r| {
+                r.strip_prefix("+QCCID:")
+                    .map(|s| s.trim().trim_matches('"').to_string())
+            })
+            .unwrap_or_else(|| "Unknown".to_string());
+        let phone = send_at_get_line(&self.serial_path, "AT+CNUM")
+            .await
+            .and_then(|r| {
+                let r = r.trim();
+                if r.starts_with("+CNUM:") {
+                    r.split(',').nth(1).map(|s| s.trim().trim_matches('"').to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
+        let net_status = send_at_get_line(&self.serial_path, "AT+CREG?")
+            .await
+            .map(|r| parse_net_status(&r))
+            .unwrap_or_else(|| "Unknown".to_string());
+        let signal_quality = send_at_get_line(&self.serial_path, "AT+CSQ")
+            .await
+            .map(|r| parse_signal_quality(&r))
+            .unwrap_or_else(|| "Unknown".to_string());
+        let temperature = send_at_get_line(&self.serial_path, "AT+QTEMP")
+            .await
+            .and_then(|r| parse_qtemp_temperature(&r))
+            .unwrap_or_else(|| "-- °C".to_string());
+
+        DeviceInfoData {
+            manufacturer: mfr,
+            model,
+            firmware: fw,
+            imei,
+            serial,
+            hw_version: hw_ver,
+            module_type,
+            sim_status,
+            imsi,
+            iccid,
+            phone,
+            net_status,
+            signal_quality,
+            temperature,
+        }
+    }
+
+    async fn send_reboot(&self) {
+        let _ = send_at_command_inner(&self.serial_path, "AT+CFUN=1,1").await;
+    }
+
+    async fn send_factory_reset(&self) {
+        let _ = send_at_command_inner(&self.serial_path, "AT&F0").await;
+    }
+
+    async fn set_airplane_mode(&self, on: bool) {
+        let cfun_val = if on { "4" } else { "1" };
+        let _ = send_at_command_inner(&self.serial_path, &format!("AT+CFUN={}", cfun_val)).await;
+    }
+
+    async fn poll_telemetry(&self) -> TelemetryData {
+        let mut telemetry = TelemetryData::default();
+
+        if let Ok(cgpaddr_resp) =
+            send_at_command_dedup(&self.serial_path, "AT+CGPADDR").await
+        {
+            parse_cgpaddr(&cgpaddr_resp, &mut telemetry);
+        }
+        if let Ok(qeng_resp) =
+            send_at_command_dedup(&self.serial_path, "AT+QENG=\"servingcell\"").await
+        {
+            parse_qeng(&qeng_resp, &mut telemetry);
+        }
+        if let Ok(qcainfo_resp) =
+            send_at_command_dedup(&self.serial_path, "AT+QCAINFO").await
+        {
+            parse_qcainfo(&qcainfo_resp, &mut telemetry);
+        }
+        if let Ok(qtemp_resp) = send_at_command_dedup(&self.serial_path, "AT+QTEMP").await {
+            if let Some(temp) = parse_qtemp_temperature(&qtemp_resp) {
+                telemetry.temperature = temp;
+            }
+        }
+
+        telemetry.traffic_stats = send_at_command_dedup(&self.serial_path, "AT+QGDNRCNT?")
+            .await
+            .ok()
+            .and_then(|r| {
+                r.lines()
+                    .find(|l| l.contains("+QGDNRCNT:"))
+                    .and_then(|l| parse_traffic_line(l, "+QGDNRCNT:", false))
+            })
+            .unwrap_or_default();
+        if telemetry.traffic_stats.is_empty() {
+            telemetry.traffic_stats = send_at_command_dedup(&self.serial_path, "AT+QGDAT?")
+                .await
+                .ok()
+                .and_then(|r| {
+                    r.lines()
+                        .find(|l| l.contains("+QGDAT:"))
+                        .and_then(|l| parse_traffic_line(l, "+QGDAT:", true))
+                })
+                .unwrap_or_default();
+        }
+
+        set_default(&mut telemetry.traffic_stats, "N/A");
+        if telemetry.signal_percentage.is_empty() {
+            telemetry.signal_percentage = "85%".to_string();
+        }
+        if telemetry.network_mode.is_empty() {
+            telemetry.network_mode = "--".to_string();
+        }
+        telemetry.sim_status = "Ready".to_string();
+
+        telemetry
+    }
+
+    async fn read_static_info(&self) -> (String, String, String, String) {
+        println!("📋 开始获取静态信息（持久串口连接）...");
+
+        let mut firmware_version = String::new();
+        let mut active_sim = String::new();
+        let mut apn = String::new();
+
+        println!("📋 [1/4] 获取固件版本 (AT+CGMR)...");
+        if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+CGMR").await {
+            for line in resp.lines() {
+                let trimmed = line.trim();
+                if !trimmed.is_empty()
+                    && !trimmed.contains("OK")
+                    && !trimmed.contains("ERROR")
+                    && !trimmed.starts_with("AT+")
+                {
+                    firmware_version = trimmed.to_string();
+                    break;
+                }
+            }
+        }
+        set_default(&mut firmware_version, "Unknown");
+
+        println!("📋 [2/5] 获取 SIM 槽位 (AT+QUIMSLOT?)...");
+        if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+QUIMSLOT?").await {
+            for line in resp.lines() {
+                if line.contains("+QUIMSLOT:") {
+                    let parts: Vec<&str> = line.split(':').collect();
+                    if parts.len() >= 2 {
+                        active_sim = format!("SIM {}", parts[1].trim());
+                    }
+                }
+            }
+        }
+        set_default(&mut active_sim, "SIM 1");
+
+        println!("📋 [3/5] 获取运营商...");
+        let network_provider = fetch_network_provider(&self.serial_path).await;
+
+        println!("📋 [4/5] 获取 APN (AT+CGCONTRDP)...");
+        let mut found_apn = false;
+        if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+CGCONTRDP").await {
+            for line in resp.lines() {
+                if line.contains("+CGCONTRDP:") {
+                    let after_prefix = line.trim().strip_prefix("+CGCONTRDP:").unwrap_or(line).trim();
+                    let parts: Vec<&str> = after_prefix.split(',').collect();
+                    if parts.len() >= 3 {
+                        let a = parts[2].trim().trim_matches('"').to_string();
+                        if !a.is_empty() {
+                            apn = a;
+                            found_apn = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if !found_apn {
+            println!("📋 [4/5] 回退 AT+CGDCONT? 获取 APN...");
+            if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+CGDCONT?").await {
+                for line in resp.lines() {
+                    if line.contains("+CGDCONT:") {
+                        let after_prefix = line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
+                        let parts: Vec<&str> = after_prefix.split(',').collect();
+                        if parts.len() >= 3 {
+                            let a = parts[2].trim().trim_matches('"').to_string();
+                            if !a.is_empty()
+                                && !a.contains("placeholder")
+                                && !a.starts_with("apn")
+                            {
+                                apn = a;
+                                found_apn = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if !found_apn {
+                    for line in resp.lines() {
+                        if line.contains("+CGDCONT:") {
+                            let after_prefix =
+                                line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
+                            let parts: Vec<&str> = after_prefix.split(',').collect();
+                            if parts.len() >= 3 {
+                                let a = parts[2].trim().trim_matches('"').to_string();
+                                if !a.is_empty() {
+                                    apn = a;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        set_default(&mut apn, "N/A");
+
+        println!(
+            "📋 静态信息已获取: FW={}, SIM={}, Provider={}, APN={}",
+            firmware_version, active_sim, network_provider, apn
+        );
+
+        (firmware_version, active_sim, network_provider, apn)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 仿真后端
+// ---------------------------------------------------------------------------
+
+struct SimBackend;
+
+#[async_trait::async_trait]
+impl HardwareBackend for SimBackend {
+    async fn exec_raw_at(&self, _cmd: &str) -> String {
+        sleep(Duration::from_millis(50)).await;
+        "OK\r\n".to_string()
+    }
+
+    async fn read_sms_list(&self) -> String {
+        "+CMGL: 1,\"REC READ\",\"+8613800138000\",,\"2026/06/04 10:30:08\"\r\nYour data usage this month: 15.2 GB\r\n+CMGL: 2,\"REC UNREAD\",\"10086\",,\"2026/06/03 09:15:22\"\r\nWelcome to China Mobile 5G network!\r\nOK\r\n".to_string()
+    }
+
+    async fn configure_apn(&self, _apn: &str, _user: &str, _pass: &str, _auth_type: u8) {}
+
+    async fn set_network_mode_pref(&self, _mode: &str) {}
+
+    async fn set_data_session(&self, _connect: bool) {}
+
+    async fn scan_available_networks(&self) -> Vec<serde_json::Value> {
+        vec![
+            serde_json::json!({"operator": "CHN-UNICOM", "mccmnc": "46001", "technology": "5G", "status": "Current", "band": "n41", "tech": "5G"}),
+            serde_json::json!({"operator": "CHN-MOBILE", "mccmnc": "46000", "technology": "5G", "status": "Available", "band": "n78", "tech": "5G"}),
+            serde_json::json!({"operator": "CHN-TELECOM", "mccmnc": "46003", "technology": "4G", "status": "Available", "band": "B3", "tech": "4G"}),
+        ]
+    }
+
+    async fn send_sms_msg(&self, _recipient: &str, _message: &str) -> bool { true }
+
+    async fn read_device_info(&self) -> DeviceInfoData {
+        DeviceInfoData {
+            manufacturer: "Quectel".to_string(),
+            model: "RM520N-GL".to_string(),
+            firmware: "RM520NGLAAR03A03M4G_BETA".to_string(),
+            imei: "867584032145678".to_string(),
+            serial: "QC2023RM520N001".to_string(),
+            hw_version: "R1.0".to_string(),
+            module_type: "M.2 5G NR Module".to_string(),
+            sim_status: "Ready".to_string(),
+            imsi: "460010123456789".to_string(),
+            iccid: "89860112851234567890".to_string(),
+            phone: "+8613800138000".to_string(),
+            net_status: "Registered".to_string(),
+            signal_quality: "-64 dBm".to_string(),
+            temperature: "42 °C".to_string(),
+        }
+    }
+
+    async fn send_reboot(&self) {}
+
+    async fn send_factory_reset(&self) {}
+
+    async fn set_airplane_mode(&self, _on: bool) {}
+
+    async fn poll_telemetry(&self) -> TelemetryData {
+        TelemetryData {
+            sim_status: "Ready".to_string(),
+            signal_percentage: "90%".to_string(),
+            network_mode: "5G NR-SA".to_string(),
+            bands: "n78".to_string(),
+            bandwidth: "100 MHz".to_string(),
+            earfcn: "627264".to_string(),
+            pci: "120".to_string(),
+            ipv4: "10.123.45.67".to_string(),
+            ipv6: "fe80::1".to_string(),
+            cell_id: "0052F1A1".to_string(),
+            enb_id: "21233".to_string(),
+            tac: "1002".to_string(),
+            ss_rsrq: "-11 dB".to_string(),
+            ss_rsrp: "-85 dBm".to_string(),
+            sinr: "18 dB".to_string(),
+            traffic_stats: "TX 1.23 GB / RX 4.56 GB".to_string(),
+            ..Default::default()
+        }
+    }
+
+    async fn read_static_info(&self) -> (String, String, String, String) {
+        eprintln!("⚠️ 使用模拟静态数据");
+        println!("📋 模拟静态数据已写入 AppState");
+        (
+            "RM520NGLAAR03A03M4G_BETA".to_string(),
+            "SIM 1".to_string(),
+            "CHN-UNICOM".to_string(),
+            "3gnet".to_string(),
+        )
+    }
+}
+
+// ============================================================================
+// 通用工具函数
+// ============================================================================
 
 /// 如果字段为空则设为默认值
 fn set_default(field: &mut String, default: &str) {
@@ -333,138 +810,9 @@ async fn fetch_network_provider(serial_path: &str) -> String {
     "Unknown".to_string()
 }
 
-/// 启动时一次性获取静态信息：固件版本、SIM槽位、运营商、APN
-/// 通过 atcmd_rs 外部命令发送 AT 命令获取
-async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
-    println!("📋 开始获取静态信息（持久串口连接）...");
-
-    if !std::path::Path::new(serial_path).exists() {
-        eprintln!("⚠️ 使用模拟静态数据");
-        let mut guard = state.global.write().await;
-        guard.firmware_version = "RM520NGLAAR03A03M4G_BETA".to_string();
-        guard.active_sim = "SIM 1".to_string();
-        guard.network_provider = "CHN-UNICOM".to_string();
-        guard.apn = "3gnet".to_string();
-        println!("📋 模拟静态数据已写入 AppState");
-        return;
-    }
-
-    let mut firmware_version = String::new();
-    let mut active_sim = String::new();
-    let mut apn = String::new();
-
-    // 1. 固件版本
-    println!("📋 [1/4] 获取固件版本 (AT+CGMR)...");
-    if let Ok(resp) = send_at_command_inner(serial_path, "AT+CGMR").await {
-        for line in resp.lines() {
-            let trimmed = line.trim();
-            if !trimmed.is_empty()
-                && !trimmed.contains("OK")
-                && !trimmed.contains("ERROR")
-                && !trimmed.starts_with("AT+")
-            {
-                firmware_version = trimmed.to_string();
-                break;
-            }
-        }
-    }
-    set_default(&mut firmware_version, "Unknown");
-
-    // 2. SIM 槽位
-    println!("📋 [2/5] 获取 SIM 槽位 (AT+QUIMSLOT?)...");
-    if let Ok(resp) = send_at_command_inner(serial_path, "AT+QUIMSLOT?").await {
-        for line in resp.lines() {
-            if line.contains("+QUIMSLOT:") {
-                let parts: Vec<&str> = line.split(':').collect();
-                if parts.len() >= 2 {
-                    active_sim = format!("SIM {}", parts[1].trim());
-                }
-            }
-        }
-    }
-    set_default(&mut active_sim, "SIM 1");
-
-    // 3. 运营商（三段回退：QSPN → COPS → QENG MCC/MNC）
-    println!("📋 [3/5] 获取运营商...");
-    let network_provider = fetch_network_provider(serial_path).await;
-
-    // 4. APN
-    // 优先用 AT+CGCONTRDP 获取活动 PDN 的实际 APN
-    // 回退：遍历 AT+CGDCONT? 所有上下文，跳过占位符
-    println!("📋 [4/5] 获取 APN (AT+CGCONTRDP)...");
-    let mut found_apn = false;
-    if let Ok(resp) = send_at_command_inner(serial_path, "AT+CGCONTRDP").await {
-        for line in resp.lines() {
-            if line.contains("+CGCONTRDP:") {
-                let after_prefix = line
-                    .trim()
-                    .strip_prefix("+CGCONTRDP:")
-                    .unwrap_or(line)
-                    .trim();
-                let parts: Vec<&str> = after_prefix.split(',').collect();
-                if parts.len() >= 3 {
-                    let a = parts[2].trim().trim_matches('"').to_string();
-                    if !a.is_empty() {
-                        apn = a;
-                        found_apn = true;
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    if !found_apn {
-        println!("📋 [4/5] 回退 AT+CGDCONT? 获取 APN...");
-        if let Ok(resp) = send_at_command_inner(serial_path, "AT+CGDCONT?").await {
-            for line in resp.lines() {
-                if line.contains("+CGDCONT:") {
-                    let after_prefix = line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
-                    let parts: Vec<&str> = after_prefix.split(',').collect();
-                    if parts.len() >= 3 {
-                        let a = parts[2].trim().trim_matches('"').to_string();
-                        if !a.is_empty()
-                            && !a.contains("placeholder")
-                            && !a.starts_with("apn")
-                        {
-                            apn = a;
-                            found_apn = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            // 如果所有上下文都是占位符，取第一个非空值
-            if !found_apn {
-                for line in resp.lines() {
-                    if line.contains("+CGDCONT:") {
-                        let after_prefix =
-                            line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
-                        let parts: Vec<&str> = after_prefix.split(',').collect();
-                        if parts.len() >= 3 {
-                            let a = parts[2].trim().trim_matches('"').to_string();
-                            if !a.is_empty() {
-                                apn = a;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    set_default(&mut apn, "N/A");
-
-    println!(
-        "📋 静态信息已获取: FW={}, SIM={}, Provider={}, APN={}",
-        firmware_version, active_sim, network_provider, apn
-    );
-
-    let mut guard = state.global.write().await;
-    guard.firmware_version = firmware_version;
-    guard.active_sim = active_sim;
-    guard.network_provider = network_provider;
-    guard.apn = apn;
-}
+// ============================================================================
+// AT 命令基础架构（互斥锁 + 去重队列）
+// ============================================================================
 
 /// 全局 AT 命令互斥锁，防止并发写入 SMD 设备
 static AT_CMD_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
@@ -663,18 +1011,18 @@ async fn index_handler() -> impl IntoResponse {
     static_file_response(include_str!("index.html"), "text/html; charset=utf-8")
 }
 
-async fn hardware_polling_actor(
+// ============================================================================
+// 第二步 & 第三步：剥离 Poller + 精简 Actor
+// ============================================================================
+
+/// 独立轮询任务 — interval.tick() 不再与 Actor 共享 select! 循环
+async fn hardware_poller(
     state: Arc<AppState>,
-    mut actor_rx: mpsc::Receiver<AtRequest>,
-    serial_path: String,
+    backend: Arc<dyn HardwareBackend>,
+    mut interval_rx: watch::Receiver<u64>,
 ) {
     let mut _sys = System::new_all();
     let mut components = Components::new_with_refreshed_list();
-
-    let serial_available = std::path::Path::new(&serial_path).exists();
-    if !serial_available {
-        println!("⚠️ 硬件轮询 actor 运行在模拟模式（串口不可用）");
-    }
 
     let mut interval_secs = 3;
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
@@ -682,339 +1030,12 @@ async fn hardware_polling_actor(
 
     loop {
         tokio::select! {
-            Some(req) = actor_rx.recv() => {
-                match req.action {
-                    AtAction::ManualAt(cmd) => {
-                        println!("👨‍💻 用户手动执行 AT: {}", cmd);
-                        let response = if serial_available {
-                            match send_at_command_dedup(&serial_path, &cmd).await {
-                                Ok(resp) => resp,
-                                Err(e) => format!("ERROR: {}", e),
-                            }
-                        } else {
-                            sleep(Duration::from_millis(50)).await;
-                            "OK\r\n".to_string()
-                        };
-                        let _ = req.resp_tx.send(serde_json::json!({ "type": "at_res", "data": response }));
-                    }
-                    AtAction::SetInterval(secs) => {
-                        let new_secs = secs.max(3);
-                        if new_secs != interval_secs {
-                            interval_secs = new_secs;
-                            interval = tokio::time::interval(Duration::from_secs(interval_secs));
-                            interval.tick().await;
-                            println!("🔄 轮询间隔已动态调整为 {} 秒", interval_secs);
-                        }
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "settings_log",
-                            "data": { "msg": format!("轮询间隔已动态调整为 {} 秒", interval_secs) }
-                        }));
-                    }
-                    AtAction::GetSmsList => {
-                        println!("📱 actor: get_sms_list via AT+CMGL");
-                        let resp = if serial_available {
-                            let _ = send_at_command_inner(&serial_path, "AT+CMGF=1").await;
-                            send_at_command_inner(&serial_path, "AT+CMGL=\"ALL\"").await
-                                .unwrap_or_else(|_| "+CMGL: 0 messages\r\nOK\r\n".to_string())
-                        } else {
-                            "+CMGL: 1,\"REC READ\",\"+8613800138000\",,\"2026/06/04 10:30:08\"\r\nYour data usage this month: 15.2 GB\r\n+CMGL: 2,\"REC UNREAD\",\"10086\",,\"2026/06/03 09:15:22\"\r\nWelcome to China Mobile 5G network!\r\nOK\r\n".to_string()
-                        };
-                        let decoded = decode_cmgl_body(&resp);
-                        let _ = req.resp_tx.send(serde_json::json!({ "type": "sms_list", "data": decoded }));
-                    }
-                    AtAction::SetApn(apn, user, pass, auth_type) => {
-                        println!("🌐 actor: set_apn apn={} user={} auth={}", apn, user, auth_type);
-                        if serial_available {
-                            let _ = send_at_command_inner(&serial_path, &format!("AT+CGDCONT=1,\"IPV4V6\",\"{}\"", apn)).await;
-                            if !user.is_empty() {
-                                let _ = send_at_command_inner(&serial_path, &format!("AT+QGAUTH=1,{},\"{}\",\"{}\"", auth_type, user, pass)).await;
-                            }
-                        }
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "network_status",
-                            "data": { "status": "APN settings applied", "apn": apn }
-                        }));
-                    }
-                    AtAction::SetNetworkMode(mode) => {
-                        println!("🌐 actor: set_network_mode {}", mode);
-                        if serial_available {
-                            let at_mode = match mode.as_str() {
-                                "nr5g" => "AT+QNWPREFCFG=\"mode_pref\",NR5G",
-                                "lte" => "AT+QNWPREFCFG=\"mode_pref\",LTE",
-                                "nr5g_lte" => "AT+QNWPREFCFG=\"mode_pref\",NR5G:LTE",
-                                "wcdma" => "AT+QNWPREFCFG=\"mode_pref\",WCDMA",
-                                _ => "AT+QNWPREFCFG=\"mode_pref\",AUTO",
-                            };
-                            let _ = send_at_command_inner(&serial_path, at_mode).await;
-                        }
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "network_status",
-                            "data": { "status": format!("Network mode set to {}", mode) }
-                        }));
-                    }
-                    AtAction::NetConnect(connect) => {
-                        println!("🌐 actor: net_{}", if connect { "connect" } else { "disconnect" });
-                        if serial_available {
-                            let action_val = if connect { "1" } else { "0" };
-                            let _ = send_at_command_inner(&serial_path, &format!("AT+CGACT={},1", action_val)).await;
-                        }
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "network_status",
-                            "data": { "status": format!("{} command sent", if connect { "Connect" } else { "Disconnect" }) }
-                        }));
-                    }
-                    AtAction::NetworkScan => {
-                        println!("🔍 actor: network_scan via AT+COPS=?");
-                        let mut networks = Vec::new();
-                        if serial_available {
-                            if let Ok(_resp) = send_at_command_inner(&serial_path, "AT+COPS=?").await {
-                                // 实际项目中解析 _resp 并在 networks 中填充，此处作为示例放置模拟返回
-                            }
-                        }
-                        if networks.is_empty() {
-                            networks = vec![
-                                serde_json::json!({"operator": "CHN-UNICOM", "mccmnc": "46001", "technology": "5G", "status": "Current", "band": "n41", "tech": "5G"}),
-                                serde_json::json!({"operator": "CHN-MOBILE", "mccmnc": "46000", "technology": "5G", "status": "Available", "band": "n78", "tech": "5G"}),
-                                serde_json::json!({"operator": "CHN-TELECOM", "mccmnc": "46003", "technology": "4G", "status": "Available", "band": "B3", "tech": "4G"})
-                            ];
-                        }
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "scan_result",
-                            "data": { "status": "Scan complete.", "networks": networks }
-                        }));
-                    }
-                    AtAction::SendSms(recipient, message) => {
-                        println!("📱 actor: send_sms to={}", recipient);
-                        let mut success = false;
-                        if serial_available {
-                            if send_at_command_inner(&serial_path, "AT+CMGF=1").await.is_ok() {
-                                if send_at_command_inner(&serial_path, &format!("AT+CMGS=\"{}\"", recipient)).await.is_ok() {
-                                    if send_at_command_inner(&serial_path, &format!("{}\u{001A}", message)).await.is_ok() {
-                                        success = true;
-                                    }
-                                }
-                            }
-                        } else {
-                            success = true;
-                        }
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "sms_sent",
-                            "data": { "status": if success { "SMS sent successfully" } else { "SMS failed" }, "recipient": recipient }
-                        }));
-                    }
-                    AtAction::GetDeviceInfo => {
-                        println!("📱 actor: get_device_info via AT commands");
-                        let (mfr, model, fw, imei, serial, hw_ver, module_type,
-                             sim_status, imsi, iccid, phone, net_status,
-                             signal_quality, temperature) = if serial_available {
-                            let mfr = send_at_get_line(&serial_path, "AT+CGMI").await.unwrap_or_else(|| "Quectel".to_string());
-                            let model = send_at_get_line(&serial_path, "AT+CGMM").await.unwrap_or_else(|| "Unknown".to_string());
-                            let fw = send_at_get_line(&serial_path, "AT+CGMR").await.unwrap_or_else(|| "Unknown".to_string());
-                            let imei = send_at_get_line(&serial_path, "AT+CGSN").await.unwrap_or_else(|| "Unknown".to_string());
-                            let serial = imei.clone(); // IMEI 作为唯一序列号
-
-                            // 硬件版本
-                            let hw_ver = send_at_get_line(&serial_path, "AT+QIMPVER").await
-                                .and_then(|r| r.strip_prefix("+QIMPVER:")
-                                    .map(|s| s.trim().trim_matches('"').to_string()))
-                                .unwrap_or_else(|| {
-                                    // 回退：从 ATI 中提取
-                                    "Unknown".to_string()
-                                });
-
-                            let module_type = model.clone();
-
-                            // SIM 状态 (AT+CPIN?)
-                            let sim_status = send_at_get_line(&serial_path, "AT+CPIN?").await
-                                .and_then(|r| r.strip_prefix("+CPIN:")
-                                    .map(|s| s.trim().trim_matches('"').to_string()))
-                                .unwrap_or_else(|| "Unknown".to_string());
-
-                            // IMSI (AT+CIMI)
-                            let imsi = send_at_get_line(&serial_path, "AT+CIMI").await
-                                .and_then(|r| r.strip_prefix("+CIMI:")
-                                    .map(|s| s.trim().to_string()))
-                                .unwrap_or_default();
-
-                            // ICCID (AT+QCCID)
-                            let iccid = send_at_get_line(&serial_path, "AT+QCCID").await
-                                .and_then(|r| r.strip_prefix("+QCCID:")
-                                    .map(|s| s.trim().trim_matches('"').to_string()))
-                                .unwrap_or_else(|| "Unknown".to_string());
-
-                            // 电话号码（AT+CNUM 多未配置，静默处理）
-                            let phone = send_at_get_line(&serial_path, "AT+CNUM").await
-                                .and_then(|r| {
-                                    let r = r.trim();
-                                    if r.starts_with("+CNUM:") {
-                                        r.split(',').nth(1)
-                                            .map(|s| s.trim().trim_matches('"').to_string())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .unwrap_or_default();
-
-                            // 网络注册状态 (AT+CREG?)
-                            let net_status = send_at_get_line(&serial_path, "AT+CREG?").await
-                                .map(|r| parse_net_status(&r))
-                                .unwrap_or_else(|| "Unknown".to_string());
-
-                            // 信号质量 (AT+CSQ)
-                            let signal_quality = send_at_get_line(&serial_path, "AT+CSQ").await
-                                .map(|r| parse_signal_quality(&r))
-                                .unwrap_or_else(|| "Unknown".to_string());
-
-                            // 模块温度 (AT+QTEMP)
-                            let temperature = send_at_get_line(&serial_path, "AT+QTEMP").await
-                                .and_then(|r| parse_qtemp_temperature(&r))
-                                .unwrap_or_else(|| "-- °C".to_string());
-
-                            (mfr, model, fw, imei, serial, hw_ver, module_type,
-                             sim_status, imsi, iccid, phone, net_status,
-                             signal_quality, temperature)
-                        } else {
-                            ("Quectel".to_string(), "RM520N-GL".to_string(),
-                             "RM520NGLAAR03A03M4G_BETA".to_string(), "867584032145678".to_string(),
-                             "QC2023RM520N001".to_string(), "R1.0".to_string(),
-                             "M.2 5G NR Module".to_string(), "Ready".to_string(),
-                             "460010123456789".to_string(), "89860112851234567890".to_string(),
-                             "+8613800138000".to_string(), "Registered".to_string(),
-                             "-64 dBm".to_string(), "42 °C".to_string())
-                        };
-
-                        // 静态能力信息（基于型号的常量）
-                        let (bands, max_rate, volte, gnss) = if model.contains("RG520N") || model.contains("RM5") {
-                            ("NR n1/n3/n5/n7/n8/n20/n28/n41/n77/n78/n79, LTE B1/B3/B5/B7/B8/B18/B19/B20/B26/B28/B32/B34/B38/B39/B40/B41/B42/B43".to_string(),
-                             "DL 4.2 Gbps / UL 600 Mbps".to_string(),
-                             "Supported".to_string(),
-                             "GPS/GLONASS/BDS/Galileo".to_string())
-                        } else {
-                            ("--".to_string(), "--".to_string(), "--".to_string(), "--".to_string())
-                        };
-
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "device_info",
-                            "data": {
-                                "manufacturer": mfr,
-                                "model": model,
-                                "firmware_version": fw,
-                                "imei": imei,
-                                "serial": serial,
-                                "hw_version": hw_ver,
-                                "module_type": module_type,
-                                "sim_status": sim_status,
-                                "imsi": imsi,
-                                "iccid": iccid,
-                                "phone": phone,
-                                "net_status": net_status,
-                                "signal": signal_quality,
-                                "temperature": temperature,
-                                "bands": bands,
-                                "max_rate": max_rate,
-                                "volte": volte,
-                                "gnss": gnss
-                            }
-                        }));
-                    }
-                    AtAction::Reboot => {
-                        println!("🔄 actor: rebooting module...");
-                        if serial_available {
-                            let _ = send_at_command_inner(&serial_path, "AT+CFUN=1,1").await;
-                        }
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "settings_log",
-                            "data": { "msg": "Reboot command sent to module." }
-                        }));
-                    }
-                    AtAction::FactoryReset => {
-                        println!("⚠️ actor: factory reset module...");
-                        if serial_available {
-                            let _ = send_at_command_inner(&serial_path, "AT&F0").await;
-                        }
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "settings_log",
-                            "data": { "msg": "Factory reset command sent to module." }
-                        }));
-                    }
-                    AtAction::FlightMode(on) => {
-                        let cfun_val = if on { "4" } else { "1" };
-                        println!("✈️ actor: setting flight mode to {}", if on { "ON" } else { "OFF" });
-                        if serial_available {
-                            let _ = send_at_command_inner(&serial_path, &format!("AT+CFUN={}", cfun_val)).await;
-                        }
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "settings_log",
-                            "data": { "msg": format!("Flight mode turned {}", if on { "ON" } else { "OFF" }) }
-                        }));
-                    }
-                }
-            }
             _ = interval.tick() => {
                 if state.active_views.load(Ordering::SeqCst) > 0 {
                     let start_poll = std::time::Instant::now();
                     components.refresh(true);
 
-                    let mut telemetry = TelemetryData::default();
-
-                    if serial_available {
-                        // 非轮询任务优先级最高：有待处理的用户请求时跳过本轮 AT 轮询
-                        if actor_rx.is_empty() {
-                            if let Ok(cgpaddr_resp) = send_at_command_dedup(&serial_path, "AT+CGPADDR").await {
-                            parse_cgpaddr(&cgpaddr_resp, &mut telemetry);
-                        }
-                        if let Ok(qeng_resp) = send_at_command_dedup(&serial_path, "AT+QENG=\"servingcell\"").await {
-                            parse_qeng(&qeng_resp, &mut telemetry);
-                        }
-                        if let Ok(qcainfo_resp) = send_at_command_dedup(&serial_path, "AT+QCAINFO").await {
-                            parse_qcainfo(&qcainfo_resp, &mut telemetry);
-                        }
-                        if let Ok(qtemp_resp) = send_at_command_dedup(&serial_path, "AT+QTEMP").await {
-                            if let Some(temp) = parse_qtemp_temperature(&qtemp_resp) {
-                                telemetry.temperature = temp;
-                            }
-                        }
-                        // 实时获取流量统计（QGDNRCNT → QGDAT 回退）
-                        telemetry.traffic_stats = send_at_command_dedup(&serial_path, "AT+QGDNRCNT?")
-                            .await
-                            .ok()
-                            .and_then(|r| r.lines().find(|l| l.contains("+QGDNRCNT:")).and_then(|l| parse_traffic_line(l, "+QGDNRCNT:", false)))
-                            .unwrap_or_default();
-                        if telemetry.traffic_stats.is_empty() {
-                            telemetry.traffic_stats = send_at_command_dedup(&serial_path, "AT+QGDAT?")
-                                .await
-                                .ok()
-                                .and_then(|r| r.lines().find(|l| l.contains("+QGDAT:")).and_then(|l| parse_traffic_line(l, "+QGDAT:", true)))
-                                .unwrap_or_default();
-                        }
-                        } // end if actor_rx.is_empty()
-                        set_default(&mut telemetry.traffic_stats, "N/A");
-                        if telemetry.signal_percentage.is_empty() {
-                            telemetry.signal_percentage = "85%".to_string();
-                        }
-                        if telemetry.network_mode.is_empty() {
-                            telemetry.network_mode = "--".to_string();
-                        }
-                        telemetry.sim_status = "Ready".to_string();
-                    } else {
-                        // 仿真遥测数据
-                        telemetry.sim_status = "Ready".to_string();
-                        telemetry.signal_percentage = "90%".to_string();
-                        telemetry.network_mode = "5G NR-SA".to_string();
-                        telemetry.bands = "n78".to_string();
-                        telemetry.bandwidth = "100 MHz".to_string();
-                        telemetry.earfcn = "627264".to_string();
-                        telemetry.pci = "120".to_string();
-                        telemetry.ipv4 = "10.123.45.67".to_string();
-                        telemetry.ipv6 = "fe80::1".to_string();
-                        telemetry.cell_id = "0052F1A1".to_string();
-                        telemetry.enb_id = "21233".to_string();
-                        telemetry.tac = "1002".to_string();
-                        telemetry.ss_rsrq = "-11 dB".to_string();
-                        telemetry.ss_rsrp = "-85 dBm".to_string();
-                        telemetry.sinr = "18 dB".to_string();
-                        telemetry.traffic_stats = "TX 1.23 GB / RX 4.56 GB".to_string();
-                    }
+                    let mut telemetry = backend.poll_telemetry().await;
 
                     // 获取 CPU 物理温度（仅当 AT+QTEMP 未提供模块温度时作为 fallback）
                     if telemetry.temperature.is_empty() {
@@ -1024,9 +1045,9 @@ async fn hardware_polling_actor(
                                 label.contains("CPU") || label.contains("cpu") || label.contains("Package") || label.contains("package")
                             })
                             .and_then(|c| c.temperature());
-
                         telemetry.temperature = cpu_temp.map_or("--".to_string(), |t| format!("{:.0} °C", t));
                     }
+
                     telemetry.internet_connection = if !telemetry.ipv4.is_empty() && telemetry.ipv4 != "--" {
                         "Connected".to_string()
                     } else {
@@ -1063,8 +1084,217 @@ async fn hardware_polling_actor(
                     println!("💤 硬件轮询处于空闲模式 (无活跃视图)");
                 }
             }
+            result = interval_rx.changed() => {
+                if result.is_ok() {
+                    let new_secs = *interval_rx.borrow();
+                    if new_secs != interval_secs {
+                        interval_secs = new_secs.max(3);
+                        interval = tokio::time::interval(Duration::from_secs(interval_secs));
+                        interval.tick().await;
+                        println!("🔄 轮询间隔已动态调整为 {} 秒", interval_secs);
+                    }
+                } else {
+                    // interval_tx 已 drop（actor 已退出），停止轮询
+                    break;
+                }
+            }
         }
     }
+}
+
+/// Actor — 仅处理来自 WebSocket 的即时修改或控制型指令
+async fn hardware_actor(
+    mut actor_rx: mpsc::Receiver<AtRequest>,
+    backend: Arc<dyn HardwareBackend>,
+    interval_tx: watch::Sender<u64>,
+) {
+    while let Some(req) = actor_rx.recv().await {
+        match req.action {
+            AtAction::ManualAt(cmd) => {
+                println!("👨‍💻 用户手动执行 AT: {}", cmd);
+                let response = backend.exec_raw_at(&cmd).await;
+                let _ = req.resp_tx.send(serde_json::json!({ "type": "at_res", "data": response }));
+            }
+            AtAction::SetInterval(secs) => {
+                let new_secs = secs.max(3);
+                let _ = interval_tx.send(new_secs);
+                println!("🔄 轮询间隔已动态调整为 {} 秒", new_secs);
+                let _ = req.resp_tx.send(serde_json::json!({
+                    "type": "settings_log",
+                    "data": { "msg": format!("轮询间隔已动态调整为 {} 秒", new_secs) }
+                }));
+            }
+            AtAction::GetSmsList => {
+                println!("📱 actor: get_sms_list via AT+CMGL");
+                let resp = backend.read_sms_list().await;
+                let decoded = decode_cmgl_body(&resp);
+                let _ = req.resp_tx.send(serde_json::json!({ "type": "sms_list", "data": decoded }));
+            }
+            AtAction::SetApn(apn, user, pass, auth_type) => {
+                println!("🌐 actor: set_apn apn={} user={} auth={}", apn, user, auth_type);
+                backend.configure_apn(&apn, &user, &pass, auth_type).await;
+                let _ = req.resp_tx.send(serde_json::json!({
+                    "type": "network_status",
+                    "data": { "status": "APN settings applied", "apn": apn }
+                }));
+            }
+            AtAction::SetNetworkMode(mode) => {
+                println!("🌐 actor: set_network_mode {}", mode);
+                backend.set_network_mode_pref(&mode).await;
+                let _ = req.resp_tx.send(serde_json::json!({
+                    "type": "network_status",
+                    "data": { "status": format!("Network mode set to {}", mode) }
+                }));
+            }
+            AtAction::NetConnect(connect) => {
+                println!("🌐 actor: net_{}", if connect { "connect" } else { "disconnect" });
+                backend.set_data_session(connect).await;
+                let _ = req.resp_tx.send(serde_json::json!({
+                    "type": "network_status",
+                    "data": { "status": format!("{} command sent", if connect { "Connect" } else { "Disconnect" }) }
+                }));
+            }
+            AtAction::NetworkScan => {
+                println!("🔍 actor: network_scan");
+                let networks = backend.scan_available_networks().await;
+                let _ = req.resp_tx.send(serde_json::json!({
+                    "type": "scan_result",
+                    "data": { "status": "Scan complete.", "networks": networks }
+                }));
+            }
+            AtAction::SendSms(recipient, message) => {
+                println!("📱 actor: send_sms to={}", recipient);
+                let success = backend.send_sms_msg(&recipient, &message).await;
+                let _ = req.resp_tx.send(serde_json::json!({
+                    "type": "sms_sent",
+                    "data": { "status": if success { "SMS sent successfully" } else { "SMS failed" }, "recipient": recipient }
+                }));
+            }
+            AtAction::GetDeviceInfo => {
+                println!("📱 actor: get_device_info via AT commands");
+                let info = backend.read_device_info().await;
+
+                // 静态能力信息（基于型号的常量）
+                let (bands, max_rate, volte, gnss) = if info.model.contains("RG520N") || info.model.contains("RM5") {
+                    ("NR n1/n3/n5/n7/n8/n20/n28/n41/n77/n78/n79, LTE B1/B3/B5/B7/B8/B18/B19/B20/B26/B28/B32/B34/B38/B39/B40/B41/B42/B43".to_string(),
+                     "DL 4.2 Gbps / UL 600 Mbps".to_string(),
+                     "Supported".to_string(),
+                     "GPS/GLONASS/BDS/Galileo".to_string())
+                } else {
+                    ("--".to_string(), "--".to_string(), "--".to_string(), "--".to_string())
+                };
+
+                let _ = req.resp_tx.send(serde_json::json!({
+                    "type": "device_info",
+                    "data": {
+                        "manufacturer": info.manufacturer,
+                        "model": info.model,
+                        "firmware_version": info.firmware,
+                        "imei": info.imei,
+                        "serial": info.serial,
+                        "hw_version": info.hw_version,
+                        "module_type": info.module_type,
+                        "sim_status": info.sim_status,
+                        "imsi": info.imsi,
+                        "iccid": info.iccid,
+                        "phone": info.phone,
+                        "net_status": info.net_status,
+                        "signal": info.signal_quality,
+                        "temperature": info.temperature,
+                        "bands": bands,
+                        "max_rate": max_rate,
+                        "volte": volte,
+                        "gnss": gnss
+                    }
+                }));
+            }
+            AtAction::Reboot => {
+                println!("🔄 actor: rebooting module...");
+                backend.send_reboot().await;
+                let _ = req.resp_tx.send(serde_json::json!({
+                    "type": "settings_log",
+                    "data": { "msg": "Reboot command sent to module." }
+                }));
+            }
+            AtAction::FactoryReset => {
+                println!("⚠️ actor: factory reset module...");
+                backend.send_factory_reset().await;
+                let _ = req.resp_tx.send(serde_json::json!({
+                    "type": "settings_log",
+                    "data": { "msg": "Factory reset command sent to module." }
+                }));
+            }
+            AtAction::FlightMode(on) => {
+                println!("✈️ actor: setting flight mode to {}", if on { "ON" } else { "OFF" });
+                backend.set_airplane_mode(on).await;
+                let _ = req.resp_tx.send(serde_json::json!({
+                    "type": "settings_log",
+                    "data": { "msg": format!("Flight mode turned {}", if on { "ON" } else { "OFF" }) }
+                }));
+            }
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let serial_path =
+        env::var("AT_SERIAL_PORT").unwrap_or_else(|_| DEFAULT_SERIAL_PORT.to_string());
+    println!("🔌 使用串口设备: {}", serial_path);
+
+    let (tx, _) = broadcast::channel(100);
+    let (actor_tx, actor_rx) = mpsc::channel(32);
+
+    let app_state = Arc::new(AppState {
+        tx: tx.clone(),
+        actor_tx,
+        active_views: AtomicUsize::new(0),
+        global: RwLock::new(GlobalTelemetry::default()),
+    });
+
+    // 创建后端（真机/仿真）
+    let backend: Arc<dyn HardwareBackend> = if std::path::Path::new(&serial_path).exists() {
+        Arc::new(RealBackend { serial_path: serial_path.clone() })
+    } else {
+        eprintln!("⚠️ 串口设备不存在，使用模拟后端");
+        Arc::new(SimBackend)
+    };
+
+    // 获取一次静态信息
+    let (firmware_version, active_sim, network_provider, apn) = backend.read_static_info().await;
+    {
+        let mut guard = app_state.global.write().await;
+        guard.firmware_version = firmware_version;
+        guard.active_sim = active_sim;
+        guard.network_provider = network_provider;
+        guard.apn = apn;
+    }
+
+    // 轮询间隔通信通道（Actor 可通过它动态调整 Poller 间隔）
+    let (interval_tx, interval_rx) = watch::channel(3u64);
+
+    // 启动独立 Poller 任务
+    tokio::spawn({
+        let state = app_state.clone();
+        let backend = backend.clone();
+        async move { hardware_poller(state, backend, interval_rx).await }
+    });
+
+    // 启动 Actor 任务（仅处理 WebSocket 控制指令）
+    tokio::spawn({
+        let backend = backend.clone();
+        async move { hardware_actor(actor_rx, backend, interval_tx).await }
+    });
+
+    let app = Router::new()
+        .route("/", get(index_handler))
+        .route("/ws", get(ws_handler))
+        .route("/style.css", get(style_handler))
+        .with_state(app_state);
+
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    println!("⚡ 移远 5G 终端 WebUI 服务端已就绪: http://0.0.0.0:3000");
+    axum::serve(listener, app).await.unwrap();
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {

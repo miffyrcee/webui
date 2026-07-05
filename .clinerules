@@ -18,7 +18,7 @@
 - `AppState` (Arc) 持有 broadcast channel (tx) + mpsc actor channel (actor_tx) + 静态信息缓存
 - `hardware_polling_actor` 是核心 actor，每 3s 轮询 AT 命令（间隔可动态调整）
 - `fetch_static_info()` 在启动时一次性获取固件版本、SIM、运营商、APN 等
-- 模拟模式: 当串口打开失败时自动降级为模拟数据，不影响 Web 服务启动
+- 设备不存在时所有 AT 命令执行失败返回 NA
 
 ### AT Parser
 - `src/at/` 目录下有 PEG parser (`grammar.pest`) 和 Rust 解析代码
@@ -38,10 +38,7 @@
 - WebSocket 命令格式: `{action: "manual_at"|"set_interval"|"set_view_state"|"get_static_info", payload: ...}`
 
 ## Testing
-- 没有硬件的环境可以通过 `AT_SERIAL_PORT` 指向不存在的端口触发模拟模式
-  - PowerShell: `$env:AT_SERIAL_PORT="COM99"; cargo run`
-  - CMD: `set AT_SERIAL_PORT=COM99 && cargo run`
-- 模拟模式下所有 AT 命令返回预定义 mock 数据
+- 没有硬件时串口设备不存在，所有 AT 命令失败，返回 NA
 
 ## AI Change History
 - **在开始任何代码修改任务之前，AI 必须首先读取项目根目录的 `CLINE_HISTORY.md` 文件**，了解项目的完整变更历史、已解决/未解决的问题、以及已验证生效的架构决策，避免重复已尝试过的失败方案或引入回退

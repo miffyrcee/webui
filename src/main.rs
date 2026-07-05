@@ -20,7 +20,6 @@ use std::sync::OnceLock;
 use std::{env, sync::Arc};
 use sysinfo::{Components, System};
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot, watch};
-use tokio::time::sleep;
 
 use at::parser::{parse_cgpaddr, parse_qcainfo, parse_qeng, parse_qtemp_temperature};
 use at::utils::{decode_hex_ucs2, format_bytes};
@@ -197,7 +196,7 @@ struct TelemetryData {
 }
 
 // ============================================================================
-// 第一步：解耦真机/仿真 — HardwareBackend trait + RealBackend + SimBackend
+// HardwareBackend trait + RealBackend（真机后端，失败返回 NA）
 // ============================================================================
 
 /// 设备信息（HardwareBackend::read_device_info 返回值）
@@ -321,13 +320,8 @@ impl HardwareBackend for RealBackend {
     }
 
     async fn scan_available_networks(&self) -> Vec<serde_json::Value> {
-        // 发送真实扫描命令（结果解析留作占位，与重构前行为一致）
         let _ = send_at_command_inner(&self.serial_path, "AT+COPS=?").await;
-        vec![
-            serde_json::json!({"operator": "CHN-UNICOM", "mccmnc": "46001", "technology": "5G", "status": "Current", "band": "n41", "tech": "5G"}),
-            serde_json::json!({"operator": "CHN-MOBILE", "mccmnc": "46000", "technology": "5G", "status": "Available", "band": "n78", "tech": "5G"}),
-            serde_json::json!({"operator": "CHN-TELECOM", "mccmnc": "46003", "technology": "4G", "status": "Available", "band": "B3", "tech": "4G"}),
-        ]
+        vec![]
     }
 
     async fn send_sms_msg(&self, recipient: &str, message: &str) -> bool {
@@ -357,7 +351,7 @@ impl HardwareBackend for RealBackend {
     async fn read_device_info(&self) -> DeviceInfoData {
         let mfr = send_at_get_line(&self.serial_path, "AT+CGMI")
             .await
-            .unwrap_or_else(|| "Quectel".to_string());
+            .unwrap_or_else(|| "Unknown".to_string());
         let model = send_at_get_line(&self.serial_path, "AT+CGMM")
             .await
             .unwrap_or_else(|| "Unknown".to_string());
@@ -495,13 +489,9 @@ impl HardwareBackend for RealBackend {
         }
 
         set_default(&mut telemetry.traffic_stats, "N/A");
-        if telemetry.signal_percentage.is_empty() {
-            telemetry.signal_percentage = "85%".to_string();
-        }
-        if telemetry.network_mode.is_empty() {
-            telemetry.network_mode = "--".to_string();
-        }
-        telemetry.sim_status = "Ready".to_string();
+        set_default(&mut telemetry.signal_percentage, "NA");
+        set_default(&mut telemetry.network_mode, "NA");
+        set_default(&mut telemetry.sim_status, "NA");
 
         telemetry
     }
@@ -527,7 +517,7 @@ impl HardwareBackend for RealBackend {
                 }
             }
         }
-        set_default(&mut firmware_version, "Unknown");
+        set_default(&mut firmware_version, "NA");
 
         println!("📋 [2/5] 获取 SIM 槽位 (AT+QUIMSLOT?)...");
         if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+QUIMSLOT?").await {
@@ -540,7 +530,7 @@ impl HardwareBackend for RealBackend {
                 }
             }
         }
-        set_default(&mut active_sim, "SIM 1");
+        set_default(&mut active_sim, "NA");
 
         println!("📋 [3/5] 获取运营商...");
         let network_provider = fetch_network_provider(&self.serial_path).await;
@@ -612,97 +602,6 @@ impl HardwareBackend for RealBackend {
     }
 }
 
-// ---------------------------------------------------------------------------
-// 仿真后端
-// ---------------------------------------------------------------------------
-
-struct SimBackend;
-
-#[async_trait::async_trait]
-impl HardwareBackend for SimBackend {
-    async fn exec_raw_at(&self, _cmd: &str) -> String {
-        sleep(Duration::from_millis(50)).await;
-        "OK\r\n".to_string()
-    }
-
-    async fn read_sms_list(&self) -> String {
-        "+CMGL: 1,\"REC READ\",\"+8613800138000\",,\"2026/06/04 10:30:08\"\r\nYour data usage this month: 15.2 GB\r\n+CMGL: 2,\"REC UNREAD\",\"10086\",,\"2026/06/03 09:15:22\"\r\nWelcome to China Mobile 5G network!\r\nOK\r\n".to_string()
-    }
-
-    async fn configure_apn(&self, _apn: &str, _user: &str, _pass: &str, _auth_type: u8) {}
-
-    async fn set_network_mode_pref(&self, _mode: &str) {}
-
-    async fn set_data_session(&self, _connect: bool) {}
-
-    async fn scan_available_networks(&self) -> Vec<serde_json::Value> {
-        vec![
-            serde_json::json!({"operator": "CHN-UNICOM", "mccmnc": "46001", "technology": "5G", "status": "Current", "band": "n41", "tech": "5G"}),
-            serde_json::json!({"operator": "CHN-MOBILE", "mccmnc": "46000", "technology": "5G", "status": "Available", "band": "n78", "tech": "5G"}),
-            serde_json::json!({"operator": "CHN-TELECOM", "mccmnc": "46003", "technology": "4G", "status": "Available", "band": "B3", "tech": "4G"}),
-        ]
-    }
-
-    async fn send_sms_msg(&self, _recipient: &str, _message: &str) -> bool { true }
-
-    async fn read_device_info(&self) -> DeviceInfoData {
-        DeviceInfoData {
-            manufacturer: "Quectel".to_string(),
-            model: "RM520N-GL".to_string(),
-            firmware: "RM520NGLAAR03A03M4G_BETA".to_string(),
-            imei: "867584032145678".to_string(),
-            serial: "QC2023RM520N001".to_string(),
-            hw_version: "R1.0".to_string(),
-            module_type: "M.2 5G NR Module".to_string(),
-            sim_status: "Ready".to_string(),
-            imsi: "460010123456789".to_string(),
-            iccid: "89860112851234567890".to_string(),
-            phone: "+8613800138000".to_string(),
-            net_status: "Registered".to_string(),
-            signal_quality: "-64 dBm".to_string(),
-            temperature: "42 °C".to_string(),
-        }
-    }
-
-    async fn send_reboot(&self) {}
-
-    async fn send_factory_reset(&self) {}
-
-    async fn set_airplane_mode(&self, _on: bool) {}
-
-    async fn poll_telemetry(&self) -> TelemetryData {
-        TelemetryData {
-            sim_status: "Ready".to_string(),
-            signal_percentage: "90%".to_string(),
-            network_mode: "5G NR-SA".to_string(),
-            bands: "n78".to_string(),
-            bandwidth: "100 MHz".to_string(),
-            earfcn: "627264".to_string(),
-            pci: "120".to_string(),
-            ipv4: "10.123.45.67".to_string(),
-            ipv6: "fe80::1".to_string(),
-            cell_id: "0052F1A1".to_string(),
-            enb_id: "21233".to_string(),
-            tac: "1002".to_string(),
-            ss_rsrq: "-11 dB".to_string(),
-            ss_rsrp: "-85 dBm".to_string(),
-            sinr: "18 dB".to_string(),
-            traffic_stats: "TX 1.23 GB / RX 4.56 GB".to_string(),
-            ..Default::default()
-        }
-    }
-
-    async fn read_static_info(&self) -> (String, String, String, String) {
-        eprintln!("⚠️ 使用模拟静态数据");
-        println!("📋 模拟静态数据已写入 AppState");
-        (
-            "RM520NGLAAR03A03M4G_BETA".to_string(),
-            "SIM 1".to_string(),
-            "CHN-UNICOM".to_string(),
-            "3gnet".to_string(),
-        )
-    }
-}
 
 // ============================================================================
 // 通用工具函数
@@ -1252,13 +1151,8 @@ async fn main() {
         global: RwLock::new(GlobalTelemetry::default()),
     });
 
-    // 创建后端（真机/仿真）
-    let backend: Arc<dyn HardwareBackend> = if std::path::Path::new(&serial_path).exists() {
-        Arc::new(RealBackend { serial_path: serial_path.clone() })
-    } else {
-        eprintln!("⚠️ 串口设备不存在，使用模拟后端");
-        Arc::new(SimBackend)
-    };
+    // 创建后端（设备不存在时命令失败返回 NA）
+    let backend: Arc<dyn HardwareBackend> = Arc::new(RealBackend { serial_path: serial_path.clone() });
 
     // 获取一次静态信息
     let (firmware_version, active_sim, network_provider, apn) = backend.read_static_info().await;

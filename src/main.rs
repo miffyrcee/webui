@@ -57,16 +57,108 @@ struct AppState {
     tx: broadcast::Sender<String>,
     actor_tx: mpsc::Sender<AtRequest>,
     active_views: AtomicUsize,
-    /// 启动时一次性获取的静态信息
-    static_info: RwLock<StaticInfo>,
+    /// 全局状态 — fetch_static_info 和 hardware_polling_actor 获取的所有值均汇聚于此，ws.send 全部从此读取
+    global: RwLock<GlobalTelemetry>,
 }
 
-#[derive(Clone, Serialize, Default, Debug)]
-struct StaticInfo {
+#[derive(Clone, Serialize, Debug)]
+struct GlobalTelemetry {
     firmware_version: String,
+    temperature: String,
+    sim_status: String,
+    signal_percentage: String,
+    internet_connection: String,
     active_sim: String,
     network_provider: String,
+    mccmnc: String,
     apn: String,
+    network_mode: String,
+    bands: String,
+    bandwidth: String,
+    earfcn: String,
+    pci: String,
+    ipv4: String,
+    ipv6: String,
+    uptime: String,
+    assessment: String,
+    traffic_stats: String,
+    cell_id: String,
+    enb_id: String,
+    tac: String,
+    ss_rsrq: String,
+    ss_rsrp: String,
+    sinr: String,
+    updated: String,
+}
+
+impl Default for GlobalTelemetry {
+    fn default() -> Self {
+        Self {
+            firmware_version: "NA".to_string(),
+            temperature: "NA".to_string(),
+            sim_status: "NA".to_string(),
+            signal_percentage: "NA".to_string(),
+            internet_connection: "NA".to_string(),
+            active_sim: "NA".to_string(),
+            network_provider: "NA".to_string(),
+            mccmnc: "NA".to_string(),
+            apn: "NA".to_string(),
+            network_mode: "NA".to_string(),
+            bands: "NA".to_string(),
+            bandwidth: "NA".to_string(),
+            earfcn: "NA".to_string(),
+            pci: "NA".to_string(),
+            ipv4: "NA".to_string(),
+            ipv6: "NA".to_string(),
+            uptime: "NA".to_string(),
+            assessment: "NA".to_string(),
+            traffic_stats: "NA".to_string(),
+            cell_id: "NA".to_string(),
+            enb_id: "NA".to_string(),
+            tac: "NA".to_string(),
+            ss_rsrq: "NA".to_string(),
+            ss_rsrp: "NA".to_string(),
+            sinr: "NA".to_string(),
+            updated: "NA".to_string(),
+        }
+    }
+}
+
+impl GlobalTelemetry {
+    /// 从 TelemetryData（解析器填充）和当前全局状态合并构造 GlobalTelemetry。
+    /// 解析器填充的非静态字段从 telemetry 复制，静态字段从 global 保留。
+    fn from_telemetry_and_global(t: &TelemetryData, g: &GlobalTelemetry) -> Self {
+        Self {
+            temperature: t.temperature.clone(),
+            sim_status: t.sim_status.clone(),
+            signal_percentage: t.signal_percentage.clone(),
+            internet_connection: t.internet_connection.clone(),
+            mccmnc: t.mccmnc.clone(),
+            network_mode: t.network_mode.clone(),
+            bands: t.bands.clone(),
+            bandwidth: t.bandwidth.clone(),
+            earfcn: t.earfcn.clone(),
+            pci: t.pci.clone(),
+            ipv4: t.ipv4.clone(),
+            ipv6: t.ipv6.clone(),
+            assessment: t.assessment.clone(),
+            traffic_stats: t.traffic_stats.clone(),
+            cell_id: t.cell_id.clone(),
+            enb_id: t.enb_id.clone(),
+            tac: t.tac.clone(),
+            ss_rsrq: t.ss_rsrq.clone(),
+            ss_rsrp: t.ss_rsrp.clone(),
+            sinr: t.sinr.clone(),
+            // 静态字段从已有全局状态保留
+            firmware_version: g.firmware_version.clone(),
+            active_sim: g.active_sim.clone(),
+            network_provider: g.network_provider.clone(),
+            apn: g.apn.clone(),
+            // uptime/updated 在构造后单独设置
+            uptime: String::new(),
+            updated: String::new(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -117,7 +209,7 @@ async fn main() {
         tx: tx.clone(),
         actor_tx,
         active_views: AtomicUsize::new(0),
-        static_info: RwLock::new(StaticInfo::default()),
+        global: RwLock::new(GlobalTelemetry::default()),
     });
 
     // 获取一次静态信息
@@ -245,19 +337,21 @@ async fn fetch_network_provider(serial_path: &str) -> String {
 /// 通过 atcmd_rs 外部命令发送 AT 命令获取
 async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
     println!("📋 开始获取静态信息（持久串口连接）...");
-    let mut info = StaticInfo::default();
 
     if !std::path::Path::new(serial_path).exists() {
         eprintln!("⚠️ 使用模拟静态数据");
-        info.firmware_version = "RM520NGLAAR03A03M4G_BETA".to_string();
-        info.active_sim = "SIM 1".to_string();
-        info.network_provider = "CHN-UNICOM".to_string();
-        info.apn = "3gnet".to_string();
-        let mut guard = state.static_info.write().await;
-        *guard = info;
+        let mut guard = state.global.write().await;
+        guard.firmware_version = "RM520NGLAAR03A03M4G_BETA".to_string();
+        guard.active_sim = "SIM 1".to_string();
+        guard.network_provider = "CHN-UNICOM".to_string();
+        guard.apn = "3gnet".to_string();
         println!("📋 模拟静态数据已写入 AppState");
         return;
     }
+
+    let mut firmware_version = String::new();
+    let mut active_sim = String::new();
+    let mut apn = String::new();
 
     // 1. 固件版本
     println!("📋 [1/4] 获取固件版本 (AT+CGMR)...");
@@ -269,12 +363,12 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
                 && !trimmed.contains("ERROR")
                 && !trimmed.starts_with("AT+")
             {
-                info.firmware_version = trimmed.to_string();
+                firmware_version = trimmed.to_string();
                 break;
             }
         }
     }
-    set_default(&mut info.firmware_version, "Unknown");
+    set_default(&mut firmware_version, "Unknown");
 
     // 2. SIM 槽位
     println!("📋 [2/5] 获取 SIM 槽位 (AT+QUIMSLOT?)...");
@@ -283,16 +377,16 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
             if line.contains("+QUIMSLOT:") {
                 let parts: Vec<&str> = line.split(':').collect();
                 if parts.len() >= 2 {
-                    info.active_sim = format!("SIM {}", parts[1].trim());
+                    active_sim = format!("SIM {}", parts[1].trim());
                 }
             }
         }
     }
-    set_default(&mut info.active_sim, "SIM 1");
+    set_default(&mut active_sim, "SIM 1");
 
     // 3. 运营商（三段回退：QSPN → COPS → QENG MCC/MNC）
     println!("📋 [3/5] 获取运营商...");
-    info.network_provider = fetch_network_provider(serial_path).await;
+    let network_provider = fetch_network_provider(serial_path).await;
 
     // 4. APN
     // 优先用 AT+CGCONTRDP 获取活动 PDN 的实际 APN
@@ -309,9 +403,9 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
                     .trim();
                 let parts: Vec<&str> = after_prefix.split(',').collect();
                 if parts.len() >= 3 {
-                    let apn = parts[2].trim().trim_matches('"').to_string();
-                    if !apn.is_empty() {
-                        info.apn = apn;
+                    let a = parts[2].trim().trim_matches('"').to_string();
+                    if !a.is_empty() {
+                        apn = a;
                         found_apn = true;
                         break;
                     }
@@ -327,12 +421,12 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
                     let after_prefix = line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
                     let parts: Vec<&str> = after_prefix.split(',').collect();
                     if parts.len() >= 3 {
-                        let apn = parts[2].trim().trim_matches('"').to_string();
-                        if !apn.is_empty()
-                            && !apn.contains("placeholder")
-                            && !apn.starts_with("apn")
+                        let a = parts[2].trim().trim_matches('"').to_string();
+                        if !a.is_empty()
+                            && !a.contains("placeholder")
+                            && !a.starts_with("apn")
                         {
-                            info.apn = apn;
+                            apn = a;
                             found_apn = true;
                             break;
                         }
@@ -347,9 +441,9 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
                             line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
                         let parts: Vec<&str> = after_prefix.split(',').collect();
                         if parts.len() >= 3 {
-                            let apn = parts[2].trim().trim_matches('"').to_string();
-                            if !apn.is_empty() {
-                                info.apn = apn;
+                            let a = parts[2].trim().trim_matches('"').to_string();
+                            if !a.is_empty() {
+                                apn = a;
                                 break;
                             }
                         }
@@ -358,15 +452,18 @@ async fn fetch_static_info(state: &Arc<AppState>, serial_path: &str) {
             }
         }
     }
-    set_default(&mut info.apn, "N/A");
+    set_default(&mut apn, "N/A");
 
     println!(
         "📋 静态信息已获取: FW={}, SIM={}, Provider={}, APN={}",
-        info.firmware_version, info.active_sim, info.network_provider, info.apn
+        firmware_version, active_sim, network_provider, apn
     );
 
-    let mut guard = state.static_info.write().await;
-    *guard = info;
+    let mut guard = state.global.write().await;
+    guard.firmware_version = firmware_version;
+    guard.active_sim = active_sim;
+    guard.network_provider = network_provider;
+    guard.apn = apn;
 }
 
 /// 全局 AT 命令互斥锁，防止并发写入 SMD 设备
@@ -936,25 +1033,29 @@ async fn hardware_polling_actor(
                         "Disconnected".to_string()
                     };
 
-                    // 获取静态共享属性并写入
-                    {
-                        let guard = state.static_info.read().await;
-                        telemetry.active_sim = guard.active_sim.clone();
-                        telemetry.network_provider = guard.network_provider.clone();
-                        telemetry.apn = guard.apn.clone();
-                    }
-
                     let uptime_sec = System::uptime();
-                    telemetry.uptime = format!("{} minutes", uptime_sec / 60);
-                    telemetry.updated = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
+                    let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
-                    if let Ok(json_str) = serde_json::to_string(&telemetry) {
-                        let send_rc = state.tx.receiver_count();
-                        eprintln!("📤 WS 广播遥测数据 ({} 接收者, {} 字节): {}",
-                            send_rc, json_str.len(), &json_str[..json_str.len().min(200)]);
-                        let _ = state.tx.send(json_str);
-                    } else {
-                        eprintln!("❌ 序列化遥测数据失败");
+                    // 合并到全局状态并从全局状态广播
+                    {
+                        let global = state.global.read().await;
+                        let mut gt = GlobalTelemetry::from_telemetry_and_global(&telemetry, &global);
+                        drop(global);
+
+                        gt.uptime = format!("{} minutes", uptime_sec / 60);
+                        gt.updated = updated_str;
+
+                        let mut global = state.global.write().await;
+                        *global = gt;
+
+                        if let Ok(json_str) = serde_json::to_string(&*global) {
+                            let send_rc = state.tx.receiver_count();
+                            eprintln!("📤 WS 广播遥测数据 ({} 接收者, {} 字节): {}",
+                                send_rc, json_str.len(), &json_str[..json_str.len().min(200)]);
+                            let _ = state.tx.send(json_str);
+                        } else {
+                            eprintln!("❌ 序列化遥测数据失败");
+                        }
                     }
 
                     println!("✅ 轮询任务完成，总耗时: {}ms", start_poll.elapsed().as_millis());
@@ -1034,7 +1135,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             continue;
                         }
                         "get_static_info" => {
-                            let guard = state_inner.static_info.read().await;
+                            let guard = state_inner.global.read().await;
                             let info_json = serde_json::json!({
                                 "type": "static_info",
                                 "data": {

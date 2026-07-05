@@ -1,6 +1,6 @@
 use clap::Parser;
 use std::fs::OpenOptions;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::process;
 
 // These are the exact terminators extracted from the original Compal firmware.
@@ -69,8 +69,9 @@ fn main() {
             }
             Ok(_) => {
                 print!("{}", line);
+                io::stdout().flush().ok();
 
-                if TERMINATORS.iter().any(|&t| line.starts_with(t)) {
+                if TERMINATORS.iter().any(|&t| line.trim().starts_with(t)) {
                     break;
                 }
             }

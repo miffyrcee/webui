@@ -74,8 +74,21 @@ qeng_fields = { generic_value ~ (COMMA ~ generic_value)* }
 qcainfo_resp = { "+QCAINFO:" ~ COMMA? ~ qcainfo_fields }
 qcainfo_fields = { generic_value ~ (COMMA ~ generic_value)* }
 
-// ─── Combined AT command response ───
+// ─── AT command echo line ───
+// Matches the initial echo of the AT command in raw output (e.g. "AT+CGMR")
+at_echo_line = { "AT" ~ (!CRLF ~ ANY)* }
+
+// ─── Combined AT command response (cleaned, no echo) ───
 // A response can contain multiple AT result lines interspersed
 at_response_line = { (cpin_resp | quimslot_resp | qspn_resp | cops_resp | cgdcont_resp | qgdnrcnt_resp | qgdat_resp | cgpaddr_resp | qeng_servingcell | qcainfo_resp | cgmr_line | status_line) }
 
 at_response = { SOI ~ (at_response_line ~ (CRLF ~ at_response_line)*)? ~ EOI }
+
+// ─── Full raw AT response (with echo and trailing status) ───
+// Matches the complete raw output from atcmd_rs: "AT+CMD\r\n[data...]\r\nOK\r\n"
+// Use at_raw_response to parse unprocessed output that still includes the
+// command echo and trailing status line (OK/ERROR/+CME ERROR:).
+at_data_line = @{ (!("OK" | "ERROR" | "+CME ERROR:") ~ (!CRLF ~ ANY)*) }
+
+at_raw_response = { SOI ~ at_echo_line ~ CRLF ~ at_raw_body ~ EOI }
+at_raw_body = { (at_data_line ~ (CRLF ~ at_data_line)*)? ~ CRLF? ~ status_line? ~ CRLF? }

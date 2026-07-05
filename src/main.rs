@@ -473,59 +473,29 @@ async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, S
 
     let raw = String::from_utf8_lossy(&output.stdout).into_owned();
 
-    // 去掉命令回显行（如 "AT+CSQ\r\n" 之类的 echo）
-    let cmd_trimmed = cmd.trim();
-    let mut lines: Vec<&str> = raw
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim();
-            trimmed != cmd_trimmed && !trimmed.eq_ignore_ascii_case(cmd_trimmed)
-        })
-        .collect();
-
-    // 去掉开头的空行
-    while let Some(first) = lines.first() {
-        if first.trim().is_empty() {
-            lines.remove(0);
-        } else {
-            break;
-        }
-    }
-
-    let response_text = lines.join("\n");
-
-    // 检测错误
-    if response_text.contains("ERROR") || response_text.contains("+CME ERROR:") {
+    // 检测错误（在原始响应中搜索 ERROR/+CME ERROR:）
+    if raw.contains("ERROR") || raw.contains("+CME ERROR:") {
         let elapsed = start.elapsed();
         println!("⚠️ [AT] {} 返回 ERROR ({}ms)", cmd, elapsed.as_millis());
-        return Err(format!("AT命令返回错误: {}", response_text.trim()));
+        return Err(format!("AT命令返回错误: {}", raw.trim()));
     }
 
-    // 去掉末尾的 OK 行及之后的内容
-    let response_text = if let Some(ok_idx) = lines.iter().rposition(|l| l.trim() == "OK") {
-        lines.truncate(ok_idx);
-        // 再去掉尾部空行
-        while let Some(last) = lines.last() {
-            if last.trim().is_empty() {
-                lines.pop();
-            } else {
-                break;
-            }
-        }
-        lines.join("\n")
-    } else {
-        // 没有 OK 行（如 AT+CMGS 的 > prompt），原样返回
-        response_text
-    };
-
     let elapsed = start.elapsed();
+    // 取首行非空非 AT 回显的内容作为日志预览
+    let preview = raw
+        .lines()
+        .find(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with("AT+")
+        })
+        .unwrap_or(&raw);
     println!(
-        "✅ [AT] {} 成功 ({}ms):\n{}",
+        "✅ [AT] {} 成功 ({}ms): {}",
         cmd,
         elapsed.as_millis(),
-        response_text
+        preview.trim()
     );
-    Ok(response_text)
+    Ok(raw)
 }
 
 /// 发送 AT 命令并返回首行有效响应（自动去除 AT echo、OK/ERROR、空行）

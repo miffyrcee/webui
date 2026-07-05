@@ -34,6 +34,37 @@ pub fn parse_at_response(raw: &str) -> Vec<ParsedLine> {
     results
 }
 
+/// Parse a combined AT response (e.g. "AT+CPIN?;+QENG=...;+QCAINFO;+CGPADDR")
+/// into individual response sections by known prefix markers.
+/// Extracts the first line matching each known prefix from the raw output
+/// (which may include echo line, trailing OK, etc.).
+#[allow(dead_code)]
+pub fn parse_combined_response(raw: &str) -> (String, String, String, String) {
+    let mut cpin = String::new();
+    let mut qeng = String::new();
+    let mut qca = String::new();
+    let mut gpad = String::new();
+
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("+CPIN:") {
+            cpin = trimmed.to_string();
+        } else if trimmed.starts_with("+QENG:") {
+            qeng = trimmed.to_string();
+        } else if trimmed.starts_with("+QCAINFO:") {
+            if qca.is_empty() {
+                qca = trimmed.to_string();
+            }
+        } else if trimmed.starts_with("+CGPADDR:") {
+            if gpad.is_empty() {
+                gpad = trimmed.to_string();
+            }
+        }
+    }
+
+    (cpin, qeng, qca, gpad)
+}
+
 /// Represents a single parsed line from an AT response
 #[derive(Debug, Clone)]
 #[allow(dead_code)]

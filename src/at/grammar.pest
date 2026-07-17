@@ -60,7 +60,7 @@ qgdat_resp = { "+QGDAT:" ~ quoted_value ~ COMMA ~ quoted_value }
 
 // ─── CGPADDR ───
 // +CGPADDR: <cid>,"<PDP_addr>","<PDP_addr>"
-cgpaddr_resp = { "+CGPADDR:" ~ cgpaddr_cid ~ COMMA ~ cgpaddr_ip }
+cgpaddr_resp = { "+CGPADDR:" ~ cgpaddr_cid ~ COMMA ~ cgpaddr_ip ~ (COMMA ~ cgpaddr_ip)? }
 cgpaddr_cid = { digits }
 cgpaddr_ip  = { quoted_value }
 
@@ -74,13 +74,39 @@ qeng_fields = { generic_value ~ (COMMA ~ generic_value)* }
 qcainfo_resp = { "+QCAINFO:" ~ COMMA? ~ qcainfo_fields }
 qcainfo_fields = { generic_value ~ (COMMA ~ generic_value)* }
 
+// ─── CREG (network registration status) ───
+// +CREG: <n>,<stat>
+creg_resp = { "+CREG:" ~ creg_fields }
+creg_fields = { generic_value ~ (COMMA ~ generic_value)* }
+
+// ─── CSQ (signal quality) ───
+// +CSQ: <rssi>,<ber>
+csq_resp = { "+CSQ:" ~ csq_fields }
+csq_fields = { generic_value ~ (COMMA ~ generic_value)* }
+
+// ─── QCFG "band" ───
+// +QCFG: "band",<GSM>,<WCDMA>,<LTE_hex>,<NR_hex>
+qcfg_band_resp = { "+QCFG: \"band\"" ~ COMMA ~ generic_value ~ COMMA ~ generic_value ~ COMMA ~ generic_value ~ COMMA ~ generic_value }
+
+// ─── QTEMP (single sensor line) ───
+// +QTEMP:"sensor_name","value"
+qtemp_resp = { "+QTEMP:" ~ quoted_value ~ COMMA ~ quoted_value }
+
+// ─── CGCONTRDP ───
+// +CGCONTRDP: <cid>,<PDP_type>,<APN>,...
+cgcontrdp_resp = { "+CGCONTRDP:" ~ generic_value ~ (COMMA ~ generic_value)* }
+
+// ─── CNUM ───
+// +CNUM: [<contact>,"<number>",<type>]
+cnum_resp = { "+CNUM:" ~ generic_value ~ (COMMA ~ generic_value)* }
+
 // ─── AT command echo line ───
 // Matches the initial echo of the AT command in raw output (e.g. "AT+CGMR")
 at_echo_line = { "AT" ~ (!CRLF ~ ANY)* }
 
 // ─── Combined AT command response (cleaned, no echo) ───
 // A response can contain multiple AT result lines interspersed
-at_response_line = { (cpin_resp | quimslot_resp | qspn_resp | cops_resp | cgdcont_resp | qgdnrcnt_resp | qgdat_resp | cgpaddr_resp | qeng_servingcell | qcainfo_resp | cgmr_line | status_line) }
+at_response_line = { (cpin_resp | quimslot_resp | qspn_resp | cops_resp | cgdcont_resp | qgdnrcnt_resp | qgdat_resp | cgpaddr_resp | qeng_servingcell | qcainfo_resp | status_line | cgmr_line) }
 
 at_response = { SOI ~ (at_response_line ~ (CRLF ~ at_response_line)*)? ~ EOI }
 

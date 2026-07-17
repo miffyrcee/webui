@@ -21,8 +21,11 @@ use std::{env, sync::Arc};
 use sysinfo::{Components, System};
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 
-use at::parser::{parse_cgpaddr, parse_qcainfo, parse_qeng, parse_qtemp_temperature};
-use at::utils::{decode_hex_ucs2, format_bytes};
+use at::{
+    parse_cgpaddr, parse_cops_scan, parse_net_status, parse_qcainfo, parse_qcfg_bands,
+    parse_qeng, parse_qtemp_temperature, parse_signal_quality, parse_traffic_line,
+    decode_cmgl_body, decode_hex_ucs2, normalize_at_command, set_default,
+};
 use fs2::FileExt;
 
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
@@ -638,40 +641,6 @@ impl HardwareBackend for RealBackend {
 // 通用工具函数
 // ============================================================================
 
-/// 如果字段为空则设为默认值
-fn set_default(field: &mut String, default: &str) {
-    if field.is_empty() {
-        *field = default.to_string();
-    }
-}
-
-/// 解析流量统计单行（支持 QGDNRCNT 和 QGDAT 两种格式）
-fn parse_traffic_line(line: &str, prefix: &str, quoted: bool) -> Option<String> {
-    let parts: Vec<&str> = line
-        .trim()
-        .strip_prefix(prefix)?
-        .trim()
-        .split(',')
-        .collect();
-    if parts.len() >= 2 {
-        let parse_val = |s: &str| -> u64 {
-            let s = if quoted {
-                s.trim().trim_matches('"')
-            } else {
-                s.trim()
-            };
-            s.parse().unwrap_or(0)
-        };
-        Some(format!(
-            "TX {} / RX {}",
-            format_bytes(parse_val(parts[0])),
-            format_bytes(parse_val(parts[1]))
-        ))
-    } else {
-        None
-    }
-}
-
 /// 三段式回退获取运营商名称：QSPN → COPS → QENG MCC/MNC
 async fn fetch_network_provider(serial_path: &str) -> String {
     // 1. AT+QSPN
@@ -783,24 +752,6 @@ async fn acquire_serial_lock() -> Result<SerialFileLock, String> {
     .map_err(|e| format!("文件锁任务被取消: {}", e))??;
 
     Ok(SerialFileLock { file: Some(result) })
-}
-
-/// 规范化 AT 命令：自动补全缺失的 AT 前缀
-fn normalize_at_command(cmd: &str) -> String {
-    let trimmed = cmd.trim();
-    if trimmed.is_empty() {
-        return trimmed.to_string();
-    }
-
-    // A/ = 重复上一条命令, +++ = 退出数据模式
-    if trimmed.starts_with("AT") || trimmed.starts_with("at")
-        || trimmed == "A/" || trimmed == "a/"
-        || trimmed == "+++"
-    {
-        trimmed.to_string()
-    } else {
-        format!("AT{}", trimmed)
-    }
 }
 
 /// 全局 AT 命令互斥锁，防止并发写入 SMD 设备
@@ -1058,89 +1009,6 @@ async fn query_device_bands(serial_path: &str) -> String {
     }
 }
 
-/// 解析 AT+QCFG="band" 响应中的 LTE 和 NR 频段 bitmask
-/// 格式: +QCFG: "band",<GSM>,<WCDMA>,<LTE_hex>,<NR_hex>
-fn parse_qcfg_bands(line: &str) -> (Vec<String>, Vec<String>) {
-    let rest = line
-        .strip_prefix("+QCFG:").unwrap_or("")
-        .trim()
-        .strip_prefix("\"band\"").unwrap_or("")
-        .trim()
-        .strip_prefix(',').unwrap_or("");
-
-    let parts: Vec<&str> = rest.split(',').collect();
-
-    // parts[2]=LTE, parts[3]=NR (after removing "band" prefix and GSM,WCDMA)
-    let lte_hex = parts.get(2).map(|s| s.trim()).unwrap_or("0");
-    let nr_hex = parts.get(3).map(|s| s.trim()).unwrap_or("0");
-
-    let lte_bands = parse_lte_bitmask(lte_hex);
-    let nr_bands = parse_nr_bitmask(nr_hex);
-
-    (lte_bands, nr_bands)
-}
-
-/// 解析 LTE 频段 bitmask（Quectel 通用位映射）
-fn parse_lte_bitmask(hex: &str) -> Vec<String> {
-    let hex = hex.trim_start_matches("0x").trim_start_matches("0X");
-    let val = u128::from_str_radix(hex, 16).ok().unwrap_or(0);
-    if val == 0 {
-        return Vec::new();
-    }
-
-    // LTE 频段位映射（基于 Quectel RM5xx/RG5xx 系列）
-    let lte_map: [(u128, &str); 42] = [
-        (1 << 0, "B1"), (1 << 1, "B2"), (1 << 2, "B3"), (1 << 3, "B4"),
-        (1 << 4, "B5"), (1 << 5, "B6"), (1 << 6, "B7"), (1 << 7, "B8"),
-        (1 << 8, "B9"), (1 << 9, "B10"), (1 << 10, "B11"), (1 << 11, "B12"),
-        (1 << 12, "B13"), (1 << 13, "B14"), (1 << 14, "B15"), (1 << 15, "B16"),
-        (1 << 16, "B17"), (1 << 17, "B18"), (1 << 18, "B19"), (1 << 19, "B20"),
-        (1 << 20, "B21"), (1 << 21, "B22"), (1 << 22, "B23"), (1 << 23, "B24"),
-        (1 << 24, "B25"), (1 << 25, "B26"), (1 << 27, "B28"),
-        (1 << 28, "B29"), (1 << 29, "B30"), (1 << 30, "B31"), (1 << 31, "B32"),
-        (1 << 32, "B33"), (1 << 33, "B34"), (1 << 34, "B35"), (1 << 35, "B36"),
-        (1 << 36, "B37"), (1 << 37, "B38"), (1 << 38, "B39"), (1 << 39, "B40"),
-        (1 << 40, "B41"), (1 << 41, "B42"), (1 << 42, "B43"),
-    ];
-
-    let mut bands: Vec<String> = Vec::new();
-    for &(mask, name) in &lte_map {
-        if val & mask != 0 {
-            bands.push(name.to_string());
-        }
-    }
-    bands
-}
-
-/// 解析 NR 频段 bitmask（Quectel 通用位映射）
-fn parse_nr_bitmask(hex: &str) -> Vec<String> {
-    let hex = hex.trim_start_matches("0x").trim_start_matches("0X");
-    let val = u128::from_str_radix(hex, 16).ok().unwrap_or(0);
-    if val == 0 {
-        return Vec::new();
-    }
-
-    // NR 频段位映射（基于 Quectel RM5xx/RG5xx 系列）
-    let nr_map: [(u128, &str); 29] = [
-        (1 << 0, "n1"), (1 << 1, "n2"), (1 << 2, "n3"), (1 << 3, "n5"),
-        (1 << 4, "n7"), (1 << 5, "n8"), (1 << 6, "n12"), (1 << 7, "n13"),
-        (1 << 8, "n14"), (1 << 9, "n18"), (1 << 10, "n20"), (1 << 11, "n25"),
-        (1 << 12, "n26"), (1 << 13, "n28"), (1 << 14, "n29"), (1 << 15, "n30"),
-        (1 << 16, "n38"), (1 << 17, "n40"), (1 << 18, "n41"), (1 << 19, "n48"),
-        (1 << 20, "n66"), (1 << 21, "n70"), (1 << 22, "n71"), (1 << 23, "n74"),
-        (1 << 24, "n75"), (1 << 25, "n76"), (1 << 26, "n77"), (1 << 27, "n78"),
-        (1 << 28, "n79"),
-    ];
-
-    let mut bands: Vec<String> = Vec::new();
-    for &(mask, name) in &nr_map {
-        if val & mask != 0 {
-            bands.push(name.to_string());
-        }
-    }
-    bands
-}
-
 /// 发送 AT 命令并返回首行有效响应（自动去除 AT echo、OK/ERROR、空行）
 async fn send_at_get_line(serial_path: &str, cmd: &str) -> Option<String> {
     send_at_command_dedup(serial_path, cmd)
@@ -1161,107 +1029,6 @@ async fn send_at_get_line(serial_path: &str, cmd: &str) -> Option<String> {
                 }
             })
         })
-}
-
-/// 从 AT 命令的至少一次查询结果中获取网络状态
-fn parse_net_status(creg_raw: &str) -> String {
-    if let Some(rest) = creg_raw.strip_prefix("+CREG:") {
-        let parts: Vec<&str> = rest.trim().split(',').collect();
-        if parts.len() >= 2 {
-            return match parts[1].trim().trim_matches('"') {
-                "1" => "Registered (home)",
-                "5" => "Registered (roaming)",
-                "2" | "3" | "4" => "Not registered",
-                _ => "Unknown",
-            }
-            .to_string();
-        }
-    }
-    "Unknown".to_string()
-}
-
-/// 从 AT+CSQ 响应解析信号质量 (dBm)
-fn parse_signal_quality(csq_raw: &str) -> String {
-    if let Some(rest) = csq_raw.strip_prefix("+CSQ:") {
-        let rssi_str = rest.trim().split(',').next().unwrap_or("99").trim();
-        if let Ok(rssi) = rssi_str.parse::<i32>() {
-            if rssi == 99 {
-                return "Unknown".to_string();
-            }
-            let dbm = -113 + (rssi * 2);
-            return format!("{} dBm", dbm);
-        }
-    }
-    "Unknown".to_string()
-}
-
-/// 解析 AT+COPS=? 扫描结果
-/// 格式: +COPS: (1,"CHINA MOBILE","CMCC","46000",2),(2,"CHINA UNICOM","","46001",3),...
-/// 每项: (status,long_name,short_name,mccmnc,act)
-fn parse_cops_scan(resp: &str) -> Vec<serde_json::Value> {
-    let mut networks = Vec::new();
-
-    for line in resp.lines() {
-        let line = line.trim();
-        if !line.starts_with("+COPS:") {
-            continue;
-        }
-        let body = line.strip_prefix("+COPS:").unwrap_or("").trim();
-
-        let mut depth = 0i32;
-        let mut start: Option<usize> = None;
-
-        for (i, ch) in body.char_indices() {
-            match ch {
-                '(' => {
-                    depth += 1;
-                    if depth == 1 {
-                        start = Some(i + 1);
-                    }
-                }
-                ')' => {
-                    if depth == 1 {
-                        if let Some(s) = start {
-                            let entry = &body[s..i];
-                            let parts: Vec<&str> = entry
-                                .split(',')
-                                .map(|s| s.trim().trim_matches('"'))
-                                .collect();
-                            if parts.len() >= 5 {
-                                let tech = match parts[4].trim() {
-                                    "0" | "1" => "GSM",
-                                    "2" => "WCDMA",
-                                    "3" => "LTE",
-                                    "4" | "5" | "6" => "NR5G",
-                                    _ => "Unknown",
-                                };
-                                let stat = match parts[0] {
-                                    "0" => "Unknown",
-                                    "1" => "Available",
-                                    "2" => "Current",
-                                    "3" => "Forbidden",
-                                    _ => "Unknown",
-                                };
-                                networks.push(serde_json::json!({
-                                    "operator": parts.get(1).unwrap_or(&""),
-                                    "short_name": parts.get(2).unwrap_or(&""),
-                                    "mccmnc": parts.get(3).unwrap_or(&""),
-                                    "technology": tech,
-                                    "status": stat,
-                                    "band": "",
-                                }));
-                            }
-                        }
-                        start = None;
-                    }
-                    depth -= 1;
-                }
-                _ => {}
-            }
-        }
-    }
-
-    networks
 }
 
 fn static_file_response(
@@ -1677,122 +1444,3 @@ async fn style_handler() -> impl IntoResponse {
     )
 }
 
-/// Decode UCS-2 hex-encoded SMS body text in +CMGL AT responses
-fn decode_cmgl_body(response: &str) -> String {
-    let mut result = String::new();
-    let mut in_body = false;
-
-    for line in response.lines() {
-        if line.starts_with("+CMGL:") {
-            in_body = true;
-            result.push_str(line);
-            result.push('\n');
-        } else if in_body {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed == "OK" {
-                in_body = false;
-                result.push_str(line);
-                result.push('\n');
-            } else {
-                let decoded = decode_hex_ucs2(trimmed);
-                if decoded.is_empty() {
-                    result.push_str(line);
-                } else {
-                    result.push_str(&decoded);
-                }
-                result.push('\n');
-            }
-        } else {
-            result.push_str(line);
-            result.push('\n');
-        }
-    }
-
-    result
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_lte_bitmask_b1_b3() {
-        let bands = parse_lte_bitmask("0x5");
-        assert!(bands.contains(&"B1".to_string()));
-        assert!(bands.contains(&"B3".to_string()));
-    }
-
-    #[test]
-    fn test_parse_lte_bitmask_b5_b7_b8() {
-        let bands = parse_lte_bitmask("0x0D0");
-        assert!(bands.contains(&"B5".to_string()));
-        assert!(bands.contains(&"B7".to_string()));
-        assert!(bands.contains(&"B8".to_string()));
-    }
-
-    #[test]
-    fn test_parse_lte_bitmask_b20_b28() {
-        let bands = parse_lte_bitmask("0x8080000");
-        assert!(bands.contains(&"B20".to_string()));
-        assert!(bands.contains(&"B28".to_string()));
-    }
-
-    #[test]
-    fn test_parse_lte_bitmask_empty() {
-        let bands = parse_lte_bitmask("0x0");
-        assert!(bands.is_empty());
-    }
-
-    #[test]
-    fn test_parse_lte_bitmask_invalid_hex() {
-        let bands = parse_lte_bitmask("zzzz");
-        assert!(bands.is_empty());
-    }
-
-    #[test]
-    fn test_parse_nr_bitmask_n1_n3_n5() {
-        let bands = parse_nr_bitmask("0xD");
-        assert!(bands.contains(&"n1".to_string()));
-        assert!(bands.contains(&"n3".to_string()));
-        assert!(bands.contains(&"n5".to_string()));
-    }
-
-    #[test]
-    fn test_parse_nr_bitmask_n77_n78_n79() {
-        let bands = parse_nr_bitmask("0x1C000000");
-        assert!(bands.contains(&"n77".to_string()));
-        assert!(bands.contains(&"n78".to_string()));
-        assert!(bands.contains(&"n79".to_string()));
-    }
-
-    #[test]
-    fn test_parse_nr_bitmask_n41() {
-        let bands = parse_nr_bitmask("0x40000");
-        assert!(bands.contains(&"n41".to_string()));
-    }
-
-    #[test]
-    fn test_parse_nr_bitmask_empty() {
-        let bands = parse_nr_bitmask("0x0");
-        assert!(bands.is_empty());
-    }
-
-    #[test]
-    fn test_parse_qcfg_bands_lte_only() {
-        // 0x3FF = bits 0-9 = B1-B10 (10 bands)
-        let (lte, nr) = parse_qcfg_bands("+QCFG: \"band\",0,0,0x3FF,0");
-        assert_eq!(lte.len(), 10);
-        assert!(lte.contains(&"B9".to_string()));
-        assert!(lte.contains(&"B10".to_string()));
-        assert!(nr.is_empty());
-    }
-
-    #[test]
-    fn test_parse_qcfg_bands_nr_only() {
-        let (lte, nr) = parse_qcfg_bands("+QCFG: \"band\",0,0,0,0x1C000000");
-        assert!(lte.is_empty());
-        assert!(nr.contains(&"n77".to_string()));
-        assert!(nr.contains(&"n78".to_string()));
-        assert!(nr.contains(&"n79".to_string()));
-    }
-}

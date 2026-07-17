@@ -105,8 +105,69 @@ pub fn convert_dotted_ipv6_to_standard(raw: &str) -> String {
 }
 
 /// Extract a string value from a pair (it may be quoted or unquoted)
+#[allow(dead_code)]
 pub fn extract_value(s: &str) -> &str {
     s.trim().trim_matches('"')
+}
+
+// ============================================================================
+// 从 main.rs 移入的通用工具函数
+// ============================================================================
+
+/// Normalize AT command by auto-prepending AT prefix if missing
+pub fn normalize_at_command(cmd: &str) -> String {
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() {
+        return trimmed.to_string();
+    }
+    if trimmed.starts_with("AT") || trimmed.starts_with("at")
+        || trimmed == "A/" || trimmed == "a/"
+        || trimmed == "+++"
+    {
+        trimmed.to_string()
+    } else {
+        format!("AT{}", trimmed)
+    }
+}
+
+/// If field is empty, set to default value
+pub fn set_default(field: &mut String, default: &str) {
+    if field.is_empty() {
+        *field = default.to_string();
+    }
+}
+
+/// Decode UCS-2 hex-encoded SMS body text in +CMGL AT responses
+pub fn decode_cmgl_body(response: &str) -> String {
+    let mut result = String::new();
+    let mut in_body = false;
+
+    for line in response.lines() {
+        if line.starts_with("+CMGL:") {
+            in_body = true;
+            result.push_str(line);
+            result.push('\n');
+        } else if in_body {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed == "OK" {
+                in_body = false;
+                result.push_str(line);
+                result.push('\n');
+            } else {
+                let decoded = decode_hex_ucs2(trimmed);
+                if decoded.is_empty() {
+                    result.push_str(line);
+                } else {
+                    result.push_str(&decoded);
+                }
+                result.push('\n');
+            }
+        } else {
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+    result
 }
 
 #[cfg(test)]

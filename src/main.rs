@@ -23,6 +23,7 @@ use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 
 use at::parser::{parse_cgpaddr, parse_qcainfo, parse_qeng, parse_qtemp_temperature};
 use at::utils::{decode_hex_ucs2, format_bytes};
+use fs2::FileExt;
 
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
 
@@ -125,29 +126,39 @@ impl Default for GlobalTelemetry {
 
 impl GlobalTelemetry {
     /// 从 TelemetryData（解析器填充）和当前全局状态合并构造 GlobalTelemetry。
-    /// 解析器填充的非静态字段从 telemetry 复制，静态字段从 global 保留。
+    /// 动态字段仅当解析器返回有效值（非空、非 NA/N/A/--）时才覆盖，
+    /// 否则保留上一次的全局值，避免一次 AT 失败就冲掉全部数据。
+    /// 静态字段始终从 global 保留。
     fn from_telemetry_and_global(t: &TelemetryData, g: &GlobalTelemetry) -> Self {
+        fn keep_valid(new: &str, old: &str) -> String {
+            if !new.is_empty() && new != "NA" && new != "N/A" && new != "--" {
+                new.to_string()
+            } else {
+                old.to_string()
+            }
+        }
+
         Self {
-            temperature: t.temperature.clone(),
-            sim_status: t.sim_status.clone(),
-            signal_percentage: t.signal_percentage.clone(),
-            internet_connection: t.internet_connection.clone(),
-            mccmnc: t.mccmnc.clone(),
-            network_mode: t.network_mode.clone(),
-            bands: t.bands.clone(),
-            bandwidth: t.bandwidth.clone(),
-            earfcn: t.earfcn.clone(),
-            pci: t.pci.clone(),
-            ipv4: t.ipv4.clone(),
-            ipv6: t.ipv6.clone(),
-            assessment: t.assessment.clone(),
-            traffic_stats: t.traffic_stats.clone(),
-            cell_id: t.cell_id.clone(),
-            enb_id: t.enb_id.clone(),
-            tac: t.tac.clone(),
-            ss_rsrq: t.ss_rsrq.clone(),
-            ss_rsrp: t.ss_rsrp.clone(),
-            sinr: t.sinr.clone(),
+            temperature: keep_valid(&t.temperature, &g.temperature),
+            sim_status: keep_valid(&t.sim_status, &g.sim_status),
+            signal_percentage: keep_valid(&t.signal_percentage, &g.signal_percentage),
+            internet_connection: keep_valid(&t.internet_connection, &g.internet_connection),
+            mccmnc: keep_valid(&t.mccmnc, &g.mccmnc),
+            network_mode: keep_valid(&t.network_mode, &g.network_mode),
+            bands: keep_valid(&t.bands, &g.bands),
+            bandwidth: keep_valid(&t.bandwidth, &g.bandwidth),
+            earfcn: keep_valid(&t.earfcn, &g.earfcn),
+            pci: keep_valid(&t.pci, &g.pci),
+            ipv4: keep_valid(&t.ipv4, &g.ipv4),
+            ipv6: keep_valid(&t.ipv6, &g.ipv6),
+            assessment: keep_valid(&t.assessment, &g.assessment),
+            traffic_stats: keep_valid(&t.traffic_stats, &g.traffic_stats),
+            cell_id: keep_valid(&t.cell_id, &g.cell_id),
+            enb_id: keep_valid(&t.enb_id, &g.enb_id),
+            tac: keep_valid(&t.tac, &g.tac),
+            ss_rsrq: keep_valid(&t.ss_rsrq, &g.ss_rsrq),
+            ss_rsrp: keep_valid(&t.ss_rsrp, &g.ss_rsrp),
+            sinr: keep_valid(&t.sinr, &g.sinr),
             // 静态字段从已有全局状态保留
             firmware_version: g.firmware_version.clone(),
             active_sim: g.active_sim.clone(),
@@ -714,8 +725,67 @@ async fn fetch_network_provider(serial_path: &str) -> String {
 }
 
 // ============================================================================
-// AT 命令基础架构（互斥锁 + 去重队列）
+// AT 命令基础架构（互斥锁 + 去重队列 + 跨进程文件锁）
 // ============================================================================
+
+/// 跨进程文件锁 — 防止其他进程（如后台监控守护进程）同时操作串口
+struct SerialFileLock {
+    file: Option<std::fs::File>,
+}
+
+impl Drop for SerialFileLock {
+    fn drop(&mut self) {
+        // 文件关闭时内核自动释放 flock；显式 unlock 更可靠
+        if let Some(ref file) = self.file {
+            let _ = file.unlock();
+        }
+    }
+}
+
+/// 锁文件路径（位于 tmpfs，重启自动清理）
+const LOCK_FILE_PATH: &str = "/tmp/atcmd_rs.lock";
+
+/// 获取跨进程排他文件锁。
+/// 同一时间仅允许一个进程持有锁，其他进程的 flock(LOCK_EX) 在内核态阻塞等待。
+async fn acquire_serial_lock() -> Result<SerialFileLock, String> {
+    let result = tokio::task::spawn_blocking(|| -> Result<std::fs::File, String> {
+        // 以 CREATE+WRITE 模式打开锁文件，保证文件始终存在
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .read(true)
+            .open(LOCK_FILE_PATH)
+            .map_err(|e| format!("无法打开锁文件 {}: {}", LOCK_FILE_PATH, e))?;
+
+        // LOCK_EX：排他锁，阻塞等待直到获取到锁
+        file.lock_exclusive()
+            .map_err(|e| format!("获取 {} 排他锁失败: {}", LOCK_FILE_PATH, e))?;
+
+        Ok(file)
+    })
+    .await
+    .map_err(|e| format!("文件锁任务被取消: {}", e))??;
+
+    Ok(SerialFileLock { file: Some(result) })
+}
+
+/// 规范化 AT 命令：自动补全缺失的 AT 前缀
+fn normalize_at_command(cmd: &str) -> String {
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() {
+        return trimmed.to_string();
+    }
+
+    // A/ = 重复上一条命令, +++ = 退出数据模式
+    if trimmed.starts_with("AT") || trimmed.starts_with("at")
+        || trimmed == "A/" || trimmed == "a/"
+        || trimmed == "+++"
+    {
+        trimmed.to_string()
+    } else {
+        format!("AT{}", trimmed)
+    }
+}
 
 /// 全局 AT 命令互斥锁，防止并发写入 SMD 设备
 static AT_CMD_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
@@ -793,6 +863,10 @@ async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, S
 
     let _lock = get_at_lock().lock().await;
 
+    // 跨进程排他锁：防止其他后台进程（如监控守护）同时操作 /dev/smd11
+    // 导致数据被劫持或响应混乱
+    let _file_lock = acquire_serial_lock().await?;
+
     let child = tokio::process::Command::new("/opt/atcmd_rs")
         .arg("-p")
         .arg(serial_path)
@@ -867,8 +941,10 @@ async fn query_device_bands(serial_path: &str) -> String {
                 .strip_prefix(',')
                 .unwrap_or("");
             let parts: Vec<&str> = rest.split(',').map(|s| s.trim().trim_matches('"')).collect();
-            // parts[0]=connection_status, parts[1]=rat, parts[8]=band
-            if let Some(band) = parts.get(8) {
+            // parts[0]=connection_status, parts[1]=rat
+            // LTE: band at index 8, NR5G: band at index 9 (extra tac field)
+            let band_idx = if parts.get(1).map(|r| r.contains("NR5G")).unwrap_or(false) { 9 } else { 8 };
+            if let Some(band) = parts.get(band_idx) {
                 let b = band.trim();
                 if !b.is_empty() && b != "-" {
                     if parts.get(1).map(|r| r.contains("NR5G")).unwrap_or(false) {
@@ -1186,6 +1262,7 @@ async fn hardware_task(
                 };
                 match req.action {
                     AtAction::ManualAt(cmd) => {
+                        let cmd = normalize_at_command(&cmd);
                         println!("👨‍💻 用户手动执行 AT: {}", cmd);
                         let response = backend.exec_raw_at(&cmd).await;
                         let _ = req.resp_tx.send(serde_json::json!({ "type": "at_res", "data": response }));

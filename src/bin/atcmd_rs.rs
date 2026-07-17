@@ -33,7 +33,11 @@ fn main() {
     // Open the serial device. Linux TTY drivers natively handle the RTS/CTS
     // flow control upon opening, bypassing the need for manual ioctl hacks
     // seen in the original `atcmd` binary.
-    let mut file = match OpenOptions::new().read(true).write(true).open(&cli.device_path) {
+    let mut file = match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&cli.device_path)
+    {
         Ok(f) => f,
         Err(e) => {
             eprintln!("fopen({}) failed: {}", cli.device_path, e);
@@ -71,7 +75,7 @@ fn main() {
                 print!("{}", line);
                 io::stdout().flush().ok();
 
-                if TERMINATORS.iter().any(|&t| line.trim().starts_with(t)) {
+                if TERMINATORS.iter().any(|&t| line.starts_with(t)) {
                     break;
                 }
             }

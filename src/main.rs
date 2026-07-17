@@ -1070,10 +1070,11 @@ async fn handle_channel_req(
     backend: &Arc<dyn HardwareBackend>,
     interval_secs: &mut u64,
     interval: &mut tokio::time::Interval,
+    current_interval_secs: &mut u64,
 ) -> bool {
     match req {
         Some(r) => {
-            handle_at_request(r, backend, interval_secs, interval).await;
+            handle_at_request(r, backend, interval_secs, interval, current_interval_secs).await;
             true
         }
         None => false,
@@ -1087,6 +1088,7 @@ async fn handle_at_request(
     backend: &Arc<dyn HardwareBackend>,
     interval_secs: &mut u64,
     interval: &mut tokio::time::Interval,
+    current_interval_secs: &mut u64,
 ) {
     match req.action {
         AtAction::ManualAt(cmd) => {
@@ -1102,6 +1104,7 @@ async fn handle_at_request(
         AtAction::SetInterval(secs) => {
             let new_secs = secs.max(5);
             *interval_secs = new_secs;
+            *current_interval_secs = new_secs;
             *interval = tokio::time::interval(Duration::from_secs(*interval_secs));
             interval.tick().await;
             println!("🔄 轮询间隔已动态调整为 {} 秒", new_secs);
@@ -1267,18 +1270,20 @@ async fn hardware_task(
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
     interval.tick().await;
     let mut consecutive_failures = 0u32;
+    // 当前计时器周期，避免无意义重建 Interval（保留漂移补偿能力）
+    let mut current_interval_secs = interval_secs;
 
     loop {
         tokio::select! {
             biased;
 
             req = actor_rx_high.recv() => {
-                if !handle_channel_req(req, &backend, &mut interval_secs, &mut interval).await {
+                if !handle_channel_req(req, &backend, &mut interval_secs, &mut interval, &mut current_interval_secs).await {
                     break;
                 }
             }
             req = actor_rx.recv() => {
-                if !handle_channel_req(req, &backend, &mut interval_secs, &mut interval).await {
+                if !handle_channel_req(req, &backend, &mut interval_secs, &mut interval, &mut current_interval_secs).await {
                     break;
                 }
             }
@@ -1365,10 +1370,13 @@ async fn hardware_task(
                     println!("💤 硬件轮询处于空闲模式 (无活跃视图)");
                 }
 
-                // 动态空闲降频
+                // 动态空闲降频：仅在周期真正发生改变时才重建 Interval
                 let next_secs = if active { interval_secs } else { IDLE_INTERVAL_SECS };
-                interval = tokio::time::interval(Duration::from_secs(next_secs));
-                interval.tick().await;
+                if next_secs != current_interval_secs {
+                    current_interval_secs = next_secs;
+                    interval = tokio::time::interval(Duration::from_secs(next_secs));
+                    interval.tick().await; // 消耗新 Interval 就绪的第一拍
+                }
             }
         }
     }

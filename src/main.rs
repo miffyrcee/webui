@@ -1055,7 +1055,33 @@ async fn index_handler() -> impl IntoResponse {
 // 统一硬件任务：串行消费 /opt/atcmd_rs，定时轮询 + 用户指令均经此通道
 // ============================================================================
 
+/// 将 GlobalTelemetry 序列化并广播到所有 WS 客户端
+fn broadcast_state(state: &AppState, global: &GlobalTelemetry) {
+    if let Ok(json_str) = serde_json::to_string(global) {
+        let send_rc = state.tx.receiver_count();
+        eprintln!("📤 WS 广播遥测数据 ({} 接收者, {} 字节)", send_rc, json_str.len());
+        let _ = state.tx.send(json_str);
+    }
+}
+
+/// 处理单个 channel 消息，返回 false 表示 channel 已关闭
+async fn handle_channel_req(
+    req: Option<AtRequest>,
+    backend: &Arc<dyn HardwareBackend>,
+    interval_secs: &mut u64,
+    interval: &mut tokio::time::Interval,
+) -> bool {
+    match req {
+        Some(r) => {
+            handle_at_request(r, backend, interval_secs, interval).await;
+            true
+        }
+        None => false,
+    }
+}
+
 /// 处理单个 AT 请求（高低优先级通道共用此函数）
+/// 🌟 所有涉及物理串口读写的操作，通过 tokio::spawn 异步派发，保证 Actor 绝不卡死
 async fn handle_at_request(
     req: AtRequest,
     backend: &Arc<dyn HardwareBackend>,
@@ -1066,8 +1092,12 @@ async fn handle_at_request(
         AtAction::ManualAt(cmd) => {
             let cmd = normalize_at_command(&cmd);
             println!("👨‍💻 用户手动执行 AT: {}", cmd);
-            let response = backend.exec_raw_at(&cmd).await;
-            let _ = req.resp_tx.send(serde_json::json!({ "type": "at_res", "data": response }));
+            let backend = backend.clone();
+            let resp_tx = req.resp_tx;
+            tokio::spawn(async move {
+                let response = backend.exec_raw_at(&cmd).await;
+                let _ = resp_tx.send(serde_json::json!({ "type": "at_res", "data": response }));
+            });
         }
         AtAction::SetInterval(secs) => {
             let new_secs = secs.max(5);
@@ -1092,27 +1122,39 @@ async fn handle_at_request(
         }
         AtAction::SetApn(apn, user, pass, auth_type) => {
             println!("🌐 actor: set_apn apn={} user={} auth={}", apn, user, auth_type);
-            backend.configure_apn(&apn, &user, &pass, auth_type).await;
-            let _ = req.resp_tx.send(serde_json::json!({
-                "type": "network_status",
-                "data": { "status": "APN settings applied", "apn": apn }
-            }));
+            let backend = backend.clone();
+            let resp_tx = req.resp_tx;
+            tokio::spawn(async move {
+                backend.configure_apn(&apn, &user, &pass, auth_type).await;
+                let _ = resp_tx.send(serde_json::json!({
+                    "type": "network_status",
+                    "data": { "status": "APN settings applied", "apn": apn }
+                }));
+            });
         }
         AtAction::SetNetworkMode(mode) => {
             println!("🌐 actor: set_network_mode {}", mode);
-            backend.set_network_mode_pref(&mode).await;
-            let _ = req.resp_tx.send(serde_json::json!({
-                "type": "network_status",
-                "data": { "status": format!("Network mode set to {}", mode) }
-            }));
+            let backend = backend.clone();
+            let resp_tx = req.resp_tx;
+            tokio::spawn(async move {
+                backend.set_network_mode_pref(&mode).await;
+                let _ = resp_tx.send(serde_json::json!({
+                    "type": "network_status",
+                    "data": { "status": format!("Network mode set to {}", mode) }
+                }));
+            });
         }
         AtAction::NetConnect(connect) => {
             println!("🌐 actor: net_{}", if connect { "connect" } else { "disconnect" });
-            backend.set_data_session(connect).await;
-            let _ = req.resp_tx.send(serde_json::json!({
-                "type": "network_status",
-                "data": { "status": format!("{} command sent", if connect { "Connect" } else { "Disconnect" }) }
-            }));
+            let backend = backend.clone();
+            let resp_tx = req.resp_tx;
+            tokio::spawn(async move {
+                backend.set_data_session(connect).await;
+                let _ = resp_tx.send(serde_json::json!({
+                    "type": "network_status",
+                    "data": { "status": format!("{} command sent", if connect { "Connect" } else { "Disconnect" }) }
+                }));
+            });
         }
         AtAction::NetworkScan => {
             println!("🔍 actor: network_scan (后台异步执行，不阻塞轮询)");
@@ -1128,69 +1170,92 @@ async fn handle_at_request(
         }
         AtAction::SendSms(recipient, message) => {
             println!("📱 actor: send_sms to={}", recipient);
-            let success = backend.send_sms_msg(&recipient, &message).await;
-            let _ = req.resp_tx.send(serde_json::json!({
-                "type": "sms_sent",
-                "data": { "status": if success { "SMS sent successfully" } else { "SMS failed" }, "recipient": recipient }
-            }));
+            let backend = backend.clone();
+            let resp_tx = req.resp_tx;
+            tokio::spawn(async move {
+                let success = backend.send_sms_msg(&recipient, &message).await;
+                let _ = resp_tx.send(serde_json::json!({
+                    "type": "sms_sent",
+                    "data": { "status": if success { "SMS sent successfully" } else { "SMS failed" }, "recipient": recipient }
+                }));
+            });
         }
         AtAction::GetDeviceInfo => {
             println!("📱 actor: get_device_info via AT commands");
-            let info = backend.read_device_info().await;
-
-            let _ = req.resp_tx.send(serde_json::json!({
-                "type": "device_info",
-                "data": {
-                    "manufacturer": info.manufacturer,
-                    "model": info.model,
-                    "firmware_version": info.firmware,
-                    "imei": info.imei,
-                    "serial": info.serial,
-                    "hw_version": info.hw_version,
-                    "module_type": info.module_type,
-                    "sim_status": info.sim_status,
-                    "imsi": info.imsi,
-                    "iccid": info.iccid,
-                    "phone": info.phone,
-                    "net_status": info.net_status,
-                    "signal": info.signal_quality,
-                    "temperature": info.temperature,
-                    "bands": info.bands,
-                    "max_rate": "--",
-                    "volte": "--",
-                    "gnss": "--"
-                }
-            }));
+            let backend = backend.clone();
+            let resp_tx = req.resp_tx;
+            tokio::spawn(async move {
+                let info = backend.read_device_info().await;
+                let _ = resp_tx.send(serde_json::json!({
+                    "type": "device_info",
+                    "data": {
+                        "manufacturer": info.manufacturer,
+                        "model": info.model,
+                        "firmware_version": info.firmware,
+                        "imei": info.imei,
+                        "serial": info.serial,
+                        "hw_version": info.hw_version,
+                        "module_type": info.module_type,
+                        "sim_status": info.sim_status,
+                        "imsi": info.imsi,
+                        "iccid": info.iccid,
+                        "phone": info.phone,
+                        "net_status": info.net_status,
+                        "signal": info.signal_quality,
+                        "temperature": info.temperature,
+                        "bands": info.bands,
+                        "max_rate": "--",
+                        "volte": "--",
+                        "gnss": "--"
+                    }
+                }));
+            });
         }
         AtAction::Reboot => {
             println!("🔄 actor: rebooting module...");
-            backend.send_reboot().await;
-            let _ = req.resp_tx.send(serde_json::json!({
-                "type": "settings_log",
-                "data": { "msg": "Reboot command sent to module." }
-            }));
+            let backend = backend.clone();
+            let resp_tx = req.resp_tx;
+            tokio::spawn(async move {
+                backend.send_reboot().await;
+                let _ = resp_tx.send(serde_json::json!({
+                    "type": "settings_log",
+                    "data": { "msg": "Reboot command sent to module." }
+                }));
+            });
         }
         AtAction::FactoryReset => {
             println!("⚠️ actor: factory reset module...");
-            backend.send_factory_reset().await;
-            let _ = req.resp_tx.send(serde_json::json!({
-                "type": "settings_log",
-                "data": { "msg": "Factory reset command sent to module." }
-            }));
+            let backend = backend.clone();
+            let resp_tx = req.resp_tx;
+            tokio::spawn(async move {
+                backend.send_factory_reset().await;
+                let _ = resp_tx.send(serde_json::json!({
+                    "type": "settings_log",
+                    "data": { "msg": "Factory reset command sent to module." }
+                }));
+            });
         }
         AtAction::FlightMode(on) => {
             println!("✈️ actor: setting flight mode to {}", if on { "ON" } else { "OFF" });
-            backend.set_airplane_mode(on).await;
-            let _ = req.resp_tx.send(serde_json::json!({
-                "type": "settings_log",
-                "data": { "msg": format!("Flight mode turned {}", if on { "ON" } else { "OFF" }) }
-            }));
+            let backend = backend.clone();
+            let resp_tx = req.resp_tx;
+            tokio::spawn(async move {
+                backend.set_airplane_mode(on).await;
+                let _ = resp_tx.send(serde_json::json!({
+                    "type": "settings_log",
+                    "data": { "msg": format!("Flight mode turned {}", if on { "ON" } else { "OFF" }) }
+                }));
+            });
         }
     }
 }
 
-/// 统一硬件任务：定时轮询 + 用户 AT 指令，全部串行处理
-/// 高优先级通道优先消费，确保用户交互指令不会被轮询阻塞
+/// 统一硬件任务：定时轮询 + 用户 AT 指令。非阻塞双轨设计 + 离线检测 + 动态空闲降频
+///
+/// 核心设计：
+/// 1. 轮询 busy-bypass：try_lock() 探活串口，忙碌时直接广播缓存不阻塞 Actor
+/// 2. 消息分发非阻塞化：所有硬件操作通过 tokio::spawn 派发，Actor 永不卡死
+/// 3. 高优先级通道优先消费，确保用户交互指令不会被轮询阻塞
 async fn hardware_task(
     mut actor_rx_high: mpsc::Receiver<AtRequest>,
     mut actor_rx: mpsc::Receiver<AtRequest>,
@@ -1200,7 +1265,7 @@ async fn hardware_task(
     let mut components = Components::new_with_refreshed_list();
     let mut interval_secs = 15u64;
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
-    interval.tick().await; // 首次 tick 立即完成
+    interval.tick().await;
     let mut consecutive_failures = 0u32;
 
     loop {
@@ -1208,40 +1273,36 @@ async fn hardware_task(
             biased;
 
             req = actor_rx_high.recv() => {
-                match req {
-                    Some(r) => handle_at_request(r, &backend, &mut interval_secs, &mut interval).await,
-                    None => break,
+                if !handle_channel_req(req, &backend, &mut interval_secs, &mut interval).await {
+                    break;
                 }
             }
             req = actor_rx.recv() => {
-                match req {
-                    Some(r) => handle_at_request(r, &backend, &mut interval_secs, &mut interval).await,
-                    None => break,
+                if !handle_channel_req(req, &backend, &mut interval_secs, &mut interval).await {
+                    break;
                 }
             }
             _ = interval.tick() => {
-                if state.active_views.load(Ordering::SeqCst) > 0 {
+                let active = state.active_views.load(Ordering::Relaxed) > 0;
+
+                if active && get_at_lock().try_lock().is_ok() {
+                    // ── 锁可用：正常物理轮询 ──
                     let start_poll = std::time::Instant::now();
                     let mut telemetry = backend.poll_telemetry().await;
 
-                    // 离线检测：在 CPU 温度回退之前检查，避免 sysinfo 数据掩盖模组无响应
+                    // 离线检测（在 CPU 温度回退之前检查，避免 sysinfo 掩盖模组无响应）
                     let telemetry_dead = telemetry.sim_status == "NA"
                         && telemetry.network_mode == "NA"
                         && telemetry.signal_percentage == "NA"
                         && (telemetry.ipv4.is_empty() || telemetry.ipv4 == "--");
-                    if telemetry_dead {
-                        consecutive_failures += 1;
-                    } else {
-                        consecutive_failures = 0;
-                    }
+                    consecutive_failures = if telemetry_dead { consecutive_failures + 1 } else { 0 };
 
                     // CPU 温度 fallback（仅当 AT+QTEMP 未提供时）
                     if telemetry.temperature.is_empty() || telemetry.temperature == "-- °C" {
                         components.refresh(true);
                         if let Some(temp) = components.iter()
                             .find(|c| {
-                                let label = c.label();
-                                let lower = label.to_lowercase();
+                                let lower = c.label().to_lowercase();
                                 lower.contains("cpu") || lower.contains("package")
                             })
                             .and_then(|c| c.temperature())
@@ -1259,14 +1320,11 @@ async fn hardware_task(
                     let uptime_sec = System::uptime();
                     let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
-                    // 合并到全局状态并广播给所有 ws 客户端
                     {
                         let mut global = state.global.write().await;
 
                         if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                            eprintln!("⚠️ 模组连续 {} 次无响应，重置为离线状态",
-                                MAX_CONSECUTIVE_FAILURES);
-                            // 保留静态信息，其余全部重置
+                            eprintln!("⚠️ 模组连续 {} 次无响应，重置为离线状态", MAX_CONSECUTIVE_FAILURES);
                             let fw = global.firmware_version.clone();
                             let sim = global.active_sim.clone();
                             let prov = global.network_provider.clone();
@@ -1287,25 +1345,28 @@ async fn hardware_task(
                             );
                         }
 
-                        if let Ok(json_str) = serde_json::to_string(&*global) {
-                            let send_rc = state.tx.receiver_count();
-                            eprintln!("📤 WS 广播遥测数据 ({} 接收者, {} 字节)",
-                                send_rc, json_str.len());
-                            let _ = state.tx.send(json_str);
-                        }
+                        broadcast_state(&state, &global);
                     }
 
                     println!("✅ 轮询任务完成，总耗时: {}ms", start_poll.elapsed().as_millis());
+
+                } else if active {
+                    // ── 串口繁忙：跳过物理查询，只更新时间戳 ──
+                    println!("⚠️ Modem 串口忙（可能正在执行长耗时 AT），跳过物理轮询，发送缓存状态");
+                    let uptime_sec = System::uptime();
+                    let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
+
+                    let mut global = state.global.write().await;
+                    global.uptime = format!("{} minutes", uptime_sec / 60);
+                    global.updated = updated_str;
+                    broadcast_state(&state, &global);
+
                 } else {
                     println!("💤 硬件轮询处于空闲模式 (无活跃视图)");
                 }
 
-                // 根据页面可见状态调整下次轮询间隔：空闲时降频省电
-                let next_secs = if state.active_views.load(Ordering::SeqCst) > 0 {
-                    interval_secs
-                } else {
-                    IDLE_INTERVAL_SECS
-                };
+                // 动态空闲降频
+                let next_secs = if active { interval_secs } else { IDLE_INTERVAL_SECS };
                 interval = tokio::time::interval(Duration::from_secs(next_secs));
                 interval.tick().await;
             }

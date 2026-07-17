@@ -332,8 +332,24 @@ impl HardwareBackend for RealBackend {
     }
 
     async fn scan_available_networks(&self) -> Vec<serde_json::Value> {
-        let _ = send_at_command_inner(&self.serial_path, "AT+COPS=?").await;
-        vec![]
+        println!("🔍 开始网络扫描 (AT+COPS=?, 180s 超时)...");
+        match send_at_command_inner_with_timeout(
+            &self.serial_path,
+            "AT+COPS=?",
+            Duration::from_secs(180),
+        )
+        .await
+        {
+            Ok(resp) => {
+                let networks = parse_cops_scan(&resp);
+                println!("🔍 网络扫描完成，发现 {} 个网络", networks.len());
+                networks
+            }
+            Err(e) => {
+                eprintln!("⚠️ 网络扫描失败: {}", e);
+                vec![]
+            }
+        }
     }
 
     async fn send_sms_msg(&self, recipient: &str, message: &str) -> bool {
@@ -857,8 +873,12 @@ async fn send_at_command_dedup(serial_path: &str, cmd: &str) -> Result<String, S
     get_at_queue().execute(serial_path, cmd).await
 }
 
-/// 底层 AT 命令发送（使用已打开的串口句柄）
-async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, String> {
+/// 底层 AT 命令发送（支持自定义超时）
+async fn send_at_command_inner_with_timeout(
+    serial_path: &str,
+    cmd: &str,
+    timeout: Duration,
+) -> Result<String, String> {
     let start = std::time::Instant::now();
 
     let _lock = get_at_lock().lock().await;
@@ -877,11 +897,11 @@ async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, S
         .spawn()
         .map_err(|e| format!("atcmd_rs启动失败: {}", e))?;
 
-    let output = match tokio::time::timeout(Duration::from_secs(10), child.wait_with_output()).await
+    let output = match tokio::time::timeout(timeout, child.wait_with_output()).await
     {
         Ok(Ok(output)) => output,
         Ok(Err(e)) => return Err(format!("atcmd_rs执行失败: {}", e)),
-        Err(_) => return Err(format!("AT命令超时(10s): {}", cmd)),
+        Err(_) => return Err(format!("AT命令超时({}s): {}", timeout.as_secs(), cmd)),
     };
 
     if !output.status.success() {
@@ -918,6 +938,11 @@ async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, S
         preview.trim()
     );
     Ok(raw)
+}
+
+/// 底层 AT 命令发送（默认 10 秒超时）
+async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, String> {
+    send_at_command_inner_with_timeout(serial_path, cmd, Duration::from_secs(10)).await
 }
 
 /// 从设备查询频段信息（NR + LTE），通过多条 AT 命令从模组获取
@@ -1170,6 +1195,75 @@ fn parse_signal_quality(csq_raw: &str) -> String {
     "Unknown".to_string()
 }
 
+/// 解析 AT+COPS=? 扫描结果
+/// 格式: +COPS: (1,"CHINA MOBILE","CMCC","46000",2),(2,"CHINA UNICOM","","46001",3),...
+/// 每项: (status,long_name,short_name,mccmnc,act)
+fn parse_cops_scan(resp: &str) -> Vec<serde_json::Value> {
+    let mut networks = Vec::new();
+
+    for line in resp.lines() {
+        let line = line.trim();
+        if !line.starts_with("+COPS:") {
+            continue;
+        }
+        let body = line.strip_prefix("+COPS:").unwrap_or("").trim();
+
+        let mut depth = 0i32;
+        let mut start: Option<usize> = None;
+
+        for (i, ch) in body.char_indices() {
+            match ch {
+                '(' => {
+                    depth += 1;
+                    if depth == 1 {
+                        start = Some(i + 1);
+                    }
+                }
+                ')' => {
+                    if depth == 1 {
+                        if let Some(s) = start {
+                            let entry = &body[s..i];
+                            let parts: Vec<&str> = entry
+                                .split(',')
+                                .map(|s| s.trim().trim_matches('"'))
+                                .collect();
+                            if parts.len() >= 5 {
+                                let tech = match parts[4].trim() {
+                                    "0" | "1" => "GSM",
+                                    "2" => "WCDMA",
+                                    "3" => "LTE",
+                                    "4" | "5" | "6" => "NR5G",
+                                    _ => "Unknown",
+                                };
+                                let stat = match parts[0] {
+                                    "0" => "Unknown",
+                                    "1" => "Available",
+                                    "2" => "Current",
+                                    "3" => "Forbidden",
+                                    _ => "Unknown",
+                                };
+                                networks.push(serde_json::json!({
+                                    "operator": parts.get(1).unwrap_or(&""),
+                                    "short_name": parts.get(2).unwrap_or(&""),
+                                    "mccmnc": parts.get(3).unwrap_or(&""),
+                                    "technology": tech,
+                                    "status": stat,
+                                    "band": "",
+                                }));
+                            }
+                        }
+                        start = None;
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    networks
+}
+
 fn static_file_response(
     body: &'static str,
     content_type: &'static str,
@@ -1309,12 +1403,16 @@ async fn hardware_task(
                         }));
                     }
                     AtAction::NetworkScan => {
-                        println!("🔍 actor: network_scan");
-                        let networks = backend.scan_available_networks().await;
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "scan_result",
-                            "data": { "status": "Scan complete.", "networks": networks }
-                        }));
+                        println!("🔍 actor: network_scan (后台异步执行，不阻塞轮询)");
+                        let backend_clone = backend.clone();
+                        let resp_tx = req.resp_tx;
+                        tokio::spawn(async move {
+                            let networks = backend_clone.scan_available_networks().await;
+                            let _ = resp_tx.send(serde_json::json!({
+                                "type": "scan_result",
+                                "data": { "status": "Scan complete.", "networks": networks }
+                            }));
+                        });
                     }
                     AtAction::SendSms(recipient, message) => {
                         println!("📱 actor: send_sms to={}", recipient);

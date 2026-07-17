@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::{env, sync::Arc};
 use sysinfo::{Components, System};
-use tokio::sync::{RwLock, broadcast, mpsc, oneshot, watch};
+use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 
 use at::parser::{parse_cgpaddr, parse_qcainfo, parse_qeng, parse_qtemp_temperature};
 use at::utils::{decode_hex_ucs2, format_bytes};
@@ -911,40 +911,40 @@ async fn index_handler() -> impl IntoResponse {
 }
 
 // ============================================================================
-// 第二步 & 第三步：剥离 Poller + 精简 Actor
+// 统一硬件任务：串行消费 /opt/atcmd_rs，定时轮询 + 用户指令均经此通道
 // ============================================================================
 
-/// 独立轮询任务 — interval.tick() 不再与 Actor 共享 select! 循环
-async fn hardware_poller(
-    state: Arc<AppState>,
+/// 统一硬件任务：定时轮询 + 用户 AT 指令，全部串行处理
+async fn hardware_task(
+    mut actor_rx: mpsc::Receiver<AtRequest>,
     backend: Arc<dyn HardwareBackend>,
-    mut interval_rx: watch::Receiver<u64>,
+    state: Arc<AppState>,
 ) {
-    let mut _sys = System::new_all();
     let mut components = Components::new_with_refreshed_list();
-
-    let mut interval_secs = 3;
+    let mut interval_secs = 3u64;
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
-    interval.tick().await;
+    interval.tick().await; // 首次 tick 立即完成
 
     loop {
         tokio::select! {
             _ = interval.tick() => {
                 if state.active_views.load(Ordering::SeqCst) > 0 {
                     let start_poll = std::time::Instant::now();
-                    components.refresh(true);
-
                     let mut telemetry = backend.poll_telemetry().await;
 
-                    // 获取 CPU 物理温度（仅当 AT+QTEMP 未提供模块温度时作为 fallback）
-                    if telemetry.temperature.is_empty() {
-                        let cpu_temp = components.iter()
+                    // CPU 温度 fallback（仅当 AT+QTEMP 未提供时）
+                    if telemetry.temperature.is_empty() || telemetry.temperature == "-- °C" {
+                        components.refresh(true);
+                        if let Some(temp) = components.iter()
                             .find(|c| {
                                 let label = c.label();
-                                label.contains("CPU") || label.contains("cpu") || label.contains("Package") || label.contains("package")
+                                label.contains("CPU") || label.contains("cpu")
+                                    || label.contains("Package") || label.contains("package")
                             })
-                            .and_then(|c| c.temperature());
-                        telemetry.temperature = cpu_temp.map_or("--".to_string(), |t| format!("{:.0} °C", t));
+                            .and_then(|c| c.temperature())
+                        {
+                            telemetry.temperature = format!("{:.0} °C", temp);
+                        }
                     }
 
                     telemetry.internet_connection = if !telemetry.ipv4.is_empty() && telemetry.ipv4 != "--" {
@@ -956,7 +956,7 @@ async fn hardware_poller(
                     let uptime_sec = System::uptime();
                     let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
-                    // 合并到全局状态并从全局状态广播
+                    // 合并到全局状态并广播给所有 ws 客户端
                     {
                         let global = state.global.read().await;
                         let mut gt = GlobalTelemetry::from_telemetry_and_global(&telemetry, &global);
@@ -970,11 +970,9 @@ async fn hardware_poller(
 
                         if let Ok(json_str) = serde_json::to_string(&*global) {
                             let send_rc = state.tx.receiver_count();
-                            eprintln!("📤 WS 广播遥测数据 ({} 接收者, {} 字节): {}",
-                                send_rc, json_str.len(), &json_str[..json_str.len().min(200)]);
+                            eprintln!("📤 WS 广播遥测数据 ({} 接收者, {} 字节)",
+                                send_rc, json_str.len());
                             let _ = state.tx.send(json_str);
-                        } else {
-                            eprintln!("❌ 序列化遥测数据失败");
                         }
                     }
 
@@ -983,153 +981,136 @@ async fn hardware_poller(
                     println!("💤 硬件轮询处于空闲模式 (无活跃视图)");
                 }
             }
-            result = interval_rx.changed() => {
-                if result.is_ok() {
-                    let new_secs = *interval_rx.borrow();
-                    if new_secs != interval_secs {
-                        interval_secs = new_secs.max(3);
+            req = actor_rx.recv() => {
+                let req = match req {
+                    Some(r) => r,
+                    None => break, // 通道关闭，退出任务
+                };
+                match req.action {
+                    AtAction::ManualAt(cmd) => {
+                        println!("👨‍💻 用户手动执行 AT: {}", cmd);
+                        let response = backend.exec_raw_at(&cmd).await;
+                        let _ = req.resp_tx.send(serde_json::json!({ "type": "at_res", "data": response }));
+                    }
+                    AtAction::SetInterval(secs) => {
+                        let new_secs = secs.max(3);
+                        interval_secs = new_secs;
                         interval = tokio::time::interval(Duration::from_secs(interval_secs));
                         interval.tick().await;
-                        println!("🔄 轮询间隔已动态调整为 {} 秒", interval_secs);
+                        println!("🔄 轮询间隔已动态调整为 {} 秒", new_secs);
+                        let _ = req.resp_tx.send(serde_json::json!({
+                            "type": "settings_log",
+                            "data": { "msg": format!("轮询间隔已动态调整为 {} 秒", new_secs) }
+                        }));
                     }
-                } else {
-                    // interval_tx 已 drop（actor 已退出），停止轮询
-                    break;
+                    AtAction::GetSmsList => {
+                        println!("📱 actor: get_sms_list via AT+CMGL");
+                        let resp = backend.read_sms_list().await;
+                        let decoded = decode_cmgl_body(&resp);
+                        let _ = req.resp_tx.send(serde_json::json!({ "type": "sms_list", "data": decoded }));
+                    }
+                    AtAction::SetApn(apn, user, pass, auth_type) => {
+                        println!("🌐 actor: set_apn apn={} user={} auth={}", apn, user, auth_type);
+                        backend.configure_apn(&apn, &user, &pass, auth_type).await;
+                        let _ = req.resp_tx.send(serde_json::json!({
+                            "type": "network_status",
+                            "data": { "status": "APN settings applied", "apn": apn }
+                        }));
+                    }
+                    AtAction::SetNetworkMode(mode) => {
+                        println!("🌐 actor: set_network_mode {}", mode);
+                        backend.set_network_mode_pref(&mode).await;
+                        let _ = req.resp_tx.send(serde_json::json!({
+                            "type": "network_status",
+                            "data": { "status": format!("Network mode set to {}", mode) }
+                        }));
+                    }
+                    AtAction::NetConnect(connect) => {
+                        println!("🌐 actor: net_{}", if connect { "connect" } else { "disconnect" });
+                        backend.set_data_session(connect).await;
+                        let _ = req.resp_tx.send(serde_json::json!({
+                            "type": "network_status",
+                            "data": { "status": format!("{} command sent", if connect { "Connect" } else { "Disconnect" }) }
+                        }));
+                    }
+                    AtAction::NetworkScan => {
+                        println!("🔍 actor: network_scan");
+                        let networks = backend.scan_available_networks().await;
+                        let _ = req.resp_tx.send(serde_json::json!({
+                            "type": "scan_result",
+                            "data": { "status": "Scan complete.", "networks": networks }
+                        }));
+                    }
+                    AtAction::SendSms(recipient, message) => {
+                        println!("📱 actor: send_sms to={}", recipient);
+                        let success = backend.send_sms_msg(&recipient, &message).await;
+                        let _ = req.resp_tx.send(serde_json::json!({
+                            "type": "sms_sent",
+                            "data": { "status": if success { "SMS sent successfully" } else { "SMS failed" }, "recipient": recipient }
+                        }));
+                    }
+                    AtAction::GetDeviceInfo => {
+                        println!("📱 actor: get_device_info via AT commands");
+                        let info = backend.read_device_info().await;
+
+                        let (bands, max_rate, volte, gnss) = if info.model.contains("RG520N") || info.model.contains("RM5") {
+                            ("NR n1/n3/n5/n7/n8/n20/n28/n41/n77/n78/n79, LTE B1/B3/B5/B7/B8/B18/B19/B20/B26/B28/B32/B34/B38/B39/B40/B41/B42/B43".to_string(),
+                             "DL 4.2 Gbps / UL 600 Mbps".to_string(),
+                             "Supported".to_string(),
+                             "GPS/GLONASS/BDS/Galileo".to_string())
+                        } else {
+                            ("--".to_string(), "--".to_string(), "--".to_string(), "--".to_string())
+                        };
+
+                        let _ = req.resp_tx.send(serde_json::json!({
+                            "type": "device_info",
+                            "data": {
+                                "manufacturer": info.manufacturer,
+                                "model": info.model,
+                                "firmware_version": info.firmware,
+                                "imei": info.imei,
+                                "serial": info.serial,
+                                "hw_version": info.hw_version,
+                                "module_type": info.module_type,
+                                "sim_status": info.sim_status,
+                                "imsi": info.imsi,
+                                "iccid": info.iccid,
+                                "phone": info.phone,
+                                "net_status": info.net_status,
+                                "signal": info.signal_quality,
+                                "temperature": info.temperature,
+                                "bands": bands,
+                                "max_rate": max_rate,
+                                "volte": volte,
+                                "gnss": gnss
+                            }
+                        }));
+                    }
+                    AtAction::Reboot => {
+                        println!("🔄 actor: rebooting module...");
+                        backend.send_reboot().await;
+                        let _ = req.resp_tx.send(serde_json::json!({
+                            "type": "settings_log",
+                            "data": { "msg": "Reboot command sent to module." }
+                        }));
+                    }
+                    AtAction::FactoryReset => {
+                        println!("⚠️ actor: factory reset module...");
+                        backend.send_factory_reset().await;
+                        let _ = req.resp_tx.send(serde_json::json!({
+                            "type": "settings_log",
+                            "data": { "msg": "Factory reset command sent to module." }
+                        }));
+                    }
+                    AtAction::FlightMode(on) => {
+                        println!("✈️ actor: setting flight mode to {}", if on { "ON" } else { "OFF" });
+                        backend.set_airplane_mode(on).await;
+                        let _ = req.resp_tx.send(serde_json::json!({
+                            "type": "settings_log",
+                            "data": { "msg": format!("Flight mode turned {}", if on { "ON" } else { "OFF" }) }
+                        }));
+                    }
                 }
-            }
-        }
-    }
-}
-
-/// Actor — 仅处理来自 WebSocket 的即时修改或控制型指令
-async fn hardware_actor(
-    mut actor_rx: mpsc::Receiver<AtRequest>,
-    backend: Arc<dyn HardwareBackend>,
-    interval_tx: watch::Sender<u64>,
-) {
-    while let Some(req) = actor_rx.recv().await {
-        match req.action {
-            AtAction::ManualAt(cmd) => {
-                println!("👨‍💻 用户手动执行 AT: {}", cmd);
-                let response = backend.exec_raw_at(&cmd).await;
-                let _ = req.resp_tx.send(serde_json::json!({ "type": "at_res", "data": response }));
-            }
-            AtAction::SetInterval(secs) => {
-                let new_secs = secs.max(3);
-                let _ = interval_tx.send(new_secs);
-                println!("🔄 轮询间隔已动态调整为 {} 秒", new_secs);
-                let _ = req.resp_tx.send(serde_json::json!({
-                    "type": "settings_log",
-                    "data": { "msg": format!("轮询间隔已动态调整为 {} 秒", new_secs) }
-                }));
-            }
-            AtAction::GetSmsList => {
-                println!("📱 actor: get_sms_list via AT+CMGL");
-                let resp = backend.read_sms_list().await;
-                let decoded = decode_cmgl_body(&resp);
-                let _ = req.resp_tx.send(serde_json::json!({ "type": "sms_list", "data": decoded }));
-            }
-            AtAction::SetApn(apn, user, pass, auth_type) => {
-                println!("🌐 actor: set_apn apn={} user={} auth={}", apn, user, auth_type);
-                backend.configure_apn(&apn, &user, &pass, auth_type).await;
-                let _ = req.resp_tx.send(serde_json::json!({
-                    "type": "network_status",
-                    "data": { "status": "APN settings applied", "apn": apn }
-                }));
-            }
-            AtAction::SetNetworkMode(mode) => {
-                println!("🌐 actor: set_network_mode {}", mode);
-                backend.set_network_mode_pref(&mode).await;
-                let _ = req.resp_tx.send(serde_json::json!({
-                    "type": "network_status",
-                    "data": { "status": format!("Network mode set to {}", mode) }
-                }));
-            }
-            AtAction::NetConnect(connect) => {
-                println!("🌐 actor: net_{}", if connect { "connect" } else { "disconnect" });
-                backend.set_data_session(connect).await;
-                let _ = req.resp_tx.send(serde_json::json!({
-                    "type": "network_status",
-                    "data": { "status": format!("{} command sent", if connect { "Connect" } else { "Disconnect" }) }
-                }));
-            }
-            AtAction::NetworkScan => {
-                println!("🔍 actor: network_scan");
-                let networks = backend.scan_available_networks().await;
-                let _ = req.resp_tx.send(serde_json::json!({
-                    "type": "scan_result",
-                    "data": { "status": "Scan complete.", "networks": networks }
-                }));
-            }
-            AtAction::SendSms(recipient, message) => {
-                println!("📱 actor: send_sms to={}", recipient);
-                let success = backend.send_sms_msg(&recipient, &message).await;
-                let _ = req.resp_tx.send(serde_json::json!({
-                    "type": "sms_sent",
-                    "data": { "status": if success { "SMS sent successfully" } else { "SMS failed" }, "recipient": recipient }
-                }));
-            }
-            AtAction::GetDeviceInfo => {
-                println!("📱 actor: get_device_info via AT commands");
-                let info = backend.read_device_info().await;
-
-                // 静态能力信息（基于型号的常量）
-                let (bands, max_rate, volte, gnss) = if info.model.contains("RG520N") || info.model.contains("RM5") {
-                    ("NR n1/n3/n5/n7/n8/n20/n28/n41/n77/n78/n79, LTE B1/B3/B5/B7/B8/B18/B19/B20/B26/B28/B32/B34/B38/B39/B40/B41/B42/B43".to_string(),
-                     "DL 4.2 Gbps / UL 600 Mbps".to_string(),
-                     "Supported".to_string(),
-                     "GPS/GLONASS/BDS/Galileo".to_string())
-                } else {
-                    ("--".to_string(), "--".to_string(), "--".to_string(), "--".to_string())
-                };
-
-                let _ = req.resp_tx.send(serde_json::json!({
-                    "type": "device_info",
-                    "data": {
-                        "manufacturer": info.manufacturer,
-                        "model": info.model,
-                        "firmware_version": info.firmware,
-                        "imei": info.imei,
-                        "serial": info.serial,
-                        "hw_version": info.hw_version,
-                        "module_type": info.module_type,
-                        "sim_status": info.sim_status,
-                        "imsi": info.imsi,
-                        "iccid": info.iccid,
-                        "phone": info.phone,
-                        "net_status": info.net_status,
-                        "signal": info.signal_quality,
-                        "temperature": info.temperature,
-                        "bands": bands,
-                        "max_rate": max_rate,
-                        "volte": volte,
-                        "gnss": gnss
-                    }
-                }));
-            }
-            AtAction::Reboot => {
-                println!("🔄 actor: rebooting module...");
-                backend.send_reboot().await;
-                let _ = req.resp_tx.send(serde_json::json!({
-                    "type": "settings_log",
-                    "data": { "msg": "Reboot command sent to module." }
-                }));
-            }
-            AtAction::FactoryReset => {
-                println!("⚠️ actor: factory reset module...");
-                backend.send_factory_reset().await;
-                let _ = req.resp_tx.send(serde_json::json!({
-                    "type": "settings_log",
-                    "data": { "msg": "Factory reset command sent to module." }
-                }));
-            }
-            AtAction::FlightMode(on) => {
-                println!("✈️ actor: setting flight mode to {}", if on { "ON" } else { "OFF" });
-                backend.set_airplane_mode(on).await;
-                let _ = req.resp_tx.send(serde_json::json!({
-                    "type": "settings_log",
-                    "data": { "msg": format!("Flight mode turned {}", if on { "ON" } else { "OFF" }) }
-                }));
             }
         }
     }
@@ -1164,20 +1145,11 @@ async fn main() {
         guard.apn = apn;
     }
 
-    // 轮询间隔通信通道（Actor 可通过它动态调整 Poller 间隔）
-    let (interval_tx, interval_rx) = watch::channel(3u64);
-
-    // 启动独立 Poller 任务
+    // 启动统一硬件任务（单消费者，串行处理所有 /opt/atcmd_rs）
     tokio::spawn({
+        let backend = backend.clone();
         let state = app_state.clone();
-        let backend = backend.clone();
-        async move { hardware_poller(state, backend, interval_rx).await }
-    });
-
-    // 启动 Actor 任务（仅处理 WebSocket 控制指令）
-    tokio::spawn({
-        let backend = backend.clone();
-        async move { hardware_actor(actor_rx, backend, interval_tx).await }
+        async move { hardware_task(actor_rx, backend, state).await }
     });
 
     let app = Router::new()

@@ -60,7 +60,11 @@ struct AtRequest {
 
 struct AppState {
     tx: broadcast::Sender<String>,
+    /// 低优先级通道（预留：后台任务使用）
+    #[allow(dead_code)]
     actor_tx: mpsc::Sender<AtRequest>,
+    /// 高优先级通道：用户交互指令
+    actor_tx_high: mpsc::Sender<AtRequest>,
     active_views: AtomicUsize,
     /// 全局状态 — fetch_static_info 和 hardware_polling_actor 获取的所有值均汇聚于此，ws.send 全部从此读取
     global: RwLock<GlobalTelemetry>,
@@ -1051,8 +1055,144 @@ async fn index_handler() -> impl IntoResponse {
 // 统一硬件任务：串行消费 /opt/atcmd_rs，定时轮询 + 用户指令均经此通道
 // ============================================================================
 
+/// 处理单个 AT 请求（高低优先级通道共用此函数）
+async fn handle_at_request(
+    req: AtRequest,
+    backend: &Arc<dyn HardwareBackend>,
+    interval_secs: &mut u64,
+    interval: &mut tokio::time::Interval,
+) {
+    match req.action {
+        AtAction::ManualAt(cmd) => {
+            let cmd = normalize_at_command(&cmd);
+            println!("👨‍💻 用户手动执行 AT: {}", cmd);
+            let response = backend.exec_raw_at(&cmd).await;
+            let _ = req.resp_tx.send(serde_json::json!({ "type": "at_res", "data": response }));
+        }
+        AtAction::SetInterval(secs) => {
+            let new_secs = secs.max(5);
+            *interval_secs = new_secs;
+            *interval = tokio::time::interval(Duration::from_secs(*interval_secs));
+            interval.tick().await;
+            println!("🔄 轮询间隔已动态调整为 {} 秒", new_secs);
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "settings_log",
+                "data": { "msg": format!("轮询间隔已动态调整为 {} 秒", new_secs) }
+            }));
+        }
+        AtAction::GetSmsList => {
+            println!("📱 actor: get_sms_list (后台异步执行，不阻塞轮询)");
+            let backend_clone = backend.clone();
+            let resp_tx = req.resp_tx;
+            tokio::spawn(async move {
+                let resp = backend_clone.read_sms_list().await;
+                let decoded = decode_cmgl_body(&resp);
+                let _ = resp_tx.send(serde_json::json!({ "type": "sms_list", "data": decoded }));
+            });
+        }
+        AtAction::SetApn(apn, user, pass, auth_type) => {
+            println!("🌐 actor: set_apn apn={} user={} auth={}", apn, user, auth_type);
+            backend.configure_apn(&apn, &user, &pass, auth_type).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "network_status",
+                "data": { "status": "APN settings applied", "apn": apn }
+            }));
+        }
+        AtAction::SetNetworkMode(mode) => {
+            println!("🌐 actor: set_network_mode {}", mode);
+            backend.set_network_mode_pref(&mode).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "network_status",
+                "data": { "status": format!("Network mode set to {}", mode) }
+            }));
+        }
+        AtAction::NetConnect(connect) => {
+            println!("🌐 actor: net_{}", if connect { "connect" } else { "disconnect" });
+            backend.set_data_session(connect).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "network_status",
+                "data": { "status": format!("{} command sent", if connect { "Connect" } else { "Disconnect" }) }
+            }));
+        }
+        AtAction::NetworkScan => {
+            println!("🔍 actor: network_scan (后台异步执行，不阻塞轮询)");
+            let backend_clone = backend.clone();
+            let resp_tx = req.resp_tx;
+            tokio::spawn(async move {
+                let networks = backend_clone.scan_available_networks().await;
+                let _ = resp_tx.send(serde_json::json!({
+                    "type": "scan_result",
+                    "data": { "status": "Scan complete.", "networks": networks }
+                }));
+            });
+        }
+        AtAction::SendSms(recipient, message) => {
+            println!("📱 actor: send_sms to={}", recipient);
+            let success = backend.send_sms_msg(&recipient, &message).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "sms_sent",
+                "data": { "status": if success { "SMS sent successfully" } else { "SMS failed" }, "recipient": recipient }
+            }));
+        }
+        AtAction::GetDeviceInfo => {
+            println!("📱 actor: get_device_info via AT commands");
+            let info = backend.read_device_info().await;
+
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "device_info",
+                "data": {
+                    "manufacturer": info.manufacturer,
+                    "model": info.model,
+                    "firmware_version": info.firmware,
+                    "imei": info.imei,
+                    "serial": info.serial,
+                    "hw_version": info.hw_version,
+                    "module_type": info.module_type,
+                    "sim_status": info.sim_status,
+                    "imsi": info.imsi,
+                    "iccid": info.iccid,
+                    "phone": info.phone,
+                    "net_status": info.net_status,
+                    "signal": info.signal_quality,
+                    "temperature": info.temperature,
+                    "bands": info.bands,
+                    "max_rate": "--",
+                    "volte": "--",
+                    "gnss": "--"
+                }
+            }));
+        }
+        AtAction::Reboot => {
+            println!("🔄 actor: rebooting module...");
+            backend.send_reboot().await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "settings_log",
+                "data": { "msg": "Reboot command sent to module." }
+            }));
+        }
+        AtAction::FactoryReset => {
+            println!("⚠️ actor: factory reset module...");
+            backend.send_factory_reset().await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "settings_log",
+                "data": { "msg": "Factory reset command sent to module." }
+            }));
+        }
+        AtAction::FlightMode(on) => {
+            println!("✈️ actor: setting flight mode to {}", if on { "ON" } else { "OFF" });
+            backend.set_airplane_mode(on).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "settings_log",
+                "data": { "msg": format!("Flight mode turned {}", if on { "ON" } else { "OFF" }) }
+            }));
+        }
+    }
+}
+
 /// 统一硬件任务：定时轮询 + 用户 AT 指令，全部串行处理
+/// 高优先级通道优先消费，确保用户交互指令不会被轮询阻塞
 async fn hardware_task(
+    mut actor_rx_high: mpsc::Receiver<AtRequest>,
     mut actor_rx: mpsc::Receiver<AtRequest>,
     backend: Arc<dyn HardwareBackend>,
     state: Arc<AppState>,
@@ -1065,6 +1205,20 @@ async fn hardware_task(
 
     loop {
         tokio::select! {
+            biased;
+
+            req = actor_rx_high.recv() => {
+                match req {
+                    Some(r) => handle_at_request(r, &backend, &mut interval_secs, &mut interval).await,
+                    None => break,
+                }
+            }
+            req = actor_rx.recv() => {
+                match req {
+                    Some(r) => handle_at_request(r, &backend, &mut interval_secs, &mut interval).await,
+                    None => break,
+                }
+            }
             _ = interval.tick() => {
                 if state.active_views.load(Ordering::SeqCst) > 0 {
                     let start_poll = std::time::Instant::now();
@@ -1155,133 +1309,6 @@ async fn hardware_task(
                 interval = tokio::time::interval(Duration::from_secs(next_secs));
                 interval.tick().await;
             }
-            req = actor_rx.recv() => {
-                let req = match req {
-                    Some(r) => r,
-                    None => break, // 通道关闭，退出任务
-                };
-                match req.action {
-                    AtAction::ManualAt(cmd) => {
-                        let cmd = normalize_at_command(&cmd);
-                        println!("👨‍💻 用户手动执行 AT: {}", cmd);
-                        let response = backend.exec_raw_at(&cmd).await;
-                        let _ = req.resp_tx.send(serde_json::json!({ "type": "at_res", "data": response }));
-                    }
-                    AtAction::SetInterval(secs) => {
-                        let new_secs = secs.max(5);
-                        interval_secs = new_secs;
-                        interval = tokio::time::interval(Duration::from_secs(interval_secs));
-                        interval.tick().await;
-                        println!("🔄 轮询间隔已动态调整为 {} 秒", new_secs);
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "settings_log",
-                            "data": { "msg": format!("轮询间隔已动态调整为 {} 秒", new_secs) }
-                        }));
-                    }
-                    AtAction::GetSmsList => {
-                        println!("📱 actor: get_sms_list via AT+CMGL");
-                        let resp = backend.read_sms_list().await;
-                        let decoded = decode_cmgl_body(&resp);
-                        let _ = req.resp_tx.send(serde_json::json!({ "type": "sms_list", "data": decoded }));
-                    }
-                    AtAction::SetApn(apn, user, pass, auth_type) => {
-                        println!("🌐 actor: set_apn apn={} user={} auth={}", apn, user, auth_type);
-                        backend.configure_apn(&apn, &user, &pass, auth_type).await;
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "network_status",
-                            "data": { "status": "APN settings applied", "apn": apn }
-                        }));
-                    }
-                    AtAction::SetNetworkMode(mode) => {
-                        println!("🌐 actor: set_network_mode {}", mode);
-                        backend.set_network_mode_pref(&mode).await;
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "network_status",
-                            "data": { "status": format!("Network mode set to {}", mode) }
-                        }));
-                    }
-                    AtAction::NetConnect(connect) => {
-                        println!("🌐 actor: net_{}", if connect { "connect" } else { "disconnect" });
-                        backend.set_data_session(connect).await;
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "network_status",
-                            "data": { "status": format!("{} command sent", if connect { "Connect" } else { "Disconnect" }) }
-                        }));
-                    }
-                    AtAction::NetworkScan => {
-                        println!("🔍 actor: network_scan (后台异步执行，不阻塞轮询)");
-                        let backend_clone = backend.clone();
-                        let resp_tx = req.resp_tx;
-                        tokio::spawn(async move {
-                            let networks = backend_clone.scan_available_networks().await;
-                            let _ = resp_tx.send(serde_json::json!({
-                                "type": "scan_result",
-                                "data": { "status": "Scan complete.", "networks": networks }
-                            }));
-                        });
-                    }
-                    AtAction::SendSms(recipient, message) => {
-                        println!("📱 actor: send_sms to={}", recipient);
-                        let success = backend.send_sms_msg(&recipient, &message).await;
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "sms_sent",
-                            "data": { "status": if success { "SMS sent successfully" } else { "SMS failed" }, "recipient": recipient }
-                        }));
-                    }
-                    AtAction::GetDeviceInfo => {
-                        println!("📱 actor: get_device_info via AT commands");
-                        let info = backend.read_device_info().await;
-
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "device_info",
-                            "data": {
-                                "manufacturer": info.manufacturer,
-                                "model": info.model,
-                                "firmware_version": info.firmware,
-                                "imei": info.imei,
-                                "serial": info.serial,
-                                "hw_version": info.hw_version,
-                                "module_type": info.module_type,
-                                "sim_status": info.sim_status,
-                                "imsi": info.imsi,
-                                "iccid": info.iccid,
-                                "phone": info.phone,
-                                "net_status": info.net_status,
-                                "signal": info.signal_quality,
-                                "temperature": info.temperature,
-                                "bands": info.bands,
-                                "max_rate": "--",
-                                "volte": "--",
-                                "gnss": "--"
-                            }
-                        }));
-                    }
-                    AtAction::Reboot => {
-                        println!("🔄 actor: rebooting module...");
-                        backend.send_reboot().await;
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "settings_log",
-                            "data": { "msg": "Reboot command sent to module." }
-                        }));
-                    }
-                    AtAction::FactoryReset => {
-                        println!("⚠️ actor: factory reset module...");
-                        backend.send_factory_reset().await;
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "settings_log",
-                            "data": { "msg": "Factory reset command sent to module." }
-                        }));
-                    }
-                    AtAction::FlightMode(on) => {
-                        println!("✈️ actor: setting flight mode to {}", if on { "ON" } else { "OFF" });
-                        backend.set_airplane_mode(on).await;
-                        let _ = req.resp_tx.send(serde_json::json!({
-                            "type": "settings_log",
-                            "data": { "msg": format!("Flight mode turned {}", if on { "ON" } else { "OFF" }) }
-                        }));
-                    }
-                }
-            }
         }
     }
 }
@@ -1294,10 +1321,12 @@ async fn main() {
 
     let (tx, _) = broadcast::channel(100);
     let (actor_tx, actor_rx) = mpsc::channel(32);
+    let (actor_tx_high, actor_rx_high) = mpsc::channel(32);
 
     let app_state = Arc::new(AppState {
         tx: tx.clone(),
         actor_tx,
+        actor_tx_high,
         active_views: AtomicUsize::new(0),
         global: RwLock::new(GlobalTelemetry::default()),
     });
@@ -1319,7 +1348,7 @@ async fn main() {
     tokio::spawn({
         let backend = backend.clone();
         let state = app_state.clone();
-        async move { hardware_task(actor_rx, backend, state).await }
+        async move { hardware_task(actor_rx_high, actor_rx, backend, state).await }
     });
 
     let app = Router::new()
@@ -1449,8 +1478,8 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                         }
                     };
 
-                    // 将动作正确派发给底层 Actor 统一执行
-                    if state_inner.actor_tx.send(AtRequest { action, resp_tx }).await.is_ok() {
+                    // 将动作通过高优先级通道派发给 Actor
+                    if state_inner.actor_tx_high.send(AtRequest { action, resp_tx }).await.is_ok() {
                         if let Ok(reply) = resp_rx.await {
                             if local_tx.send(reply.to_string()).await.is_err() {
                                 break;

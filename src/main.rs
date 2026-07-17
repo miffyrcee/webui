@@ -30,7 +30,7 @@ use fs2::FileExt;
 
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
-const IDLE_INTERVAL_SECS: u64 = 60;
+const IDLE_INTERVAL_SECS: u64 = 15;
 
 #[derive(Debug)]
 enum AtAction {
@@ -1263,7 +1263,7 @@ async fn hardware_task(
     state: Arc<AppState>,
 ) {
     let mut components = Components::new_with_refreshed_list();
-    let mut interval_secs = 15u64;
+    let mut interval_secs = 5u64;
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
     interval.tick().await;
     let mut consecutive_failures = 0u32;

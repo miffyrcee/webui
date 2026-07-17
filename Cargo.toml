@@ -15,4 +15,3 @@ pest = "2.7"
 pest_derive = "2.7"
 clap = { version = "4", features = ["derive"] }
 async-trait = "0.1"
-fs2 = "0.4"

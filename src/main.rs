@@ -216,6 +216,7 @@ struct DeviceInfoData {
     net_status: String,
     signal_quality: String,
     temperature: String,
+    bands: String,
 }
 
 #[async_trait::async_trait]
@@ -412,6 +413,8 @@ impl HardwareBackend for RealBackend {
             .and_then(|r| parse_qtemp_temperature(&r))
             .unwrap_or_else(|| "-- °C".to_string());
 
+        let bands = query_device_bands(&self.serial_path).await;
+
         DeviceInfoData {
             manufacturer: mfr,
             model,
@@ -427,6 +430,7 @@ impl HardwareBackend for RealBackend {
             net_status,
             signal_quality,
             temperature,
+            bands,
         }
     }
 
@@ -842,6 +846,200 @@ async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, S
     Ok(raw)
 }
 
+/// 从设备查询频段信息（NR + LTE），通过多条 AT 命令从模组获取
+async fn query_device_bands(serial_path: &str) -> String {
+    // ── 方法 1: AT+QENG="servingcell" 获取当前服务小区频段 ──
+    let mut nr_bands: Vec<String> = Vec::new();
+    let mut lte_bands: Vec<String> = Vec::new();
+
+    if let Ok(resp) = send_at_command_dedup(serial_path, "AT+QENG=\"servingcell\"").await {
+        for line in resp.lines() {
+            let trimmed = line.trim();
+            if !trimmed.starts_with("+QENG: \"servingcell\"") {
+                continue;
+            }
+            // 格式: +QENG: "servingcell","NOCONN","NR5G-SA","TDD",460,00,...,<band>,...
+            // band 字段位置: LTE=9, NR5G=9 (基于现有 parser 的索引)
+            let rest = trimmed
+                .strip_prefix("+QENG: \"servingcell\"")
+                .unwrap_or("")
+                .trim()
+                .strip_prefix(',')
+                .unwrap_or("");
+            let parts: Vec<&str> = rest.split(',').map(|s| s.trim().trim_matches('"')).collect();
+            // parts[0]=connection_status, parts[1]=rat, parts[8]=band
+            if let Some(band) = parts.get(8) {
+                let b = band.trim();
+                if !b.is_empty() && b != "-" {
+                    if parts.get(1).map(|r| r.contains("NR5G")).unwrap_or(false) {
+                        if !nr_bands.contains(&format!("n{}", b)) {
+                            nr_bands.push(format!("n{}", b));
+                        }
+                    } else if parts.get(1).map(|r| *r == "LTE").unwrap_or(false) {
+                        if !lte_bands.contains(&format!("B{}", b)) {
+                            lte_bands.push(format!("B{}", b));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── 方法 2: AT+QCAINFO 补充载波聚合频段 ──
+    if let Ok(resp) = send_at_command_dedup(serial_path, "AT+QCAINFO").await {
+        for line in resp.lines() {
+            let trimmed = line.trim();
+            if !trimmed.starts_with("+QCAINFO:") {
+                continue;
+            }
+            let rest = trimmed.strip_prefix("+QCAINFO:").unwrap_or("").trim();
+            let parts: Vec<&str> = rest.split(',').map(|s| s.trim().trim_matches('"')).collect();
+            // parts[3]=band, e.g. "NR5G BAND 41" or just "41"
+            if let Some(raw) = parts.get(3) {
+                let band_str = raw.trim();
+                if band_str.starts_with("NR5G BAND ") {
+                    let num = band_str.strip_prefix("NR5G BAND ").unwrap_or("").trim();
+                    if !num.is_empty() && !nr_bands.contains(&format!("n{}", num)) {
+                        nr_bands.push(format!("n{}", num));
+                    }
+                } else if let Ok(_) = band_str.parse::<i32>() {
+                    // Could be NR or LTE — try to classify by value
+                    if band_str.parse::<u32>().unwrap_or(0) > 100 {
+                        // >100 are NR band numbers
+                        if !nr_bands.contains(&format!("n{}", band_str)) {
+                            nr_bands.push(format!("n{}", band_str));
+                        }
+                    } else {
+                        if !lte_bands.contains(&format!("B{}", band_str)) {
+                            lte_bands.push(format!("B{}", band_str));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── 方法 3: AT+QCFG="band" 获取配置的完整频段列表 ──
+    if nr_bands.len() <= 1 || lte_bands.len() <= 1 {
+        if let Ok(resp) = send_at_command_dedup(serial_path, "AT+QCFG=\"band\"").await {
+            if let Some(line) = resp.lines().find(|l| l.trim().starts_with("+QCFG:")) {
+                let parsed = parse_qcfg_bands(line.trim());
+                if !parsed.0.is_empty() {
+                    lte_bands = parsed.0;
+                }
+                if !parsed.1.is_empty() {
+                    nr_bands = parsed.1;
+                }
+            }
+        }
+    }
+
+    // ── 格式化输出 ──
+    nr_bands.sort_by_key(|b| {
+        b.trim_start_matches('n').parse::<u32>().unwrap_or(999)
+    });
+    lte_bands.sort_by_key(|b| {
+        b.trim_start_matches('B').parse::<u32>().unwrap_or(999)
+    });
+
+    let mut result = Vec::new();
+    if !nr_bands.is_empty() {
+        result.push(format!("NR {}", nr_bands.join("/")));
+    }
+    if !lte_bands.is_empty() {
+        result.push(format!("LTE {}", lte_bands.join("/")));
+    }
+
+    if result.is_empty() {
+        "--".to_string()
+    } else {
+        result.join(", ")
+    }
+}
+
+/// 解析 AT+QCFG="band" 响应中的 LTE 和 NR 频段 bitmask
+/// 格式: +QCFG: "band",<GSM>,<WCDMA>,<LTE_hex>,<NR_hex>
+fn parse_qcfg_bands(line: &str) -> (Vec<String>, Vec<String>) {
+    let rest = line
+        .strip_prefix("+QCFG:").unwrap_or("")
+        .trim()
+        .strip_prefix("\"band\"").unwrap_or("")
+        .trim()
+        .strip_prefix(',').unwrap_or("");
+
+    let parts: Vec<&str> = rest.split(',').collect();
+
+    // parts[2]=LTE, parts[3]=NR (after removing "band" prefix and GSM,WCDMA)
+    let lte_hex = parts.get(2).map(|s| s.trim()).unwrap_or("0");
+    let nr_hex = parts.get(3).map(|s| s.trim()).unwrap_or("0");
+
+    let lte_bands = parse_lte_bitmask(lte_hex);
+    let nr_bands = parse_nr_bitmask(nr_hex);
+
+    (lte_bands, nr_bands)
+}
+
+/// 解析 LTE 频段 bitmask（Quectel 通用位映射）
+fn parse_lte_bitmask(hex: &str) -> Vec<String> {
+    let hex = hex.trim_start_matches("0x").trim_start_matches("0X");
+    let val = u128::from_str_radix(hex, 16).ok().unwrap_or(0);
+    if val == 0 {
+        return Vec::new();
+    }
+
+    // LTE 频段位映射（基于 Quectel RM5xx/RG5xx 系列）
+    let lte_map: [(u128, &str); 42] = [
+        (1 << 0, "B1"), (1 << 1, "B2"), (1 << 2, "B3"), (1 << 3, "B4"),
+        (1 << 4, "B5"), (1 << 5, "B6"), (1 << 6, "B7"), (1 << 7, "B8"),
+        (1 << 8, "B9"), (1 << 9, "B10"), (1 << 10, "B11"), (1 << 11, "B12"),
+        (1 << 12, "B13"), (1 << 13, "B14"), (1 << 14, "B15"), (1 << 15, "B16"),
+        (1 << 16, "B17"), (1 << 17, "B18"), (1 << 18, "B19"), (1 << 19, "B20"),
+        (1 << 20, "B21"), (1 << 21, "B22"), (1 << 22, "B23"), (1 << 23, "B24"),
+        (1 << 24, "B25"), (1 << 25, "B26"), (1 << 27, "B28"),
+        (1 << 28, "B29"), (1 << 29, "B30"), (1 << 30, "B31"), (1 << 31, "B32"),
+        (1 << 32, "B33"), (1 << 33, "B34"), (1 << 34, "B35"), (1 << 35, "B36"),
+        (1 << 36, "B37"), (1 << 37, "B38"), (1 << 38, "B39"), (1 << 39, "B40"),
+        (1 << 40, "B41"), (1 << 41, "B42"), (1 << 42, "B43"),
+    ];
+
+    let mut bands: Vec<String> = Vec::new();
+    for &(mask, name) in &lte_map {
+        if val & mask != 0 {
+            bands.push(name.to_string());
+        }
+    }
+    bands
+}
+
+/// 解析 NR 频段 bitmask（Quectel 通用位映射）
+fn parse_nr_bitmask(hex: &str) -> Vec<String> {
+    let hex = hex.trim_start_matches("0x").trim_start_matches("0X");
+    let val = u128::from_str_radix(hex, 16).ok().unwrap_or(0);
+    if val == 0 {
+        return Vec::new();
+    }
+
+    // NR 频段位映射（基于 Quectel RM5xx/RG5xx 系列）
+    let nr_map: [(u128, &str); 29] = [
+        (1 << 0, "n1"), (1 << 1, "n2"), (1 << 2, "n3"), (1 << 3, "n5"),
+        (1 << 4, "n7"), (1 << 5, "n8"), (1 << 6, "n12"), (1 << 7, "n13"),
+        (1 << 8, "n14"), (1 << 9, "n18"), (1 << 10, "n20"), (1 << 11, "n25"),
+        (1 << 12, "n26"), (1 << 13, "n28"), (1 << 14, "n29"), (1 << 15, "n30"),
+        (1 << 16, "n38"), (1 << 17, "n40"), (1 << 18, "n41"), (1 << 19, "n48"),
+        (1 << 20, "n66"), (1 << 21, "n70"), (1 << 22, "n71"), (1 << 23, "n74"),
+        (1 << 24, "n75"), (1 << 25, "n76"), (1 << 26, "n77"), (1 << 27, "n78"),
+        (1 << 28, "n79"),
+    ];
+
+    let mut bands: Vec<String> = Vec::new();
+    for &(mask, name) in &nr_map {
+        if val & mask != 0 {
+            bands.push(name.to_string());
+        }
+    }
+    bands
+}
+
 /// 发送 AT 命令并返回首行有效响应（自动去除 AT echo、OK/ERROR、空行）
 async fn send_at_get_line(serial_path: &str, cmd: &str) -> Option<String> {
     send_at_command_dedup(serial_path, cmd)
@@ -1053,15 +1251,6 @@ async fn hardware_task(
                         println!("📱 actor: get_device_info via AT commands");
                         let info = backend.read_device_info().await;
 
-                        let (bands, max_rate, volte, gnss) = if info.model.contains("RG520N") || info.model.contains("RM5") {
-                            ("NR n1/n3/n5/n7/n8/n20/n28/n41/n77/n78/n79, LTE B1/B3/B5/B7/B8/B18/B19/B20/B26/B28/B32/B34/B38/B39/B40/B41/B42/B43".to_string(),
-                             "DL 4.2 Gbps / UL 600 Mbps".to_string(),
-                             "Supported".to_string(),
-                             "GPS/GLONASS/BDS/Galileo".to_string())
-                        } else {
-                            ("--".to_string(), "--".to_string(), "--".to_string(), "--".to_string())
-                        };
-
                         let _ = req.resp_tx.send(serde_json::json!({
                             "type": "device_info",
                             "data": {
@@ -1079,10 +1268,10 @@ async fn hardware_task(
                                 "net_status": info.net_status,
                                 "signal": info.signal_quality,
                                 "temperature": info.temperature,
-                                "bands": bands,
-                                "max_rate": max_rate,
-                                "volte": volte,
-                                "gnss": gnss
+                                "bands": info.bands,
+                                "max_rate": "--",
+                                "volte": "--",
+                                "gnss": "--"
                             }
                         }));
                     }
@@ -1345,4 +1534,90 @@ fn decode_cmgl_body(response: &str) -> String {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_lte_bitmask_b1_b3() {
+        let bands = parse_lte_bitmask("0x5");
+        assert!(bands.contains(&"B1".to_string()));
+        assert!(bands.contains(&"B3".to_string()));
+    }
+
+    #[test]
+    fn test_parse_lte_bitmask_b5_b7_b8() {
+        let bands = parse_lte_bitmask("0x0D0");
+        assert!(bands.contains(&"B5".to_string()));
+        assert!(bands.contains(&"B7".to_string()));
+        assert!(bands.contains(&"B8".to_string()));
+    }
+
+    #[test]
+    fn test_parse_lte_bitmask_b20_b28() {
+        let bands = parse_lte_bitmask("0x8080000");
+        assert!(bands.contains(&"B20".to_string()));
+        assert!(bands.contains(&"B28".to_string()));
+    }
+
+    #[test]
+    fn test_parse_lte_bitmask_empty() {
+        let bands = parse_lte_bitmask("0x0");
+        assert!(bands.is_empty());
+    }
+
+    #[test]
+    fn test_parse_lte_bitmask_invalid_hex() {
+        let bands = parse_lte_bitmask("zzzz");
+        assert!(bands.is_empty());
+    }
+
+    #[test]
+    fn test_parse_nr_bitmask_n1_n3_n5() {
+        let bands = parse_nr_bitmask("0xD");
+        assert!(bands.contains(&"n1".to_string()));
+        assert!(bands.contains(&"n3".to_string()));
+        assert!(bands.contains(&"n5".to_string()));
+    }
+
+    #[test]
+    fn test_parse_nr_bitmask_n77_n78_n79() {
+        let bands = parse_nr_bitmask("0x1C000000");
+        assert!(bands.contains(&"n77".to_string()));
+        assert!(bands.contains(&"n78".to_string()));
+        assert!(bands.contains(&"n79".to_string()));
+    }
+
+    #[test]
+    fn test_parse_nr_bitmask_n41() {
+        let bands = parse_nr_bitmask("0x40000");
+        assert!(bands.contains(&"n41".to_string()));
+    }
+
+    #[test]
+    fn test_parse_nr_bitmask_empty() {
+        let bands = parse_nr_bitmask("0x0");
+        assert!(bands.is_empty());
+    }
+
+    #[test]
+    fn test_parse_qcfg_bands_lte_only() {
+        // 0x3FF = bits 0-9 = B1-B10 (10 bands)
+        let (lte, nr) = parse_qcfg_bands("+QCFG: \"band\",0,0,0x3FF,0");
+        assert_eq!(lte.len(), 10);
+        assert!(lte.contains(&"B9".to_string()));
+        assert!(lte.contains(&"B10".to_string()));
+        assert!(nr.is_empty());
+    }
+
+    #[test]
+    fn test_parse_qcfg_bands_nr_only() {
+        let (lte, nr) = parse_qcfg_bands("+QCFG: \"band\",0,0,0,0x1C000000");
+        assert!(lte.is_empty());
+        assert!(nr.contains(&"n77".to_string()));
+        assert!(nr.contains(&"n78".to_string()));
+        assert!(nr.contains(&"n79".to_string()));
+    }
 }

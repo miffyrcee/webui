@@ -11,7 +11,7 @@ After=network.target port_bridge.service dnsmasq.service lighttpd.service
 
 [Service]
 ExecStart=/opt/quectel-webui
-ExecStop=/usr/bin/kill -s HUP \$MAINPID
+KillSignal=SIGHUP
 Restart=on-failure
 RestartSec=60s
 

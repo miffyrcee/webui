@@ -29,6 +29,8 @@ use at::{
 use fs2::FileExt;
 
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
+const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+const IDLE_INTERVAL_SECS: u64 = 60;
 
 #[derive(Debug)]
 enum AtAction {
@@ -1056,9 +1058,10 @@ async fn hardware_task(
     state: Arc<AppState>,
 ) {
     let mut components = Components::new_with_refreshed_list();
-    let mut interval_secs = 3u64;
+    let mut interval_secs = 15u64;
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
     interval.tick().await; // 首次 tick 立即完成
+    let mut consecutive_failures = 0u32;
 
     loop {
         tokio::select! {
@@ -1066,6 +1069,17 @@ async fn hardware_task(
                 if state.active_views.load(Ordering::SeqCst) > 0 {
                     let start_poll = std::time::Instant::now();
                     let mut telemetry = backend.poll_telemetry().await;
+
+                    // 离线检测：在 CPU 温度回退之前检查，避免 sysinfo 数据掩盖模组无响应
+                    let telemetry_dead = telemetry.sim_status == "NA"
+                        && telemetry.network_mode == "NA"
+                        && telemetry.signal_percentage == "NA"
+                        && (telemetry.ipv4.is_empty() || telemetry.ipv4 == "--");
+                    if telemetry_dead {
+                        consecutive_failures += 1;
+                    } else {
+                        consecutive_failures = 0;
+                    }
 
                     // CPU 温度 fallback（仅当 AT+QTEMP 未提供时）
                     if telemetry.temperature.is_empty() || telemetry.temperature == "-- °C" {
@@ -1094,11 +1108,30 @@ async fn hardware_task(
                     // 合并到全局状态并广播给所有 ws 客户端
                     {
                         let mut global = state.global.write().await;
-                        *global = GlobalTelemetry::from_telemetry_and_global(
-                            &telemetry, &global,
-                            format!("{} minutes", uptime_sec / 60),
-                            updated_str,
-                        );
+
+                        if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                            eprintln!("⚠️ 模组连续 {} 次无响应，重置为离线状态",
+                                MAX_CONSECUTIVE_FAILURES);
+                            // 保留静态信息，其余全部重置
+                            let fw = global.firmware_version.clone();
+                            let sim = global.active_sim.clone();
+                            let prov = global.network_provider.clone();
+                            let apn = global.apn.clone();
+                            *global = GlobalTelemetry::default();
+                            global.firmware_version = fw;
+                            global.active_sim = sim;
+                            global.network_provider = prov;
+                            global.apn = apn;
+                            global.internet_connection = "Disconnected".to_string();
+                            global.uptime = format!("{} minutes", uptime_sec / 60);
+                            global.updated = updated_str;
+                        } else {
+                            *global = GlobalTelemetry::from_telemetry_and_global(
+                                &telemetry, &global,
+                                format!("{} minutes", uptime_sec / 60),
+                                updated_str,
+                            );
+                        }
 
                         if let Ok(json_str) = serde_json::to_string(&*global) {
                             let send_rc = state.tx.receiver_count();
@@ -1112,6 +1145,15 @@ async fn hardware_task(
                 } else {
                     println!("💤 硬件轮询处于空闲模式 (无活跃视图)");
                 }
+
+                // 根据页面可见状态调整下次轮询间隔：空闲时降频省电
+                let next_secs = if state.active_views.load(Ordering::SeqCst) > 0 {
+                    interval_secs
+                } else {
+                    IDLE_INTERVAL_SECS
+                };
+                interval = tokio::time::interval(Duration::from_secs(next_secs));
+                interval.tick().await;
             }
             req = actor_rx.recv() => {
                 let req = match req {
@@ -1126,7 +1168,7 @@ async fn hardware_task(
                         let _ = req.resp_tx.send(serde_json::json!({ "type": "at_res", "data": response }));
                     }
                     AtAction::SetInterval(secs) => {
-                        let new_secs = secs.max(3);
+                        let new_secs = secs.max(5);
                         interval_secs = new_secs;
                         interval = tokio::time::interval(Duration::from_secs(interval_secs));
                         interval.tick().await;

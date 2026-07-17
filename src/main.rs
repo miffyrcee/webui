@@ -1,111 +1,86 @@
-// ============================================================================
-// quectel-webui — 移远 5G 终端 WebUI 服务端
-//
-// 架构亮点：
-// 1. ★ 零成本视图探活：state.tx.receiver_count() 替代 active_views，
-//    彻底消除 set_view_state 通信与计数器漂移风险
-// 2. ★ 内存级串口访问：专用串口 I/O 线程持有 /dev/smd11 fd，
-//    消除子进程 fork/exec 开销（延迟从 50~100ms 降至 <5ms）
-// 3. ★ URC 主动上报：AT 命令响应后自动检测尾随 URC 数据
-// 4. ★ 静态/动态状态分离：StaticDeviceInfo 单次读取永不重传，
-//    DynamicTelemetry 轻量高频广播（包体缩小 80%）
-// ============================================================================
-
 mod at;
 
-use at::{
-    decode_cmgl_body, decode_hex_ucs2, normalize_at_command, parse_cgpaddr, parse_cops_scan,
-    parse_net_status, parse_qcainfo, parse_qcfg_bands, parse_qeng, parse_qtemp_temperature,
-    parse_signal_quality, parse_traffic_line, set_default,
-};
 use axum::{
+    Router,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::header,
     response::{IntoResponse, Response},
     routing::get,
-    Router,
 };
-use chrono::Local;
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader, Write};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::{env, sync::Arc};
 use sysinfo::{Components, System};
-use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
+use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 
-// ============================================================================
-// 1. 常量
-// ============================================================================
+use at::{
+    parse_cgpaddr, parse_cops_scan, parse_net_status, parse_qcainfo, parse_qcfg_bands,
+    parse_qeng, parse_qtemp_temperature, parse_signal_quality, parse_traffic_line,
+    decode_cmgl_body, decode_hex_ucs2, normalize_at_command, set_default,
+};
+use fs2::FileExt;
 
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 const IDLE_INTERVAL_SECS: u64 = 15;
-const POLL_INTERVAL_ACTIVE: u64 = 5;
 
-/// AT 响应终止符 — 出现即表示响应结束（保持与 atcmd_rs 一致）
-const AT_TERMINATORS: &[&str] = &[
-    "+CME ERROR:",
-    "+CMS ERROR:",
-    "BUSY\r\n",
-    "ERROR\r\n",
-    "NO ANSWER\r\n",
-    "NO CARRIER\r\n",
-    "NO DIALTONE\r\n",
-    "OK\r\n",
-];
+#[derive(Debug)]
+enum AtAction {
+    ManualAt(String),
+    SetInterval(u64),
+    GetSmsList,
+    /// (apn, user, pass, auth_type)
+    SetApn(String, String, String, u8),
+    /// mode string
+    SetNetworkMode(String),
+    /// true=connect, false=disconnect
+    NetConnect(bool),
+    NetworkScan,
+    /// (recipient, message)
+    SendSms(String, String),
+    GetDeviceInfo,
+    Reboot,
+    FactoryReset,
+    /// true=ON, false=OFF
+    FlightMode(bool),
+}
 
-/// URC 前缀 — 模组主动上报的行首匹配
-const URC_PREFIXES: &[&str] = &[
-    "+QIND:",
-    "+CMT:",
-    "+CMTI:",
-    "+CREG:",
-    "+CGREG:",
-    "+CEREG:",
-    "+QHUP:",
-    "+QCLOSE:",
-];
+struct AtRequest {
+    action: AtAction,
+    resp_tx: oneshot::Sender<serde_json::Value>,
+}
 
-// ============================================================================
-// 2. 数据模型
-// ============================================================================
+struct AppState {
+    tx: broadcast::Sender<String>,
+    /// 低优先级通道（预留：后台任务使用）
+    #[allow(dead_code)]
+    actor_tx: mpsc::Sender<AtRequest>,
+    /// 高优先级通道：用户交互指令
+    actor_tx_high: mpsc::Sender<AtRequest>,
+    active_views: AtomicUsize,
+    /// 全局状态 — fetch_static_info 和 hardware_polling_actor 获取的所有值均汇聚于此，ws.send 全部从此读取
+    global: RwLock<GlobalTelemetry>,
+}
 
-/// 静态设备信息 — 开机初始化时获取一次，永不重传。
-/// 仅在 WebSocket 连接建立时通过 get_static_info 发送给新客户端。
 #[derive(Clone, Serialize, Debug)]
-struct StaticDeviceInfo {
+struct GlobalTelemetry {
     firmware_version: String,
-    active_sim: String,
-    network_provider: String,
-    apn: String,
-}
-
-impl Default for StaticDeviceInfo {
-    fn default() -> Self {
-        Self {
-            firmware_version: "NA".to_string(),
-            active_sim: "NA".to_string(),
-            network_provider: "NA".to_string(),
-            apn: "NA".to_string(),
-        }
-    }
-}
-
-/// 动态遥测数据 — 高频变化，每个轮询周期广播。
-/// 不包含设备开机后永不变化的静态信息（固件版本、ICCID等）。
-#[derive(Clone, Serialize, Debug)]
-struct DynamicTelemetry {
     temperature: String,
     sim_status: String,
     signal_percentage: String,
     internet_connection: String,
+    active_sim: String,
+    network_provider: String,
     mccmnc: String,
+    apn: String,
     network_mode: String,
     bands: String,
     bandwidth: String,
@@ -125,14 +100,18 @@ struct DynamicTelemetry {
     updated: String,
 }
 
-impl Default for DynamicTelemetry {
+impl Default for GlobalTelemetry {
     fn default() -> Self {
         Self {
+            firmware_version: "NA".to_string(),
             temperature: "NA".to_string(),
             sim_status: "NA".to_string(),
             signal_percentage: "NA".to_string(),
             internet_connection: "NA".to_string(),
+            active_sim: "NA".to_string(),
+            network_provider: "NA".to_string(),
             mccmnc: "NA".to_string(),
+            apn: "NA".to_string(),
             network_mode: "NA".to_string(),
             bands: "NA".to_string(),
             bandwidth: "NA".to_string(),
@@ -154,39 +133,46 @@ impl Default for DynamicTelemetry {
     }
 }
 
-impl DynamicTelemetry {
-    /// 从 TelemetryData（解析器填充）和当前 DynamicTelemetry 合并构造新值。
-    /// 动态字段仅当解析器返回有效值时才覆盖，否则保留上一次的有效值。
-    fn from_telemetry(t: &TelemetryData, prev: &DynamicTelemetry, uptime: String, updated: String) -> Self {
-        let keep_valid = |new: &str, old: &str| -> String {
+impl GlobalTelemetry {
+    /// 从 TelemetryData（解析器填充）和当前全局状态合并构造 GlobalTelemetry。
+    /// 动态字段仅当解析器返回有效值（非空、非 NA/N/A/--）时才覆盖，
+    /// 否则保留上一次的全局值，避免一次 AT 失败就冲掉全部数据。
+    /// 静态字段始终从 global 保留。
+    fn from_telemetry_and_global(t: &TelemetryData, g: &GlobalTelemetry, uptime: String, updated: String) -> Self {
+        fn keep_valid(new: &str, old: &str) -> String {
             if !new.is_empty() && new != "NA" && new != "N/A" && new != "--" {
                 new.to_string()
             } else {
                 old.to_string()
             }
-        };
+        }
 
         Self {
-            temperature: keep_valid(&t.temperature, &prev.temperature),
-            sim_status: keep_valid(&t.sim_status, &prev.sim_status),
-            signal_percentage: keep_valid(&t.signal_percentage, &prev.signal_percentage),
-            internet_connection: keep_valid(&t.internet_connection, &prev.internet_connection),
-            mccmnc: keep_valid(&t.mccmnc, &prev.mccmnc),
-            network_mode: keep_valid(&t.network_mode, &prev.network_mode),
-            bands: keep_valid(&t.bands, &prev.bands),
-            bandwidth: keep_valid(&t.bandwidth, &prev.bandwidth),
-            earfcn: keep_valid(&t.earfcn, &prev.earfcn),
-            pci: keep_valid(&t.pci, &prev.pci),
-            ipv4: keep_valid(&t.ipv4, &prev.ipv4),
-            ipv6: keep_valid(&t.ipv6, &prev.ipv6),
-            assessment: keep_valid(&t.assessment, &prev.assessment),
-            traffic_stats: keep_valid(&t.traffic_stats, &prev.traffic_stats),
-            cell_id: keep_valid(&t.cell_id, &prev.cell_id),
-            enb_id: keep_valid(&t.enb_id, &prev.enb_id),
-            tac: keep_valid(&t.tac, &prev.tac),
-            ss_rsrq: keep_valid(&t.ss_rsrq, &prev.ss_rsrq),
-            ss_rsrp: keep_valid(&t.ss_rsrp, &prev.ss_rsrp),
-            sinr: keep_valid(&t.sinr, &prev.sinr),
+            temperature: keep_valid(&t.temperature, &g.temperature),
+            sim_status: keep_valid(&t.sim_status, &g.sim_status),
+            signal_percentage: keep_valid(&t.signal_percentage, &g.signal_percentage),
+            internet_connection: keep_valid(&t.internet_connection, &g.internet_connection),
+            mccmnc: keep_valid(&t.mccmnc, &g.mccmnc),
+            network_mode: keep_valid(&t.network_mode, &g.network_mode),
+            bands: keep_valid(&t.bands, &g.bands),
+            bandwidth: keep_valid(&t.bandwidth, &g.bandwidth),
+            earfcn: keep_valid(&t.earfcn, &g.earfcn),
+            pci: keep_valid(&t.pci, &g.pci),
+            ipv4: keep_valid(&t.ipv4, &g.ipv4),
+            ipv6: keep_valid(&t.ipv6, &g.ipv6),
+            assessment: keep_valid(&t.assessment, &g.assessment),
+            traffic_stats: keep_valid(&t.traffic_stats, &g.traffic_stats),
+            cell_id: keep_valid(&t.cell_id, &g.cell_id),
+            enb_id: keep_valid(&t.enb_id, &g.enb_id),
+            tac: keep_valid(&t.tac, &g.tac),
+            ss_rsrq: keep_valid(&t.ss_rsrq, &g.ss_rsrq),
+            ss_rsrp: keep_valid(&t.ss_rsrp, &g.ss_rsrp),
+            sinr: keep_valid(&t.sinr, &g.sinr),
+            // 静态字段从已有全局状态保留
+            firmware_version: g.firmware_version.clone(),
+            active_sim: g.active_sim.clone(),
+            network_provider: g.network_provider.clone(),
+            apn: g.apn.clone(),
             uptime,
             updated,
         }
@@ -228,245 +214,11 @@ struct TelemetryData {
     updated: String,
 }
 
-#[derive(Debug)]
-enum AtAction {
-    ManualAt(String),
-    SetInterval(u64),
-    GetSmsList,
-    SetApn(String, String, String, u8),
-    SetNetworkMode(String),
-    NetConnect(bool),
-    NetworkScan,
-    SendSms(String, String),
-    GetDeviceInfo,
-    Reboot,
-    FactoryReset,
-    FlightMode(bool),
-}
-
-struct AtRequest {
-    action: AtAction,
-    resp_tx: oneshot::Sender<serde_json::Value>,
-}
-
 // ============================================================================
-// 3. 串口 I/O 子系统
-// ============================================================================
-//
-// 设计：
-//   专用 std::thread 持有一个永久打开的 /dev/smd11 fd。
-//   通过 std::sync::mpsc + recv_timeout 实现命令多路复用。
-//   彻底消除 tokio::process::Command + /opt/atcmd_rs 子进程模式。
-//
-//   命令处理流程：
-//     1. 写入 AT 命令 + \r\n
-//     2. BufReader 逐行读取响应
-//     3. 遇到终止符（OK/ERROR 等）则响应结束
-//     4. 尝试用 fill_buf() 检测 BufReader 缓冲区中的残留 URC 数据
-//
-//   URC 检测（最佳努力）：
-//     AT 响应完成后，BufReader 内部缓冲区可能包含模组紧随响应
-//     发出的 URC 数据。fill_buf() 在不触发额外 read 的情况下
-//     检查缓冲区中是否已有 URC，若有则提取并广播。
-//     在专用线程 + libc 条件不具备时的务实选择。
+// HardwareBackend trait + RealBackend（真机后端，失败返回 NA）
 // ============================================================================
 
-/// 串口 I/O 命令（发送到专用线程）
-enum SerialCmd {
-    ExecAt {
-        cmd: String,
-        timeout: Duration,
-        resp: oneshot::Sender<Result<String, String>>,
-    },
-}
-
-/// 串口 I/O 句柄 — async 侧的轻量代理
-struct SerialIo {
-    cmd_tx: std::sync::mpsc::Sender<SerialCmd>,
-}
-
-impl SerialIo {
-    /// 启动串口 I/O 线程并返回代理句柄。
-    fn spawn(path: &str, urc_tx: broadcast::Sender<String>) -> Self {
-        let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SerialCmd>();
-        let path_owned = path.to_string();
-
-        std::thread::Builder::new()
-            .name("serial-io".into())
-            .spawn(move || Self::run_thread(path_owned, cmd_rx, urc_tx))
-            .expect("spawn serial-io thread 失败");
-
-        SerialIo { cmd_tx }
-    }
-
-    /// 发送 AT 命令到串口线程并等待响应。
-    /// 必须在 AT_CMD_LOCK 保护下调用。
-    async fn exec_at(&self, cmd: &str, timeout: Duration) -> Result<String, String> {
-        let (tx, rx) = oneshot::channel();
-        self.cmd_tx
-            .send(SerialCmd::ExecAt {
-                cmd: cmd.to_string(),
-                timeout,
-                resp: tx,
-            })
-            .map_err(|_| "串口 I/O 线程已终止".to_string())?;
-        rx.await.map_err(|_| "串口 I/O 响应被取消".to_string())?
-    }
-
-    // ─── 专用线程主循环 ───
-
-    fn run_thread(
-        path: String,
-        cmd_rx: std::sync::mpsc::Receiver<SerialCmd>,
-        urc_tx: broadcast::Sender<String>,
-    ) {
-        // 打开串口，持续保持打开状态
-        let file = match std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&path)
-        {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("FATAL: 无法打开串口 {}: {}", path, e);
-                return;
-            }
-        };
-
-        println!("🔌 串口 I/O 线程已启动: {}", path);
-
-        loop {
-            match cmd_rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(SerialCmd::ExecAt {
-                    cmd,
-                    timeout,
-                    resp,
-                }) => {
-                    let result = Self::blocking_exec(&file, &cmd, timeout, &urc_tx);
-                    let _ = resp.send(result);
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    // 无待处理命令，不进行阻塞检查（避免阻塞读取）
-                    // URC 检测在每次命令完成后附带走
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    println!("🔌 串口 I/O 线程收到关闭信号");
-                    break;
-                }
-            }
-        }
-    }
-
-    /// 阻塞式 AT 命令执行：写入 → 读取 → 终止检测 → 尾随 URC 提取
-    fn blocking_exec(
-        file: &std::fs::File,
-        cmd: &str,
-        timeout: Duration,
-        urc_tx: &broadcast::Sender<String>,
-    ) -> Result<String, String> {
-        let deadline = std::time::Instant::now() + timeout;
-
-        // ── 写入命令 ──
-        let full_cmd = format!("{}\r\n", cmd);
-        (&*file as &std::fs::File)
-            .write_all(full_cmd.as_bytes())
-            .map_err(|e| format!("串口写入失败: {}", e))?;
-
-        // ── 读取响应 ──
-        // BufReader 会缓冲从 file 读取的数据，减少系统调用次数
-        let mut reader = BufReader::new(&*file as &std::fs::File);
-        let mut response = String::new();
-        let mut line = String::new();
-
-        loop {
-            if std::time::Instant::now() > deadline {
-                return Err(format!("AT 命令超时 ({}s): {}", timeout.as_secs(), cmd));
-            }
-
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) => break, // EOF
-                Ok(_) => {
-                    response.push_str(&line);
-                    // 检测终止符
-                    if AT_TERMINATORS
-                        .iter()
-                        .any(|t| line.as_str().contains(t))
-                    {
-                        break;
-                    }
-                }
-                Err(e) => return Err(format!("串口读取失败: {}", e)),
-            }
-        }
-
-        // 检查是否有 ERROR
-        if response.contains("ERROR") || response.contains("+CME ERROR:") {
-            return Err(format!("AT 命令错误: {}", response.trim()));
-        }
-
-        // ── 在 reader 被 drop 前，检查缓冲区中的残留 URC 数据 ──
-        // BufReader 在一次 read() 中可能已经读到了模组紧随 OK 发出的 URC 数据。
-        // fill_buf() 返回缓冲区中的现有数据，若不为空则有 URC。
-        // 注意：若缓冲区已空，fill_buf() 会触发新的 read() 调用并阻塞。
-        // 因此我们仅做一次快速检查，超时由调用方 AT_CMD_LOCK 保证。
-        Self::check_buffered_urc(&mut reader, urc_tx);
-
-        // 清理响应：去掉 AT 回显、空行、OK 标记
-        let clean: String = response
-            .lines()
-            .filter(|l| {
-                let t = l.trim();
-                !t.is_empty()
-                    && !t.starts_with("AT+")
-                    && !t.starts_with("AT ")
-                    && t != "OK"
-                    && !t.starts_with("+CME ERROR:")
-                    && t != "ERROR"
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        Ok(clean)
-    }
-
-    /// 检查 BufReader 内部缓冲区中的残留 URC 数据。
-    /// 仅在缓冲区已有数据时提取（不触发新的 read 调用）。
-    fn check_buffered_urc(
-        reader: &mut BufReader<&std::fs::File>,
-        urc_tx: &broadcast::Sender<String>,
-    ) {
-        let raw = match reader.fill_buf() {
-            Ok(b) if !b.is_empty() => {
-                let data = String::from_utf8_lossy(b).to_string();
-                let len = b.len();
-                reader.consume(len);
-                data
-            }
-            _ => return,
-        };
-
-        for line in raw.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            if URC_PREFIXES.iter().any(|p| trimmed.starts_with(p)) {
-                eprintln!("📡 URC 捕获: {}", trimmed);
-                let _ = urc_tx.send(trimmed.to_string());
-            } else {
-                eprintln!("📡 尾随数据（非 URC）: {}", trimmed);
-            }
-        }
-    }
-
-}
-
-
-// ============================================================================
-// 4. 硬件后端抽象
-// ============================================================================
-
+/// 设备信息（HardwareBackend::read_device_info 返回值）
 #[derive(Default)]
 struct DeviceInfoData {
     manufacturer: String,
@@ -488,70 +240,86 @@ struct DeviceInfoData {
 
 #[async_trait::async_trait]
 trait HardwareBackend: Send + Sync {
+    /// 手动执行 AT 命令（ManualAt）
     async fn exec_raw_at(&self, cmd: &str) -> String;
+
+    /// 获取 SMS 列表（原始 CMGL 响应）
     async fn read_sms_list(&self) -> String;
+
+    /// 配置 APN
     async fn configure_apn(&self, apn: &str, user: &str, pass: &str, auth_type: u8);
+
+    /// 设置网络模式偏好
     async fn set_network_mode_pref(&self, mode: &str);
+
+    /// 设置数据会话连接/断开
     async fn set_data_session(&self, connect: bool);
+
+    /// 执行网络扫描，返回可用网络列表
     async fn scan_available_networks(&self) -> Vec<serde_json::Value>;
+
+    /// 发送 SMS，返回成功与否
     async fn send_sms_msg(&self, recipient: &str, message: &str) -> bool;
+
+    /// 读取设备详细信息
     async fn read_device_info(&self) -> DeviceInfoData;
+
+    /// 发送重启命令
     async fn send_reboot(&self);
+
+    /// 发送恢复出厂设置命令
     async fn send_factory_reset(&self);
+
+    /// 设置飞行模式
     async fn set_airplane_mode(&self, on: bool);
+
+    /// 轮询采集遥测数据
     async fn poll_telemetry(&self) -> TelemetryData;
-    async fn read_static_info(&self) -> StaticDeviceInfo;
+
+    /// 启动时读取静态信息 (fw, sim, provider, apn)
+    async fn read_static_info(&self) -> (String, String, String, String);
 }
 
-// ============================================================================
-// 5. 真机后端 (RealBackend)
-// ============================================================================
+// ---------------------------------------------------------------------------
+// 真机后端
+// ---------------------------------------------------------------------------
 
 struct RealBackend {
-    io: Arc<SerialIo>,
+    serial_path: String,
 }
 
 #[async_trait::async_trait]
 impl HardwareBackend for RealBackend {
     async fn exec_raw_at(&self, cmd: &str) -> String {
-        let _lock = get_at_lock().lock().await;
-        match self.io.exec_at(cmd, Duration::from_secs(10)).await {
+        match send_at_command_dedup(&self.serial_path, cmd).await {
             Ok(resp) => resp,
             Err(e) => format!("ERROR: {}", e),
         }
     }
 
     async fn read_sms_list(&self) -> String {
-        let _lock = get_at_lock().lock().await;
-        let _ = self.io.exec_at("AT+CMGF=1", Duration::from_secs(5)).await;
-        self.io
-            .exec_at("AT+CMGL=\"ALL\"", Duration::from_secs(10))
+        let _ = send_at_command_inner(&self.serial_path, "AT+CMGF=1").await;
+        send_at_command_inner(&self.serial_path, "AT+CMGL=\"ALL\"")
             .await
             .unwrap_or_else(|_| "+CMGL: 0 messages\r\nOK\r\n".to_string())
     }
 
     async fn configure_apn(&self, apn: &str, user: &str, pass: &str, auth_type: u8) {
-        let _lock = get_at_lock().lock().await;
-        let _ = self
-            .io
-            .exec_at(
-                &format!("AT+CGDCONT=1,\"IPV4V6\",\"{}\"", apn),
-                Duration::from_secs(5),
+        let _ = send_at_command_inner(
+            &self.serial_path,
+            &format!("AT+CGDCONT=1,\"IPV4V6\",\"{}\"", apn),
+        )
+        .await;
+        if !user.is_empty() {
+            let _ = send_at_command_inner(
+                &self.serial_path,
+                &format!("AT+QGAUTH=1,{},\"{}\",\"{}\"", auth_type, user, pass),
             )
             .await;
-        if !user.is_empty() {
-            let _ = self
-                .io
-                .exec_at(
-                    &format!("AT+QGAUTH=1,{},\"{}\",\"{}\"", auth_type, user, pass),
-                    Duration::from_secs(5),
-                )
-                .await;
         }
     }
 
     async fn set_network_mode_pref(&self, mode: &str) {
-        let _lock = get_at_lock().lock().await;
         let at_mode = match mode {
             "nr5g" => "AT+QNWPREFCFG=\"mode_pref\",NR5G",
             "lte" => "AT+QNWPREFCFG=\"mode_pref\",LTE",
@@ -559,28 +327,26 @@ impl HardwareBackend for RealBackend {
             "wcdma" => "AT+QNWPREFCFG=\"mode_pref\",WCDMA",
             _ => "AT+QNWPREFCFG=\"mode_pref\",AUTO",
         };
-        let _ = self.io.exec_at(at_mode, Duration::from_secs(5)).await;
+        let _ = send_at_command_inner(&self.serial_path, at_mode).await;
     }
 
     async fn set_data_session(&self, connect: bool) {
-        let _lock = get_at_lock().lock().await;
         let action_val = if connect { "1" } else { "0" };
-        let _ = self
-            .io
-            .exec_at(
-                &format!("AT+CGACT={},1", action_val),
-                Duration::from_secs(10),
-            )
-            .await;
+        let _ = send_at_command_inner(
+            &self.serial_path,
+            &format!("AT+CGACT={},1", action_val),
+        )
+        .await;
     }
 
     async fn scan_available_networks(&self) -> Vec<serde_json::Value> {
-        let _lock = get_at_lock().lock().await;
         println!("🔍 开始网络扫描 (AT+COPS=?, 180s 超时)...");
-        match self
-            .io
-            .exec_at("AT+COPS=?", Duration::from_secs(180))
-            .await
+        match send_at_command_inner_with_timeout(
+            &self.serial_path,
+            "AT+COPS=?",
+            Duration::from_secs(180),
+        )
+        .await
         {
             Ok(resp) => {
                 let networks = parse_cops_scan(&resp);
@@ -595,31 +361,21 @@ impl HardwareBackend for RealBackend {
     }
 
     async fn send_sms_msg(&self, recipient: &str, message: &str) -> bool {
-        let _lock = get_at_lock().lock().await;
         let mut success = false;
-        if self
-            .io
-            .exec_at("AT+CMGF=1", Duration::from_secs(5))
+        if send_at_command_inner(&self.serial_path, "AT+CMGF=1").await.is_ok() {
+            if send_at_command_inner(
+                &self.serial_path,
+                &format!("AT+CMGS=\"{}\"", recipient),
+            )
             .await
             .is_ok()
-        {
-            if self
-                .io
-                .exec_at(
-                    &format!("AT+CMGS=\"{}\"", recipient),
-                    Duration::from_secs(5),
+            {
+                if send_at_command_inner(
+                    &self.serial_path,
+                    &format!("{}\u{001A}", message),
                 )
                 .await
                 .is_ok()
-            {
-                if self
-                    .io
-                    .exec_at(
-                        &format!("{}\u{001A}", message),
-                        Duration::from_secs(30),
-                    )
-                    .await
-                    .is_ok()
                 {
                     success = true;
                 }
@@ -629,25 +385,20 @@ impl HardwareBackend for RealBackend {
     }
 
     async fn read_device_info(&self) -> DeviceInfoData {
-        let mfr = self
-            .send_at_get_line("AT+CGMI")
+        let mfr = send_at_get_line(&self.serial_path, "AT+CGMI")
             .await
             .unwrap_or_else(|| "Unknown".to_string());
-        let model = self
-            .send_at_get_line("AT+CGMM")
+        let model = send_at_get_line(&self.serial_path, "AT+CGMM")
             .await
             .unwrap_or_else(|| "Unknown".to_string());
-        let fw = self
-            .send_at_get_line("AT+CGMR")
+        let fw = send_at_get_line(&self.serial_path, "AT+CGMR")
             .await
             .unwrap_or_else(|| "Unknown".to_string());
-        let imei = self
-            .send_at_get_line("AT+CGSN")
+        let imei = send_at_get_line(&self.serial_path, "AT+CGSN")
             .await
             .unwrap_or_else(|| "Unknown".to_string());
         let serial = imei.clone();
-        let hw_ver = self
-            .send_at_get_line("AT+QIMPVER")
+        let hw_ver = send_at_get_line(&self.serial_path, "AT+QIMPVER")
             .await
             .and_then(|r| {
                 r.strip_prefix("+QIMPVER:")
@@ -655,29 +406,25 @@ impl HardwareBackend for RealBackend {
             })
             .unwrap_or_else(|| "Unknown".to_string());
         let module_type = model.clone();
-        let sim_status = self
-            .send_at_get_line("AT+CPIN?")
+        let sim_status = send_at_get_line(&self.serial_path, "AT+CPIN?")
             .await
             .and_then(|r| {
                 r.strip_prefix("+CPIN:")
                     .map(|s| s.trim().trim_matches('"').to_string())
             })
             .unwrap_or_else(|| "Unknown".to_string());
-        let imsi = self
-            .send_at_get_line("AT+CIMI")
+        let imsi = send_at_get_line(&self.serial_path, "AT+CIMI")
             .await
             .and_then(|r| r.strip_prefix("+CIMI:").map(|s| s.trim().to_string()))
             .unwrap_or_default();
-        let iccid = self
-            .send_at_get_line("AT+QCCID")
+        let iccid = send_at_get_line(&self.serial_path, "AT+QCCID")
             .await
             .and_then(|r| {
                 r.strip_prefix("+QCCID:")
                     .map(|s| s.trim().trim_matches('"').to_string())
             })
             .unwrap_or_else(|| "Unknown".to_string());
-        let phone = self
-            .send_at_get_line("AT+CNUM")
+        let phone = send_at_get_line(&self.serial_path, "AT+CNUM")
             .await
             .and_then(|r| {
                 let r = r.trim();
@@ -688,23 +435,20 @@ impl HardwareBackend for RealBackend {
                 }
             })
             .unwrap_or_default();
-        let net_status = self
-            .send_at_get_line("AT+CREG?")
+        let net_status = send_at_get_line(&self.serial_path, "AT+CREG?")
             .await
             .map(|r| parse_net_status(&r))
             .unwrap_or_else(|| "Unknown".to_string());
-        let signal_quality = self
-            .send_at_get_line("AT+CSQ")
+        let signal_quality = send_at_get_line(&self.serial_path, "AT+CSQ")
             .await
             .map(|r| parse_signal_quality(&r))
             .unwrap_or_else(|| "Unknown".to_string());
-        let temperature = self
-            .send_at_get_line("AT+QTEMP")
+        let temperature = send_at_get_line(&self.serial_path, "AT+QTEMP")
             .await
             .and_then(|r| parse_qtemp_temperature(&r))
             .unwrap_or_else(|| "-- °C".to_string());
 
-        let bands = query_device_bands(&self.io).await;
+        let bands = query_device_bands(&self.serial_path).await;
 
         DeviceInfoData {
             manufacturer: mfr,
@@ -726,49 +470,40 @@ impl HardwareBackend for RealBackend {
     }
 
     async fn send_reboot(&self) {
-        let _lock = get_at_lock().lock().await;
-        let _ = self
-            .io
-            .exec_at("AT+CFUN=1,1", Duration::from_secs(5))
-            .await;
+        let _ = send_at_command_inner(&self.serial_path, "AT+CFUN=1,1").await;
     }
 
     async fn send_factory_reset(&self) {
-        let _lock = get_at_lock().lock().await;
-        let _ = self.io.exec_at("AT&F0", Duration::from_secs(5)).await;
+        let _ = send_at_command_inner(&self.serial_path, "AT&F0").await;
     }
 
     async fn set_airplane_mode(&self, on: bool) {
-        let _lock = get_at_lock().lock().await;
         let cfun_val = if on { "4" } else { "1" };
-        let _ = self
-            .io
-            .exec_at(&format!("AT+CFUN={}", cfun_val), Duration::from_secs(10))
-            .await;
+        let _ = send_at_command_inner(&self.serial_path, &format!("AT+CFUN={}", cfun_val)).await;
     }
 
     async fn poll_telemetry(&self) -> TelemetryData {
         let mut telemetry = TelemetryData::default();
 
-        if let Ok(resp) = self.io.exec_at("AT+CGPADDR", Duration::from_secs(5)).await {
-            parse_cgpaddr(&resp, &mut telemetry);
-        }
-        if let Ok(resp) = self
-            .io
-            .exec_at("AT+QENG=\"servingcell\"", Duration::from_secs(5))
-            .await
+        if let Ok(cgpaddr_resp) =
+            send_at_command_dedup(&self.serial_path, "AT+CGPADDR").await
         {
-            parse_qeng(&resp, &mut telemetry);
+            parse_cgpaddr(&cgpaddr_resp, &mut telemetry);
         }
-        if let Ok(resp) = self
-            .io
-            .exec_at("AT+QCAINFO", Duration::from_secs(5))
-            .await
+        if let Ok(qeng_resp) =
+            send_at_command_dedup(&self.serial_path, "AT+QENG=\"servingcell\"").await
         {
-            parse_qcainfo(&resp, &mut telemetry);
+            parse_qeng(&qeng_resp, &mut telemetry);
         }
-        if let Ok(resp) = self.io.exec_at("AT+CPIN?", Duration::from_secs(5)).await {
-            for line in resp.lines() {
+        if let Ok(qcainfo_resp) =
+            send_at_command_dedup(&self.serial_path, "AT+QCAINFO").await
+        {
+            parse_qcainfo(&qcainfo_resp, &mut telemetry);
+        }
+        if let Ok(cpin_resp) =
+            send_at_command_dedup(&self.serial_path, "AT+CPIN?").await
+        {
+            for line in cpin_resp.lines() {
                 let trimmed = line.trim();
                 if let Some(status) = trimmed.strip_prefix("+CPIN:") {
                     let s = status.trim().trim_matches('"');
@@ -779,15 +514,13 @@ impl HardwareBackend for RealBackend {
                 }
             }
         }
-        if let Ok(resp) = self.io.exec_at("AT+QTEMP", Duration::from_secs(5)).await {
-            if let Some(temp) = parse_qtemp_temperature(&resp) {
+        if let Ok(qtemp_resp) = send_at_command_dedup(&self.serial_path, "AT+QTEMP").await {
+            if let Some(temp) = parse_qtemp_temperature(&qtemp_resp) {
                 telemetry.temperature = temp;
             }
         }
 
-        telemetry.traffic_stats = self
-            .io
-            .exec_at("AT+QGDNRCNT?", Duration::from_secs(5))
+        telemetry.traffic_stats = send_at_command_dedup(&self.serial_path, "AT+QGDNRCNT?")
             .await
             .ok()
             .and_then(|r| {
@@ -797,9 +530,7 @@ impl HardwareBackend for RealBackend {
             })
             .unwrap_or_default();
         if telemetry.traffic_stats.is_empty() {
-            telemetry.traffic_stats = self
-                .io
-                .exec_at("AT+QGDAT?", Duration::from_secs(5))
+            telemetry.traffic_stats = send_at_command_dedup(&self.serial_path, "AT+QGDAT?")
                 .await
                 .ok()
                 .and_then(|r| {
@@ -818,16 +549,20 @@ impl HardwareBackend for RealBackend {
         telemetry
     }
 
-    async fn read_static_info(&self) -> StaticDeviceInfo {
-        println!("📋 开始获取静态信息...");
+    async fn read_static_info(&self) -> (String, String, String, String) {
+        println!("📋 开始获取静态信息（持久串口连接）...");
 
-        let firmware_version = self
-            .send_at_get_line("AT+CGMR")
+        let firmware_version;
+        let mut active_sim = String::new();
+        let mut apn = String::new();
+
+        println!("📋 [1/4] 获取固件版本 (AT+CGMR)...");
+        firmware_version = send_at_get_line(&self.serial_path, "AT+CGMR")
             .await
             .unwrap_or_else(|| "NA".to_string());
 
-        let mut active_sim = String::new();
-        if let Ok(resp) = self.send_at_command_inner("AT+QUIMSLOT?").await {
+        println!("📋 [2/5] 获取 SIM 槽位 (AT+QUIMSLOT?)...");
+        if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+QUIMSLOT?").await {
             if let Some(line) = resp.lines().find(|l| l.contains("+QUIMSLOT:")) {
                 let parts: Vec<&str> = line.split(':').collect();
                 if parts.len() >= 2 {
@@ -837,87 +572,85 @@ impl HardwareBackend for RealBackend {
         }
         set_default(&mut active_sim, "NA");
 
-        let network_provider = fetch_network_provider(&self.io).await;
-        let apn = fetch_apn(&self.io).await;
+        println!("📋 [3/5] 获取运营商...");
+        let network_provider = fetch_network_provider(&self.serial_path).await;
 
-        let info = StaticDeviceInfo {
-            firmware_version,
-            active_sim,
-            network_provider,
-            apn,
-        };
+        println!("📋 [4/5] 获取 APN (AT+CGCONTRDP)...");
+        let mut found_apn = false;
+        if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+CGCONTRDP").await {
+            for line in resp.lines() {
+                if line.contains("+CGCONTRDP:") {
+                    let after_prefix = line.trim().strip_prefix("+CGCONTRDP:").unwrap_or(line).trim();
+                    let parts: Vec<&str> = after_prefix.split(',').collect();
+                    if parts.len() >= 3 {
+                        let a = parts[2].trim().trim_matches('"').to_string();
+                        if !a.is_empty() {
+                            apn = a;
+                            found_apn = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if !found_apn {
+            println!("📋 [4/5] 回退 AT+CGDCONT? 获取 APN...");
+            if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+CGDCONT?").await {
+                for line in resp.lines() {
+                    if line.contains("+CGDCONT:") {
+                        let after_prefix = line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
+                        let parts: Vec<&str> = after_prefix.split(',').collect();
+                        if parts.len() >= 3 {
+                            let a = parts[2].trim().trim_matches('"').to_string();
+                            if !a.is_empty()
+                                && !a.contains("placeholder")
+                                && !a.starts_with("apn")
+                            {
+                                apn = a;
+                                found_apn = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if !found_apn {
+                    for line in resp.lines() {
+                        if line.contains("+CGDCONT:") {
+                            let after_prefix =
+                                line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
+                            let parts: Vec<&str> = after_prefix.split(',').collect();
+                            if parts.len() >= 3 {
+                                let a = parts[2].trim().trim_matches('"').to_string();
+                                if !a.is_empty() {
+                                    apn = a;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        set_default(&mut apn, "N/A");
 
         println!(
             "📋 静态信息已获取: FW={}, SIM={}, Provider={}, APN={}",
-            info.firmware_version, info.active_sim, info.network_provider, info.apn
+            firmware_version, active_sim, network_provider, apn
         );
 
-        info
+        (firmware_version, active_sim, network_provider, apn)
     }
 }
 
-// ═══ RealBackend 内部辅助方法 ═══
-
-impl RealBackend {
-    async fn send_at_get_line(&self, cmd: &str) -> Option<String> {
-        let _lock = get_at_lock().lock().await;
-        self.io
-            .exec_at(cmd, Duration::from_secs(10))
-            .await
-            .ok()
-            .and_then(|resp| {
-                resp.lines().find_map(|l| {
-                    let trimmed = l.trim();
-                    if !trimmed.is_empty()
-                        && !trimmed.contains("OK")
-                        && !trimmed.contains("ERROR")
-                        && !trimmed.starts_with("AT+")
-                        && !trimmed.starts_with("+CME ERROR:")
-                    {
-                        Some(trimmed.to_string())
-                    } else {
-                        None
-                    }
-                })
-            })
-    }
-
-    async fn send_at_command_inner(&self, cmd: &str) -> Result<String, String> {
-        let _lock = get_at_lock().lock().await;
-        self.io.exec_at(cmd, Duration::from_secs(10)).await
-    }
-}
 
 // ============================================================================
-// 6. 全局状态与互斥锁
-// ============================================================================
-
-struct AppState {
-    tx: broadcast::Sender<String>,
-    #[allow(dead_code)]
-    actor_tx: mpsc::Sender<AtRequest>,
-    actor_tx_high: mpsc::Sender<AtRequest>,
-    static_info: RwLock<StaticDeviceInfo>,
-    dynamic: RwLock<DynamicTelemetry>,
-}
-
-/// 全局 AT 命令互斥锁 — 防止并发发送 AT 命令。
-/// 利用 try_lock() 实现忙碌避让（长耗时 AT 命令执行中时跳过轮询）。
-static AT_CMD_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-
-fn get_at_lock() -> &'static tokio::sync::Mutex<()> {
-    AT_CMD_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-}
-
-// ============================================================================
-// 7. 通用工具函数
+// 通用工具函数
 // ============================================================================
 
 /// 三段式回退获取运营商名称：QSPN → COPS → QENG MCC/MNC
-async fn fetch_network_provider(io: &SerialIo) -> String {
-    let _lock = get_at_lock().lock().await;
-
-    if let Ok(resp) = io.exec_at("AT+QSPN", Duration::from_secs(5)).await {
+async fn fetch_network_provider(serial_path: &str) -> String {
+    // 1. AT+QSPN
+    if let Ok(resp) = send_at_command_inner(serial_path, "AT+QSPN").await {
         for line in resp.lines() {
             if line.contains("+QSPN:") {
                 let after_prefix = line.trim().strip_prefix("+QSPN:").unwrap_or(line).trim();
@@ -926,14 +659,19 @@ async fn fetch_network_provider(io: &SerialIo) -> String {
                     let raw = raw.trim().trim_matches('"').trim();
                     if !raw.is_empty() && raw != "????" {
                         let decoded = decode_hex_ucs2(raw);
-                        return if decoded.is_empty() { raw.to_string() } else { decoded };
+                        return if decoded.is_empty() {
+                            raw.to_string()
+                        } else {
+                            decoded
+                        };
                     }
                 }
             }
         }
     }
 
-    if let Ok(resp) = io.exec_at("AT+COPS?", Duration::from_secs(5)).await {
+    // 2. AT+COPS?
+    if let Ok(resp) = send_at_command_inner(serial_path, "AT+COPS?").await {
         for line in resp.lines() {
             if line.contains("+COPS:") {
                 let after_prefix = line.trim().strip_prefix("+COPS:").unwrap_or(line).trim();
@@ -942,17 +680,19 @@ async fn fetch_network_provider(io: &SerialIo) -> String {
                     let raw = parts[1].trim().trim_matches('"').trim();
                     if !raw.is_empty() && raw != "????" {
                         let decoded = decode_hex_ucs2(raw);
-                        return if decoded.is_empty() { raw.to_string() } else { decoded };
+                        return if decoded.is_empty() {
+                            raw.to_string()
+                        } else {
+                            decoded
+                        };
                     }
                 }
             }
         }
     }
 
-    if let Ok(resp) = io
-        .exec_at("AT+QENG=\"servingcell\"", Duration::from_secs(5))
-        .await
-    {
+    // 3. AT+QENG="servingcell" 通过 MCC/MNC 映射
+    if let Ok(resp) = send_at_command_inner(serial_path, "AT+QENG=\"servingcell\"").await {
         for line in resp.lines() {
             if line.contains("+QENG: \"servingcell\"") {
                 let parts: Vec<&str> = line
@@ -975,74 +715,207 @@ async fn fetch_network_provider(io: &SerialIo) -> String {
     "Unknown".to_string()
 }
 
-/// 获取 APN：CGCONTRDP → 回退 CGDCONT
-async fn fetch_apn(io: &SerialIo) -> String {
-    let _lock = get_at_lock().lock().await;
-    let mut apn = String::new();
+// ============================================================================
+// AT 命令基础架构（互斥锁 + 去重队列 + 跨进程文件锁）
+// ============================================================================
 
-    if let Ok(resp) = io.exec_at("AT+CGCONTRDP", Duration::from_secs(5)).await {
-        for line in resp.lines() {
-            if line.contains("+CGCONTRDP:") {
-                let after_prefix = line.trim().strip_prefix("+CGCONTRDP:").unwrap_or(line).trim();
-                let parts: Vec<&str> = after_prefix.split(',').collect();
-                if parts.len() >= 3 {
-                    let a = parts[2].trim().trim_matches('"').to_string();
-                    if !a.is_empty() {
-                        return a;
-                    }
-                }
-            }
-        }
-    }
-
-    if let Ok(resp) = io.exec_at("AT+CGDCONT?", Duration::from_secs(5)).await {
-        for line in resp.lines() {
-            if line.contains("+CGDCONT:") {
-                let after_prefix = line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
-                let parts: Vec<&str> = after_prefix.split(',').collect();
-                if parts.len() >= 3 {
-                    let a = parts[2].trim().trim_matches('"').to_string();
-                    if !a.is_empty() && !a.contains("placeholder") && !a.starts_with("apn") {
-                        return a;
-                    }
-                }
-            }
-        }
-        if apn.is_empty() {
-            for line in resp.lines() {
-                if line.contains("+CGDCONT:") {
-                    let after_prefix = line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
-                    let parts: Vec<&str> = after_prefix.split(',').collect();
-                    if parts.len() >= 3 {
-                        let a = parts[2].trim().trim_matches('"').to_string();
-                        if !a.is_empty() {
-                            apn = a;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if apn.is_empty() { "N/A".to_string() } else { apn }
+/// 跨进程文件锁 — 防止其他进程（如后台监控守护进程）同时操作串口
+struct SerialFileLock {
+    file: Option<std::fs::File>,
 }
 
-/// 查询设备频段信息
-async fn query_device_bands(io: &SerialIo) -> String {
+impl Drop for SerialFileLock {
+    fn drop(&mut self) {
+        // 文件关闭时内核自动释放 flock；显式 unlock 更可靠
+        if let Some(ref file) = self.file {
+            let _ = file.unlock();
+        }
+    }
+}
+
+/// 锁文件路径（位于 tmpfs，重启自动清理）
+const LOCK_FILE_PATH: &str = "/tmp/atcmd_rs.lock";
+
+/// 获取跨进程排他文件锁。
+/// 同一时间仅允许一个进程持有锁，其他进程的 flock(LOCK_EX) 在内核态阻塞等待。
+async fn acquire_serial_lock() -> Result<SerialFileLock, String> {
+    let result = tokio::task::spawn_blocking(|| -> Result<std::fs::File, String> {
+        // 以 CREATE+WRITE 模式打开锁文件，保证文件始终存在
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .read(true)
+            .open(LOCK_FILE_PATH)
+            .map_err(|e| format!("无法打开锁文件 {}: {}", LOCK_FILE_PATH, e))?;
+
+        // LOCK_EX：排他锁，阻塞等待直到获取到锁
+        file.lock_exclusive()
+            .map_err(|e| format!("获取 {} 排他锁失败: {}", LOCK_FILE_PATH, e))?;
+
+        Ok(file)
+    })
+    .await
+    .map_err(|e| format!("文件锁任务被取消: {}", e))??;
+
+    Ok(SerialFileLock { file: Some(result) })
+}
+
+/// 全局 AT 命令互斥锁，防止并发写入 SMD 设备
+static AT_CMD_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+fn get_at_lock() -> &'static tokio::sync::Mutex<()> {
+    AT_CMD_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// AT 命令队列 - 合并相同请求避免重复执行
+struct AtCommandQueue {
+    inner: tokio::sync::Mutex<HashMap<String, AtPendingCmd>>,
+}
+
+struct AtPendingCmd {
+    waiters: Vec<oneshot::Sender<Result<String, String>>>,
+}
+
+static AT_CMD_QUEUE: OnceLock<AtCommandQueue> = OnceLock::new();
+
+fn get_at_queue() -> &'static AtCommandQueue {
+    AT_CMD_QUEUE.get_or_init(|| AtCommandQueue::new())
+}
+
+impl AtCommandQueue {
+    fn new() -> Self {
+        AtCommandQueue {
+            inner: tokio::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// 提交 AT 命令到队列并等待结果。
+    /// 如果相同命令已在执行中，则合并请求共享相同的结果。
+    async fn execute(&self, serial_path: &str, cmd: &str) -> Result<String, String> {
+        use std::collections::hash_map::Entry;
+
+        let mut guard = self.inner.lock().await;
+
+        match guard.entry(cmd.to_string()) {
+            Entry::Occupied(mut entry) => {
+                // 相同命令已在执行中，订阅其结果
+                let (tx, rx) = oneshot::channel();
+                entry.get_mut().waiters.push(tx);
+                drop(guard);
+                rx.await.unwrap_or_else(|_| Err("AT命令队列等待被取消".to_string()))
+            }
+            Entry::Vacant(entry) => {
+                // 首次请求，我们负责执行
+                entry.insert(AtPendingCmd { waiters: vec![] });
+                drop(guard);
+
+                let result = send_at_command_inner(serial_path, cmd).await;
+
+                // 广播结果给所有等待者
+                let mut guard = self.inner.lock().await;
+                if let Some(pending) = guard.remove(cmd) {
+                    for waiter in pending.waiters {
+                        let _ = waiter.send(result.clone());
+                    }
+                }
+                result
+            }
+        }
+    }
+}
+
+/// 带队列去重的 AT 命令发送。
+/// 相同命令同时请求时会被合并，避免重复执行。
+async fn send_at_command_dedup(serial_path: &str, cmd: &str) -> Result<String, String> {
+    get_at_queue().execute(serial_path, cmd).await
+}
+
+/// 底层 AT 命令发送（支持自定义超时）
+async fn send_at_command_inner_with_timeout(
+    serial_path: &str,
+    cmd: &str,
+    timeout: Duration,
+) -> Result<String, String> {
+    let start = std::time::Instant::now();
+
     let _lock = get_at_lock().lock().await;
+
+    // 跨进程排他锁：防止其他后台进程（如监控守护）同时操作 /dev/smd11
+    // 导致数据被劫持或响应混乱
+    let _file_lock = acquire_serial_lock().await?;
+
+    let child = tokio::process::Command::new("/opt/atcmd_rs")
+        .arg("-p")
+        .arg(serial_path)
+        .arg(cmd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("atcmd_rs启动失败: {}", e))?;
+
+    let output = match tokio::time::timeout(timeout, child.wait_with_output()).await
+    {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => return Err(format!("atcmd_rs执行失败: {}", e)),
+        Err(_) => return Err(format!("AT命令超时({}s): {}", timeout.as_secs(), cmd)),
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "atcmd_rs失败 (exit={}): {}",
+            output.status,
+            stderr.trim()
+        ));
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout).into_owned();
+
+    // 检测错误（在原始响应中搜索 ERROR/+CME ERROR:）
+    if raw.contains("ERROR") || raw.contains("+CME ERROR:") {
+        let elapsed = start.elapsed();
+        println!("⚠️ [AT] {} 返回 ERROR ({}ms)", cmd, elapsed.as_millis());
+        return Err(format!("AT命令返回错误: {}", raw.trim()));
+    }
+
+    let elapsed = start.elapsed();
+    // 取首行非空非 AT 回显的内容作为日志预览
+    let preview = raw
+        .lines()
+        .find(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with("AT+")
+        })
+        .unwrap_or(&raw);
+    println!(
+        "✅ [AT] {} 成功 ({}ms): {}",
+        cmd,
+        elapsed.as_millis(),
+        preview.trim()
+    );
+    Ok(raw)
+}
+
+/// 底层 AT 命令发送（默认 10 秒超时）
+async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, String> {
+    send_at_command_inner_with_timeout(serial_path, cmd, Duration::from_secs(10)).await
+}
+
+/// 从设备查询频段信息（NR + LTE），通过多条 AT 命令从模组获取
+async fn query_device_bands(serial_path: &str) -> String {
+    // ── 方法 1: AT+QENG="servingcell" 获取当前服务小区频段 ──
     let mut nr_bands: Vec<String> = Vec::new();
     let mut lte_bands: Vec<String> = Vec::new();
 
-    if let Ok(resp) = io
-        .exec_at("AT+QENG=\"servingcell\"", Duration::from_secs(5))
-        .await
-    {
+    if let Ok(resp) = send_at_command_dedup(serial_path, "AT+QENG=\"servingcell\"").await {
         for line in resp.lines() {
             let trimmed = line.trim();
             if !trimmed.starts_with("+QENG: \"servingcell\"") {
                 continue;
             }
+            // 格式: +QENG: "servingcell","NOCONN","NR5G-SA","TDD",460,00,...,<band>,...
+            // band 字段位置: LTE=9, NR5G=9 (基于现有 parser 的索引)
             let rest = trimmed
                 .strip_prefix("+QENG: \"servingcell\"")
                 .unwrap_or("")
@@ -1050,8 +923,9 @@ async fn query_device_bands(io: &SerialIo) -> String {
                 .strip_prefix(',')
                 .unwrap_or("");
             let parts: Vec<&str> = rest.split(',').map(|s| s.trim().trim_matches('"')).collect();
-            let is_nr = parts.get(1).map_or(false, |r| r.contains("NR5G"));
-            let band_idx = if is_nr { 9 } else { 8 };
+            // parts[0]=connection_status, parts[1]=rat
+            // LTE: band at index 8, NR5G: band at index 9 (extra tac field)
+            let band_idx = if parts.get(1).map_or(false, |r| r.contains("NR5G")) { 9 } else { 8 };
             if let Some(band) = parts.get(band_idx) {
                 let b = band.trim();
                 if !b.is_empty() && b != "-" {
@@ -1069,7 +943,8 @@ async fn query_device_bands(io: &SerialIo) -> String {
         }
     }
 
-    if let Ok(resp) = io.exec_at("AT+QCAINFO", Duration::from_secs(5)).await {
+    // ── 方法 2: AT+QCAINFO 补充载波聚合频段 ──
+    if let Ok(resp) = send_at_command_dedup(serial_path, "AT+QCAINFO").await {
         for line in resp.lines() {
             let trimmed = line.trim();
             if !trimmed.starts_with("+QCAINFO:") {
@@ -1077,6 +952,7 @@ async fn query_device_bands(io: &SerialIo) -> String {
             }
             let rest = trimmed.strip_prefix("+QCAINFO:").unwrap_or("").trim();
             let parts: Vec<&str> = rest.split(',').map(|s| s.trim().trim_matches('"')).collect();
+            // parts[3]=band, e.g. "NR5G BAND 41" or just "41"
             if let Some(raw) = parts.get(3) {
                 let band_str = raw.trim();
                 if band_str.starts_with("NR5G BAND ") {
@@ -1084,21 +960,26 @@ async fn query_device_bands(io: &SerialIo) -> String {
                     if !num.is_empty() && !nr_bands.contains(&format!("n{}", num)) {
                         nr_bands.push(format!("n{}", num));
                     }
-                } else if band_str.parse::<i32>().is_ok() {
+                } else if let Ok(_) = band_str.parse::<i32>() {
+                    // Could be NR or LTE — try to classify by value
                     if band_str.parse::<u32>().unwrap_or(0) > 100 {
+                        // >100 are NR band numbers
                         if !nr_bands.contains(&format!("n{}", band_str)) {
                             nr_bands.push(format!("n{}", band_str));
                         }
-                    } else if !lte_bands.contains(&format!("B{}", band_str)) {
-                        lte_bands.push(format!("B{}", band_str));
+                    } else {
+                        if !lte_bands.contains(&format!("B{}", band_str)) {
+                            lte_bands.push(format!("B{}", band_str));
+                        }
                     }
                 }
             }
         }
     }
 
+    // ── 方法 3: AT+QCFG="band" 获取配置的完整频段列表 ──
     if nr_bands.len() <= 1 || lte_bands.len() <= 1 {
-        if let Ok(resp) = io.exec_at("AT+QCFG=\"band\"", Duration::from_secs(5)).await {
+        if let Ok(resp) = send_at_command_dedup(serial_path, "AT+QCFG=\"band\"").await {
             if let Some(line) = resp.lines().find(|l| l.trim().starts_with("+QCFG:")) {
                 let parsed = parse_qcfg_bands(line.trim());
                 if !parsed.0.is_empty() {
@@ -1111,8 +992,13 @@ async fn query_device_bands(io: &SerialIo) -> String {
         }
     }
 
-    nr_bands.sort_by_key(|b| b.trim_start_matches('n').parse::<u32>().unwrap_or(999));
-    lte_bands.sort_by_key(|b| b.trim_start_matches('B').parse::<u32>().unwrap_or(999));
+    // ── 格式化输出 ──
+    nr_bands.sort_by_key(|b| {
+        b.trim_start_matches('n').parse::<u32>().unwrap_or(999)
+    });
+    lte_bands.sort_by_key(|b| {
+        b.trim_start_matches('B').parse::<u32>().unwrap_or(999)
+    });
 
     let mut result = Vec::new();
     if !nr_bands.is_empty() {
@@ -1122,95 +1008,63 @@ async fn query_device_bands(io: &SerialIo) -> String {
         result.push(format!("LTE {}", lte_bands.join("/")));
     }
 
-    if result.is_empty() { "--".to_string() } else { result.join(", ") }
+    if result.is_empty() {
+        "--".to_string()
+    } else {
+        result.join(", ")
+    }
 }
 
-// ============================================================================
-// 8. URC 处理任务
-// ============================================================================
-
-/// 应用 URC 更新到动态状态，返回 true 表示发生了有意义的变更
-fn apply_urc(dynamic: &mut DynamicTelemetry, urc: &str) -> bool {
-    if let Some(val) = urc
-        .strip_prefix("+QIND: \"signal\",")
-        .or_else(|| {
-            urc.lines()
-                .find(|l| l.contains("+QIND:") && l.contains("signal"))
-                .and_then(|l| l.split(',').nth(1).map(|s| s.trim().trim_matches('"')))
+/// 发送 AT 命令并返回首行有效响应（自动去除 AT echo、OK/ERROR、空行）
+async fn send_at_get_line(serial_path: &str, cmd: &str) -> Option<String> {
+    send_at_command_dedup(serial_path, cmd)
+        .await
+        .ok()
+        .and_then(|resp| {
+            resp.lines().find_map(|l| {
+                let trimmed = l.trim();
+                if !trimmed.is_empty()
+                    && !trimmed.contains("OK")
+                    && !trimmed.contains("ERROR")
+                    && !trimmed.starts_with("AT+")
+                    && !trimmed.starts_with("+CME ERROR:")
+                {
+                    Some(trimmed.to_string())
+                } else {
+                    None
+                }
+            })
         })
-    {
-        let old = dynamic.signal_percentage.clone();
-        dynamic.signal_percentage = format!("{}%", val);
-        return dynamic.signal_percentage != old;
-    }
-
-    if urc.contains("+QIND: \"srv\"") || urc.contains("+QIND: \"psattach\"") {
-        dynamic.internet_connection = if urc.contains(",1") || urc.contains("\"attached\"") {
-            "Connected".to_string()
-        } else {
-            "Disconnected".to_string()
-        };
-        return true;
-    }
-
-    if urc.starts_with("+CREG:") || urc.starts_with("+CEREG:") || urc.starts_with("+CGREG:") {
-        dynamic.updated = Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
-        return true;
-    }
-
-    if urc.starts_with("+CMT:") || urc.starts_with("+CMTI:") {
-        dynamic.updated = Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
-        return true;
-    }
-
-    if urc.contains("+QIND: \"pscall\"") {
-        dynamic.internet_connection = if urc.contains(",1") {
-            "Connected".to_string()
-        } else {
-            "Disconnected".to_string()
-        };
-        return true;
-    }
-
-    false
 }
 
-async fn urc_handler_task(
-    mut urc_rx: broadcast::Receiver<String>,
-    state: Arc<AppState>,
-    interval_secs: Arc<RwLock<u64>>,
-) {
-    while let Ok(urc_msg) = urc_rx.recv().await {
-        let changed = {
-            let mut dynamic = state.dynamic.write().await;
-            apply_urc(&mut dynamic, &urc_msg)
-        };
+fn static_file_response(
+    body: &'static str,
+    content_type: &'static str,
+) -> Response<axum::body::Body> {
+    Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .body(axum::body::Body::from(body))
+        .unwrap()
+}
 
-        if changed {
-            let dynamic = state.dynamic.read().await;
-            if let Ok(json_str) = serde_json::to_string(&*dynamic) {
-                eprintln!("📡 URC 触发广播: {} 字节", json_str.len());
-                let _ = state.tx.send(json_str);
-            }
-            drop(dynamic);
-            // URC 到来时提速轮询（模组活跃）
-            *interval_secs.write().await = 3;
-        }
-    }
+async fn index_handler() -> impl IntoResponse {
+    static_file_response(include_str!("index.html"), "text/html; charset=utf-8")
 }
 
 // ============================================================================
-// 9. WebSocket 消息路由
+// 统一硬件任务：串行消费 /opt/atcmd_rs，定时轮询 + 用户指令均经此通道
 // ============================================================================
 
-fn broadcast_dynamic(state: &AppState, dynamic: &DynamicTelemetry) {
-    if let Ok(json_str) = serde_json::to_string(dynamic) {
-        let rc = state.tx.receiver_count();
-        eprintln!("📤 WS 广播动态遥测 ({} 接收者, {} 字节)", rc, json_str.len());
+/// 将 GlobalTelemetry 序列化并广播到所有 WS 客户端
+fn broadcast_state(state: &AppState, global: &GlobalTelemetry) {
+    if let Ok(json_str) = serde_json::to_string(global) {
+        let send_rc = state.tx.receiver_count();
+        eprintln!("📤 WS 广播遥测数据 ({} 接收者, {} 字节)", send_rc, json_str.len());
         let _ = state.tx.send(json_str);
     }
 }
 
+/// 处理单个 channel 消息，返回 false 表示 channel 已关闭
 async fn handle_channel_req(
     req: Option<AtRequest>,
     backend: &Arc<dyn HardwareBackend>,
@@ -1227,6 +1081,8 @@ async fn handle_channel_req(
     }
 }
 
+/// 处理单个 AT 请求（高低优先级通道共用此函数）
+/// 🌟 所有涉及物理串口读写的操作，通过 tokio::spawn 异步派发，保证 Actor 绝不卡死
 async fn handle_at_request(
     req: AtRequest,
     backend: &Arc<dyn HardwareBackend>,
@@ -1258,7 +1114,7 @@ async fn handle_at_request(
             }));
         }
         AtAction::GetSmsList => {
-            println!("📱 actor: get_sms_list (后台异步执行)");
+            println!("📱 actor: get_sms_list (后台异步执行，不阻塞轮询)");
             let backend_clone = backend.clone();
             let resp_tx = req.resp_tx;
             tokio::spawn(async move {
@@ -1304,7 +1160,7 @@ async fn handle_at_request(
             });
         }
         AtAction::NetworkScan => {
-            println!("🔍 actor: network_scan (后台异步执行)");
+            println!("🔍 actor: network_scan (后台异步执行，不阻塞轮询)");
             let backend_clone = backend.clone();
             let resp_tx = req.resp_tx;
             tokio::spawn(async move {
@@ -1397,57 +1253,56 @@ async fn handle_at_request(
     }
 }
 
-// ============================================================================
-// 10. 统一硬件任务
-// ============================================================================
-
+/// 统一硬件任务：定时轮询 + 用户 AT 指令。非阻塞双轨设计 + 离线检测 + 动态空闲降频
+///
+/// 核心设计：
+/// 1. 轮询 busy-bypass：try_lock() 探活串口，忙碌时直接广播缓存不阻塞 Actor
+/// 2. 消息分发非阻塞化：所有硬件操作通过 tokio::spawn 派发，Actor 永不卡死
+/// 3. 高优先级通道优先消费，确保用户交互指令不会被轮询阻塞
 async fn hardware_task(
     mut actor_rx_high: mpsc::Receiver<AtRequest>,
     mut actor_rx: mpsc::Receiver<AtRequest>,
     backend: Arc<dyn HardwareBackend>,
     state: Arc<AppState>,
-    interval_secs: Arc<RwLock<u64>>,
 ) {
     let mut components = Components::new_with_refreshed_list();
-    let mut interval = tokio::time::interval(Duration::from_secs(POLL_INTERVAL_ACTIVE));
+    let mut interval_secs = 5u64;
+    let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
     interval.tick().await;
     let mut consecutive_failures = 0u32;
-    let mut current_interval_secs = POLL_INTERVAL_ACTIVE;
+    // 当前计时器周期，避免无意义重建 Interval（保留漂移补偿能力）
+    let mut current_interval_secs = interval_secs;
 
     loop {
         tokio::select! {
             biased;
 
             req = actor_rx_high.recv() => {
-                let mut user_interval = interval_secs.write().await;
-                if !handle_channel_req(req, &backend, &mut *user_interval, &mut interval, &mut current_interval_secs).await {
+                if !handle_channel_req(req, &backend, &mut interval_secs, &mut interval, &mut current_interval_secs).await {
                     break;
                 }
             }
             req = actor_rx.recv() => {
-                let mut user_interval = interval_secs.write().await;
-                if !handle_channel_req(req, &backend, &mut *user_interval, &mut interval, &mut current_interval_secs).await {
+                if !handle_channel_req(req, &backend, &mut interval_secs, &mut interval, &mut current_interval_secs).await {
                     break;
                 }
             }
             _ = interval.tick() => {
-                // ★ 零成本视图探活：broadcast::Sender::receiver_count()
-                // 自动随 WS 连接数增减，无需手动原子计数维护
-                let active = state.tx.receiver_count() > 0;
+                let active = state.active_views.load(Ordering::Relaxed) > 0;
 
                 if active && get_at_lock().try_lock().is_ok() {
-                    // ── 串口空闲，正常物理轮询 ──
+                    // ── 锁可用：正常物理轮询 ──
                     let start_poll = std::time::Instant::now();
                     let mut telemetry = backend.poll_telemetry().await;
 
-                    // 离线检测
+                    // 离线检测（在 CPU 温度回退之前检查，避免 sysinfo 掩盖模组无响应）
                     let telemetry_dead = telemetry.sim_status == "NA"
                         && telemetry.network_mode == "NA"
                         && telemetry.signal_percentage == "NA"
                         && (telemetry.ipv4.is_empty() || telemetry.ipv4 == "--");
                     consecutive_failures = if telemetry_dead { consecutive_failures + 1 } else { 0 };
 
-                    // CPU 温度回退
+                    // CPU 温度 fallback（仅当 AT+QTEMP 未提供时）
                     if telemetry.temperature.is_empty() || telemetry.temperature == "-- °C" {
                         components.refresh(true);
                         if let Some(temp) = components.iter()
@@ -1468,82 +1323,112 @@ async fn hardware_task(
                     };
 
                     let uptime_sec = System::uptime();
-                    let updated_str = Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
-                    let uptime_str = format!("{} minutes", uptime_sec / 60);
+                    let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
                     {
-                        let mut dynamic = state.dynamic.write().await;
+                        let mut global = state.global.write().await;
 
                         if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
                             eprintln!("⚠️ 模组连续 {} 次无响应，重置为离线状态", MAX_CONSECUTIVE_FAILURES);
-                            *dynamic = DynamicTelemetry::default();
-                            dynamic.internet_connection = "Disconnected".to_string();
-                            dynamic.uptime = uptime_str;
-                            dynamic.updated = updated_str;
+                            let fw = global.firmware_version.clone();
+                            let sim = global.active_sim.clone();
+                            let prov = global.network_provider.clone();
+                            let apn = global.apn.clone();
+                            *global = GlobalTelemetry::default();
+                            global.firmware_version = fw;
+                            global.active_sim = sim;
+                            global.network_provider = prov;
+                            global.apn = apn;
+                            global.internet_connection = "Disconnected".to_string();
+                            global.uptime = format!("{} minutes", uptime_sec / 60);
+                            global.updated = updated_str;
                         } else {
-                            *dynamic = DynamicTelemetry::from_telemetry(
-                                &telemetry, &dynamic,
-                                uptime_str,
+                            *global = GlobalTelemetry::from_telemetry_and_global(
+                                &telemetry, &global,
+                                format!("{} minutes", uptime_sec / 60),
                                 updated_str,
                             );
                         }
 
-                        broadcast_dynamic(&state, &dynamic);
+                        broadcast_state(&state, &global);
                     }
 
                     println!("✅ 轮询任务完成，总耗时: {}ms", start_poll.elapsed().as_millis());
 
                 } else if active {
-                    // ── 串口繁忙，使用缓存 ──
-                    println!("⚠️ Modem 串口忙，跳过物理轮询，发送缓存状态");
+                    // ── 串口繁忙：跳过物理查询，只更新时间戳 ──
+                    println!("⚠️ Modem 串口忙（可能正在执行长耗时 AT），跳过物理轮询，发送缓存状态");
                     let uptime_sec = System::uptime();
-                    let updated_str = Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
+                    let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
-                    let mut dynamic = state.dynamic.write().await;
-                    dynamic.uptime = format!("{} minutes", uptime_sec / 60);
-                    dynamic.updated = updated_str;
-                    broadcast_dynamic(&state, &dynamic);
+                    let mut global = state.global.write().await;
+                    global.uptime = format!("{} minutes", uptime_sec / 60);
+                    global.updated = updated_str;
+                    broadcast_state(&state, &global);
 
                 } else {
-                    println!("💤 硬件轮询空闲模式 (无活跃视图)");
+                    println!("💤 硬件轮询处于空闲模式 (无活跃视图)");
                 }
 
-                // 动态空闲降频
-                let user_interval = *interval_secs.read().await;
-                let next_secs = if active { user_interval } else { IDLE_INTERVAL_SECS };
+                // 动态空闲降频：仅在周期真正发生改变时才重建 Interval
+                let next_secs = if active { interval_secs } else { IDLE_INTERVAL_SECS };
                 if next_secs != current_interval_secs {
                     current_interval_secs = next_secs;
                     interval = tokio::time::interval(Duration::from_secs(next_secs));
-                    interval.tick().await;
+                    interval.tick().await; // 消耗新 Interval 就绪的第一拍
                 }
             }
         }
     }
 }
 
-// ============================================================================
-// 11. HTTP/WS 处理器
-// ============================================================================
+#[tokio::main]
+async fn main() {
+    let serial_path =
+        env::var("AT_SERIAL_PORT").unwrap_or_else(|_| DEFAULT_SERIAL_PORT.to_string());
+    println!("🔌 使用串口设备: {}", serial_path);
 
-fn static_file_response(
-    body: &'static str,
-    content_type: &'static str,
-) -> Response<axum::body::Body> {
-    Response::builder()
-        .header(header::CONTENT_TYPE, content_type)
-        .body(axum::body::Body::from(body))
-        .unwrap()
-}
+    let (tx, _) = broadcast::channel(100);
+    let (actor_tx, actor_rx) = mpsc::channel(32);
+    let (actor_tx_high, actor_rx_high) = mpsc::channel(32);
 
-async fn index_handler() -> impl IntoResponse {
-    static_file_response(include_str!("index.html"), "text/html; charset=utf-8")
-}
+    let app_state = Arc::new(AppState {
+        tx: tx.clone(),
+        actor_tx,
+        actor_tx_high,
+        active_views: AtomicUsize::new(0),
+        global: RwLock::new(GlobalTelemetry::default()),
+    });
 
-async fn style_handler() -> impl IntoResponse {
-    static_file_response(
-        include_str!("../templates/style.css"),
-        "text/css; charset=utf-8",
-    )
+    // 创建后端（设备不存在时命令失败返回 NA）
+    let backend: Arc<dyn HardwareBackend> = Arc::new(RealBackend { serial_path: serial_path.clone() });
+
+    // 获取一次静态信息
+    let (firmware_version, active_sim, network_provider, apn) = backend.read_static_info().await;
+    {
+        let mut guard = app_state.global.write().await;
+        guard.firmware_version = firmware_version;
+        guard.active_sim = active_sim;
+        guard.network_provider = network_provider;
+        guard.apn = apn;
+    }
+
+    // 启动统一硬件任务（单消费者，串行处理所有 /opt/atcmd_rs）
+    tokio::spawn({
+        let backend = backend.clone();
+        let state = app_state.clone();
+        async move { hardware_task(actor_rx_high, actor_rx, backend, state).await }
+    });
+
+    let app = Router::new()
+        .route("/", get(index_handler))
+        .route("/ws", get(ws_handler))
+        .route("/style.css", get(style_handler))
+        .with_state(app_state);
+
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    println!("⚡ 移远 5G 终端 WebUI 服务端已就绪: http://0.0.0.0:3000");
+    axum::serve(listener, app).await.unwrap();
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -1551,10 +1436,15 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) ->
 }
 
 async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
-    // ★ 订阅广播自动增加 receiver_count — 视图探活零成本原生实现
     let mut broadcast_rx = state.tx.subscribe();
     let online_count = state.tx.receiver_count();
-    println!("🔌 新 WebSocket 客户端已连接 (当前在线: {})", online_count);
+    println!(
+        "🔌 新的 WebSocket 客户端已连接 (当前在线: {})",
+        online_count
+    );
+
+    state.active_views.fetch_add(1, Ordering::SeqCst);
+    let mut current_is_active = true;
 
     let (local_tx, mut local_rx) = mpsc::channel::<String>(10);
     let (mut ws_sender, mut ws_receiver) = socket.split();
@@ -1576,10 +1466,11 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                 }
             }
         } => {
-            println!("💬 WebSocket 发送通道中断");
+            println!("💬 WebSocket 发送通道中断，准备断开连接");
         },
 
         _ = async {
+            let state_inner = state.clone();
             while let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
                 if let Ok(cmd) = serde_json::from_str::<WsCommand>(&text) {
                     let (resp_tx, resp_rx) = oneshot::channel();
@@ -1596,11 +1487,19 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             AtAction::SetInterval(secs)
                         }
                         "set_view_state" => {
-                            // ★ 已由 receiver_count() 完全替代，保留仅兼容旧前端
+                            let is_active = cmd.payload.as_ref().and_then(|p| p.as_str()) == Some("active");
+                            if is_active != current_is_active {
+                                if is_active {
+                                    state_inner.active_views.fetch_add(1, Ordering::SeqCst);
+                                } else {
+                                    state_inner.active_views.fetch_sub(1, Ordering::SeqCst);
+                                }
+                                current_is_active = is_active;
+                            }
                             continue;
                         }
                         "get_static_info" => {
-                            let guard = state.static_info.read().await;
+                            let guard = state_inner.global.read().await;
                             let info_json = serde_json::json!({
                                 "type": "static_info",
                                 "data": {
@@ -1642,96 +1541,43 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             let on = cmd.payload.as_ref().and_then(|p| p.as_str()).unwrap_or("0") == "1";
                             AtAction::FlightMode(on)
                         }
-                        _ => {
-                            eprintln!("⚠️ 未知 WS 动作: {}", cmd.action);
+                        unknown_action => {
+                            eprintln!("⚠️ 未知 WebSocket 动作: {:?}", unknown_action);
                             continue;
                         }
                     };
 
-                    if state.actor_tx_high.send(AtRequest { action, resp_tx }).await.is_ok() {
+                    // 将动作通过高优先级通道派发给 Actor
+                    if state_inner.actor_tx_high.send(AtRequest { action, resp_tx }).await.is_ok() {
                         if let Ok(reply) = resp_rx.await {
                             if local_tx.send(reply.to_string()).await.is_err() {
                                 break;
                             }
                         }
                     }
+                } else {
+                    eprintln!("⚠️ WS 收到无法解析的消息: {:?}", text);
                 }
             }
         } => {
-            println!("💬 浏览器主动断开 WebSocket 连接");
+            println!("💬 浏览器主动断开 WebSocket 连接（接收流正常结束）");
         }
     };
 
-    // ★ broadcast_rx drop 时自动递减 receiver_count，无需手动清理
-    println!("🔌 WebSocket 客户端已断开 (当前在线: {})", state.tx.receiver_count());
+    if current_is_active {
+        state.active_views.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    println!(
+        "🔌 WebSocket 客户端已断开 (当前在线: {})",
+        state.tx.receiver_count()
+    );
 }
 
-// ============================================================================
-// 12. 主入口
-// ============================================================================
-
-#[tokio::main]
-async fn main() {
-    let serial_path =
-        env::var("AT_SERIAL_PORT").unwrap_or_else(|_| DEFAULT_SERIAL_PORT.to_string());
-    println!("🔌 串口设备: {}", serial_path);
-
-    // ── 广播通道 ──
-    let (tx, _) = broadcast::channel(100);
-    let (urc_tx, _) = broadcast::channel(50);
-
-    // ── 启动串口 I/O 线程（专用 std::thread，持久 fd）──
-    let serial_io = Arc::new(SerialIo::spawn(&serial_path, urc_tx.clone()));
-
-    // ── 硬件后端 ──
-    let backend: Arc<dyn HardwareBackend> = Arc::new(RealBackend {
-        io: serial_io.clone(),
-    });
-
-    // ── 通信通道 ──
-    let (actor_tx, actor_rx) = mpsc::channel(32);
-    let (actor_tx_high, actor_rx_high) = mpsc::channel(32);
-
-    // ── 应用状态 ──
-    let app_state = Arc::new(AppState {
-        tx: tx.clone(),
-        actor_tx,
-        actor_tx_high,
-        static_info: RwLock::new(StaticDeviceInfo::default()),
-        dynamic: RwLock::new(DynamicTelemetry::default()),
-    });
-
-    // ── 启动时采集静态信息（仅一次）──
-    let static_info = backend.read_static_info().await;
-    *app_state.static_info.write().await = static_info;
-
-    // ── 轮询间隔（可由 URC 动态调整）──
-    let interval_secs = Arc::new(RwLock::new(POLL_INTERVAL_ACTIVE));
-
-    // ── URC 处理任务 ──
-    let urc_rx = urc_tx.subscribe();
-    tokio::spawn({
-        let state = app_state.clone();
-        let interval = interval_secs.clone();
-        urc_handler_task(urc_rx, state, interval)
-    });
-
-    // ── 硬件轮询任务 ──
-    tokio::spawn({
-        let backend = backend.clone();
-        let state = app_state.clone();
-        let interval = interval_secs.clone();
-        async move { hardware_task(actor_rx_high, actor_rx, backend, state, interval).await }
-    });
-
-    // ── HTTP 路由 ──
-    let app = Router::new()
-        .route("/", get(index_handler))
-        .route("/ws", get(ws_handler))
-        .route("/style.css", get(style_handler))
-        .with_state(app_state);
-
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    println!("⚡ 移远 5G 终端 WebUI 服务端已就绪: http://0.0.0.0:3000");
-    axum::serve(listener, app).await.unwrap();
+async fn style_handler() -> impl IntoResponse {
+    static_file_response(
+        include_str!("../templates/style.css"),
+        "text/css; charset=utf-8",
+    )
 }
+

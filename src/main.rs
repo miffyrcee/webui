@@ -132,7 +132,7 @@ impl GlobalTelemetry {
     /// 动态字段仅当解析器返回有效值（非空、非 NA/N/A/--）时才覆盖，
     /// 否则保留上一次的全局值，避免一次 AT 失败就冲掉全部数据。
     /// 静态字段始终从 global 保留。
-    fn from_telemetry_and_global(t: &TelemetryData, g: &GlobalTelemetry) -> Self {
+    fn from_telemetry_and_global(t: &TelemetryData, g: &GlobalTelemetry, uptime: String, updated: String) -> Self {
         fn keep_valid(new: &str, old: &str) -> String {
             if !new.is_empty() && new != "NA" && new != "N/A" && new != "--" {
                 new.to_string()
@@ -167,9 +167,8 @@ impl GlobalTelemetry {
             active_sim: g.active_sim.clone(),
             network_provider: g.network_provider.clone(),
             apn: g.apn.clone(),
-            // uptime/updated 在构造后单独设置
-            uptime: String::new(),
-            updated: String::new(),
+            uptime,
+            updated,
         }
     }
 }
@@ -495,6 +494,20 @@ impl HardwareBackend for RealBackend {
         {
             parse_qcainfo(&qcainfo_resp, &mut telemetry);
         }
+        if let Ok(cpin_resp) =
+            send_at_command_dedup(&self.serial_path, "AT+CPIN?").await
+        {
+            for line in cpin_resp.lines() {
+                let trimmed = line.trim();
+                if let Some(status) = trimmed.strip_prefix("+CPIN:") {
+                    let s = status.trim().trim_matches('"');
+                    if !s.is_empty() {
+                        telemetry.sim_status = s.to_string();
+                    }
+                    break;
+                }
+            }
+        }
         if let Ok(qtemp_resp) = send_at_command_dedup(&self.serial_path, "AT+QTEMP").await {
             if let Some(temp) = parse_qtemp_temperature(&qtemp_resp) {
                 telemetry.temperature = temp;
@@ -533,34 +546,21 @@ impl HardwareBackend for RealBackend {
     async fn read_static_info(&self) -> (String, String, String, String) {
         println!("📋 开始获取静态信息（持久串口连接）...");
 
-        let mut firmware_version = String::new();
+        let firmware_version;
         let mut active_sim = String::new();
         let mut apn = String::new();
 
         println!("📋 [1/4] 获取固件版本 (AT+CGMR)...");
-        if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+CGMR").await {
-            for line in resp.lines() {
-                let trimmed = line.trim();
-                if !trimmed.is_empty()
-                    && !trimmed.contains("OK")
-                    && !trimmed.contains("ERROR")
-                    && !trimmed.starts_with("AT+")
-                {
-                    firmware_version = trimmed.to_string();
-                    break;
-                }
-            }
-        }
-        set_default(&mut firmware_version, "NA");
+        firmware_version = send_at_get_line(&self.serial_path, "AT+CGMR")
+            .await
+            .unwrap_or_else(|| "NA".to_string());
 
         println!("📋 [2/5] 获取 SIM 槽位 (AT+QUIMSLOT?)...");
         if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+QUIMSLOT?").await {
-            for line in resp.lines() {
-                if line.contains("+QUIMSLOT:") {
-                    let parts: Vec<&str> = line.split(':').collect();
-                    if parts.len() >= 2 {
-                        active_sim = format!("SIM {}", parts[1].trim());
-                    }
+            if let Some(line) = resp.lines().find(|l| l.contains("+QUIMSLOT:")) {
+                let parts: Vec<&str> = line.split(':').collect();
+                if parts.len() >= 2 {
+                    active_sim = format!("SIM {}", parts[1].trim());
                 }
             }
         }
@@ -796,7 +796,7 @@ impl AtCommandQueue {
                 let (tx, rx) = oneshot::channel();
                 entry.get_mut().waiters.push(tx);
                 drop(guard);
-                rx.await.unwrap_or(Err("AT命令队列等待被取消".to_string()))
+                rx.await.unwrap_or_else(|_| Err("AT命令队列等待被取消".to_string()))
             }
             Entry::Vacant(entry) => {
                 // 首次请求，我们负责执行
@@ -919,15 +919,15 @@ async fn query_device_bands(serial_path: &str) -> String {
             let parts: Vec<&str> = rest.split(',').map(|s| s.trim().trim_matches('"')).collect();
             // parts[0]=connection_status, parts[1]=rat
             // LTE: band at index 8, NR5G: band at index 9 (extra tac field)
-            let band_idx = if parts.get(1).map(|r| r.contains("NR5G")).unwrap_or(false) { 9 } else { 8 };
+            let band_idx = if parts.get(1).map_or(false, |r| r.contains("NR5G")) { 9 } else { 8 };
             if let Some(band) = parts.get(band_idx) {
                 let b = band.trim();
                 if !b.is_empty() && b != "-" {
-                    if parts.get(1).map(|r| r.contains("NR5G")).unwrap_or(false) {
+                    if parts.get(1).map_or(false, |r| r.contains("NR5G")) {
                         if !nr_bands.contains(&format!("n{}", b)) {
                             nr_bands.push(format!("n{}", b));
                         }
-                    } else if parts.get(1).map(|r| *r == "LTE").unwrap_or(false) {
+                    } else if parts.get(1).map_or(false, |r| *r == "LTE") {
                         if !lte_bands.contains(&format!("B{}", b)) {
                             lte_bands.push(format!("B{}", b));
                         }
@@ -1073,8 +1073,8 @@ async fn hardware_task(
                         if let Some(temp) = components.iter()
                             .find(|c| {
                                 let label = c.label();
-                                label.contains("CPU") || label.contains("cpu")
-                                    || label.contains("Package") || label.contains("package")
+                                let lower = label.to_lowercase();
+                                lower.contains("cpu") || lower.contains("package")
                             })
                             .and_then(|c| c.temperature())
                         {
@@ -1093,15 +1093,12 @@ async fn hardware_task(
 
                     // 合并到全局状态并广播给所有 ws 客户端
                     {
-                        let global = state.global.read().await;
-                        let mut gt = GlobalTelemetry::from_telemetry_and_global(&telemetry, &global);
-                        drop(global);
-
-                        gt.uptime = format!("{} minutes", uptime_sec / 60);
-                        gt.updated = updated_str;
-
                         let mut global = state.global.write().await;
-                        *global = gt;
+                        *global = GlobalTelemetry::from_telemetry_and_global(
+                            &telemetry, &global,
+                            format!("{} minutes", uptime_sec / 60),
+                            updated_str,
+                        );
 
                         if let Ok(json_str) = serde_json::to_string(&*global) {
                             let send_rc = state.tx.receiver_count();

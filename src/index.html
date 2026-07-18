@@ -731,10 +731,7 @@
 
             const output = getDomElement('console_output');
             if (!output) return;
-            const escaped = raw
-                .replace(/&/g, '&')
-                .replace(/</g, '<')
-                .replace(/>/g, '>')
+            const escaped = escapeHtml(raw)
                 .replace(/\n/g, '<br>');
             output.innerHTML += `<div class="text-emerald-300 mt-1">${escaped}</div>`;
             output.scrollTop = output.scrollHeight;

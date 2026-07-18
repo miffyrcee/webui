@@ -432,10 +432,10 @@ pub fn parse_qcainfo(qca_res: &str, telemetry: &mut crate::TelemetryData) {
         telemetry.pci = Some(pcis.join(", "));
     }
 
-    eprintln!(
-        "🔍 QCAINFO parsed: bands={:?} bw={:?} earfcn={:?} pci={:?}",
+    crate::push_log("INFO", "QCAINFO", &format!(
+        "QCAINFO parsed: bands={:?} bw={:?} earfcn={:?} pci={:?}",
         telemetry.bands, telemetry.bandwidth, telemetry.earfcn, telemetry.pci
-    );
+    ));
 }
 
 /// Parse +CGPADDR response and populate TelemetryData

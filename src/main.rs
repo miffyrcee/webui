@@ -334,7 +334,7 @@ impl HardwareBackend for RealBackend {
     }
 
     async fn scan_available_networks(&self) -> Vec<serde_json::Value> {
-        push_log("INFO", "Scan", "🔍 开始网络扫描 (AT+COPS=?, 240s 超时)...");
+        push_log("INFO", "Scan", "开始网络扫描 (AT+COPS=?, 240s 超时)...");
         match send_at_command_inner_with_timeout(
             &self.serial_path,
             "AT+COPS=?",
@@ -531,17 +531,17 @@ impl HardwareBackend for RealBackend {
     }
 
     async fn read_static_info(&self) -> (String, String, String, String) {
-        push_log("INFO", "System", "📋 开始获取静态信息...");
+        push_log("INFO", "System", "开始获取静态信息...");
 
         let firmware_version;
         let mut active_sim = String::new();
 
-        push_log("INFO", "System", "📋 [1/4] 获取固件版本 (AT+CGMR)...");
+        push_log("INFO", "System", "[1/4] 获取固件版本 (AT+CGMR)...");
         firmware_version = send_at_get_line(&self.serial_path, "AT+CGMR")
             .await
             .unwrap_or_else(|| "NA".to_string());
 
-        push_log("INFO", "System", "📋 [2/5] 获取 SIM 槽位 (AT+QUIMSLOT?)...");
+        push_log("INFO", "System", "[2/5] 获取 SIM 槽位 (AT+QUIMSLOT?)...");
         if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+QUIMSLOT?").await {
             if let Some(line) = resp.lines().find(|l| l.contains("+QUIMSLOT:")) {
                 let parts: Vec<&str> = line.split(':').collect();
@@ -554,10 +554,10 @@ impl HardwareBackend for RealBackend {
             active_sim = "NA".to_string();
         }
 
-        push_log("INFO", "System", "📋 [3/5] 获取运营商...");
+        push_log("INFO", "System", "[3/5] 获取运营商...");
         let network_provider = fetch_network_provider(&self.serial_path).await;
 
-        push_log("INFO", "System", "📋 [4/5] 获取 APN (AT+CGCONTRDP)...");
+        push_log("INFO", "System", "[4/5] 获取 APN (AT+CGCONTRDP)...");
         let mut apn = String::new();
         let mut found_apn = false;
         if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+CGCONTRDP").await {
@@ -577,7 +577,7 @@ impl HardwareBackend for RealBackend {
             }
         }
         if !found_apn {
-            push_log("INFO", "System", "📋 [4/5] 回退 AT+CGDCONT? 获取 APN...");
+            push_log("INFO", "System", "[4/5] 回退 AT+CGDCONT? 获取 APN...");
             if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+CGDCONT?").await {
                 for line in resp.lines() {
                     if line.contains("+CGDCONT:") {
@@ -618,7 +618,7 @@ impl HardwareBackend for RealBackend {
             apn = "N/A".to_string();
         }
 
-        push_log("INFO", "System", &format!("📋 静态信息已获取: FW={}, SIM={}, Provider={}, APN={}", firmware_version, active_sim, network_provider, apn));
+        push_log("INFO", "System", &format!("静态信息已获取: FW={}, SIM={}, Provider={}, APN={}", firmware_version, active_sim, network_provider, apn));
 
         (firmware_version, active_sim, network_provider, apn)
     }
@@ -1067,7 +1067,7 @@ async fn handle_at_request(
     match req.action {
         AtAction::ManualAt(cmd) => {
             let cmd = normalize_at_command(&cmd);
-            push_log("INFO", "Actor", &format!("👨‍💻 顺序执行手动 AT: {}", cmd));
+            push_log("INFO", "Actor", &format!("顺序执行手动 AT: {}", cmd));
             let response = backend.exec_raw_at(&cmd).await;
             let _ = req.resp_tx.send(serde_json::json!({ "type": "at_res", "data": response }));
         }
@@ -1077,20 +1077,20 @@ async fn handle_at_request(
             *current_interval_secs = new_secs;
             *interval = tokio::time::interval(Duration::from_secs(*interval_secs));
             interval.tick().await;
-            push_log("INFO", "Settings", &format!("🔄 轮询间隔已调整为 {} 秒", new_secs));
+            push_log("INFO", "Settings", &format!("轮询间隔已调整为 {} 秒", new_secs));
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "settings_log",
                 "data": { "msg": format!("轮询间隔已调整为 {} 秒", new_secs) }
             }));
         }
         AtAction::GetSmsList => {
-            push_log("INFO", "Actor", "📱 读取短信列表...");
+            push_log("INFO", "Actor", "读取短信列表...");
             let resp = backend.read_sms_list().await;
             let decoded = decode_cmgl_body(&resp);
             let _ = req.resp_tx.send(serde_json::json!({ "type": "sms_list", "data": decoded }));
         }
         AtAction::SetApn(apn, user, pass, auth_type) => {
-            push_log("INFO", "Actor", &format!("🌐 配置 APN: {}", apn));
+            push_log("INFO", "Actor", &format!("配置 APN: {}", apn));
             backend.configure_apn(&apn, &user, &pass, auth_type).await;
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "network_status",
@@ -1098,7 +1098,7 @@ async fn handle_at_request(
             }));
         }
         AtAction::SetNetworkMode(mode) => {
-            push_log("INFO", "Actor", &format!("🌐 切换网络模式为: {}", mode));
+            push_log("INFO", "Actor", &format!("切换网络模式为: {}", mode));
             backend.set_network_mode_pref(&mode).await;
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "network_status",
@@ -1106,7 +1106,7 @@ async fn handle_at_request(
             }));
         }
         AtAction::NetConnect(connect) => {
-            push_log("INFO", "Actor", &format!("🌐 拨号控制: {}", if connect { "连接" } else { "断开" }));
+            push_log("INFO", "Actor", &format!("拨号控制: {}", if connect { "连接" } else { "断开" }));
             backend.set_data_session(connect).await;
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "network_status",
@@ -1114,7 +1114,7 @@ async fn handle_at_request(
             }));
         }
         AtAction::NetworkScan => {
-            push_log("INFO", "Actor", "🔍 开始扫描可用网络...");
+            push_log("INFO", "Actor", "开始扫描可用网络...");
             let networks = backend.scan_available_networks().await;
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "scan_result",
@@ -1122,7 +1122,7 @@ async fn handle_at_request(
             }));
         }
         AtAction::SendSms(recipient, message) => {
-            push_log("INFO", "Actor", &format!("📱 发送短信至: {}", recipient));
+            push_log("INFO", "Actor", &format!("发送短信至: {}", recipient));
             let success = backend.send_sms_msg(&recipient, &message).await;
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "sms_sent",
@@ -1130,7 +1130,7 @@ async fn handle_at_request(
             }));
         }
         AtAction::GetDeviceInfo => {
-            push_log("INFO", "Actor", "📱 获取设备详细信息...");
+            push_log("INFO", "Actor", "获取设备详细信息...");
             let info = backend.read_device_info().await;
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "device_info",
@@ -1157,7 +1157,7 @@ async fn handle_at_request(
             }));
         }
         AtAction::Reboot => {
-            push_log("WARN", "System", "🔄 重启模组指令已下发");
+            push_log("WARN", "System", "重启模组指令已下发");
             backend.send_reboot().await;
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "settings_log",
@@ -1209,6 +1209,9 @@ async fn hardware_task(
                 let active = state.active_views.load(Ordering::Relaxed) > 0;
 
                 if active && get_at_lock().try_lock().is_ok() {
+                    // try_lock 仅用于非阻塞检测串口是否空闲（无手动 AT 命令正在执行）。
+                    // MutexGuard 在 is_ok() 后立即释放，因此轮询周期不持有 AT 互斥锁。
+                    // 串行化由 Actor 通道（command_tx）保证，无需在此持有锁。
                     let start_poll = std::time::Instant::now();
                     let mut telemetry = backend.poll_telemetry().await;
 
@@ -1281,7 +1284,7 @@ async fn hardware_task(
                     broadcast_state(&state, &global);
 
                 } else {
-                    push_log("INFO", "Poll", "💤 硬件轮询处于空闲模式 (无活跃视图)");
+                    push_log("INFO", "Poll", "硬件轮询处于空闲模式 (无活跃视图)");
                 }
 
                 let next_secs = if active { interval_secs } else { IDLE_INTERVAL_SECS };
@@ -1299,7 +1302,7 @@ async fn hardware_task(
 async fn main() {
     let serial_path =
         env::var("AT_SERIAL_PORT").unwrap_or_else(|_| DEFAULT_SERIAL_PORT.to_string());
-    push_log("INFO", "System", &format!("🔌 正在初始化串口设备: {}", serial_path));
+    push_log("INFO", "System", &format!("正在初始化串口设备: {}", serial_path));
 
     let (tx, _) = broadcast::channel(100);
     let (command_tx, command_rx) = mpsc::channel(32);
@@ -1346,7 +1349,7 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) ->
 async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     let mut broadcast_rx = state.tx.subscribe();
     let online_count = state.tx.receiver_count();
-    push_log("INFO", "WS", &format!("🔌 新的 WebSocket 客户端已连接 (当前在线: {})", online_count));
+    push_log("INFO", "WS", &format!("新的 WebSocket 客户端已连接 (当前在线: {})", online_count));
 
     state.active_views.fetch_add(1, Ordering::SeqCst);
     let mut current_is_active = true;
@@ -1396,7 +1399,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                 }
             }
         } => {
-            push_log("WARN", "WS", "💬 WebSocket 发送通道中断，准备断开连接");
+            push_log("WARN", "WS", "WebSocket 发送通道中断，准备断开连接");
         },
 
         _ = async {
@@ -1511,7 +1514,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
         state.active_views.fetch_sub(1, Ordering::SeqCst);
     }
 
-    push_log("INFO", "WS", &format!("🔌 WebSocket 客户端已断开 (当前在线: {})", state.tx.receiver_count()));
+    push_log("INFO", "WS", &format!("WebSocket 客户端已断开 (当前在线: {})", state.tx.receiver_count()));
 }
 
 async fn style_handler() -> impl IntoResponse {

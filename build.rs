@@ -6,7 +6,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/input.css");
 
     if let Err(e) = fs::create_dir_all("./templates") {
-        panic!("🚨 无法创建 templates 目录: {}", e);
+        panic!("无法创建 templates 目录: {}", e);
     }
 
     let npx_cmd = if cfg!(target_os = "windows") {
@@ -43,7 +43,7 @@ fn main() {
 
             if fallback_status.is_err() || !fallback_status.unwrap().success() {
                 panic!(
-                    "🚨 Tailwind CSS 编译失败。请确保执行了 `npm install -D @tailwindcss/cli` 安装 v4 编译器。"
+                    "Tailwind CSS 编译失败。请确保执行了 `npm install -D @tailwindcss/cli` 安装 v4 编译器。"
                 );
             }
         }

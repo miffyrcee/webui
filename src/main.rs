@@ -1209,9 +1209,6 @@ async fn hardware_task(
                 let active = state.active_views.load(Ordering::Relaxed) > 0;
 
                 if active && get_at_lock().try_lock().is_ok() {
-                    // try_lock 仅用于非阻塞检测串口是否空闲（无手动 AT 命令正在执行）。
-                    // MutexGuard 在 is_ok() 后立即释放，因此轮询周期不持有 AT 互斥锁。
-                    // 串行化由 Actor 通道（command_tx）保证，无需在此持有锁。
                     let start_poll = std::time::Instant::now();
                     let mut telemetry = backend.poll_telemetry().await;
 

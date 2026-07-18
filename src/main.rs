@@ -810,41 +810,51 @@ async fn send_at_command_inner_with_timeout(
 ) -> Result<String, String> {
     let start = std::time::Instant::now();
 
-    // 使用独立作用域将 LLD 进程的拉起和阻塞等待完全包裹起来
-    let raw = {
-        let _lock = get_at_lock().lock().await;
-        let _file_lock = acquire_serial_lock().await?;
+    let _lock = get_at_lock().lock().await;
+    let _file_lock = acquire_serial_lock().await?;
 
-        let child = tokio::process::Command::new("/opt/atcmd_rs")
-            .arg("-p").arg(serial_path).arg(cmd)
-            .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped())
-            .kill_on_drop(true).spawn().map_err(|e| format!("atcmd_rs启动失败: {}", e))?;
+    let child = tokio::process::Command::new("/opt/atcmd_rs")
+        .arg("-p")
+        .arg(serial_path)
+        .arg(cmd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("atcmd_rs启动失败: {}", e))?;
 
-        let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
-            Ok(Ok(output)) => output,
-            Ok(Err(e)) => return Err(format!("atcmd_rs执行失败: {}", e)),
-            Err(_) => return Err(format!("AT命令超时: {}", cmd)),
-        };
-
-        if !output.status.success() {
-            return Err(format!("atcmd_rs失败: {}", String::from_utf8_lossy(&output.stderr).trim()));
-        }
-
-        String::from_utf8_lossy(&output.stdout).into_owned()
-        // 此作用域结束：_lock 和 _file_lock 会在此处准时 Drop 释放，即使后续调用 push_log 发生耗时，也不会占着锁！
+    let output = match tokio::time::timeout(timeout, child.wait_with_output()).await
+    {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => return Err(format!("atcmd_rs执行失败: {}", e)),
+        Err(_) => return Err(format!("AT命令超时({}s): {}", timeout.as_secs(), cmd)),
     };
 
-    let elapsed = start.elapsed();
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "atcmd_rs失败 (exit={}): {}",
+            output.status,
+            stderr.trim()
+        ));
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout).into_owned();
+
     if raw.contains("ERROR") || raw.contains("+CME ERROR:") {
-        push_log("WARN", "AT", &format!("{} 返回 ERROR ({}ms)", cmd, elapsed.as_millis()));
+        let elapsed = start.elapsed();
+        push_log("WARN", "AT", &format!("[AT] {} 返回 ERROR ({}ms)", cmd, elapsed.as_millis()));
         return Err(format!("AT命令返回错误: {}", raw.trim()));
     }
 
-    let preview = raw.lines().find(|l| {
-        let t = l.trim();
-        !t.is_empty() && !t.starts_with("AT+")
-    }).unwrap_or(&raw);
-
+    let elapsed = start.elapsed();
+    let preview = raw
+        .lines()
+        .find(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with("AT+")
+        })
+        .unwrap_or(&raw);
     push_log("INFO", "AT", &format!("{} 成功 ({}ms): {}", cmd, elapsed.as_millis(), preview.trim()));
     Ok(raw)
 }

@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/style.css">
 </head>
 
-<body class="bg-brandBg text-white font-sans min-h-full p-4 md:p-8 select-none transition-all duration-300">
+<body class="bg-brandBg text-white font-sans min-h-full p-4 md:p-8 transition-all duration-300">
 
     <div id="main_container" class="max-w-7xl mx-auto space-y-6 transition-all duration-300">
 
@@ -499,6 +499,11 @@
 
     </div>
 
+    <!-- 复制成功提示 -->
+    <div id="copy_toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-sm px-4 py-2 rounded-lg shadow-xl transition-all duration-300 opacity-0 translate-y-4 pointer-events-none z-50">
+        已复制到剪贴板
+    </div>
+
     <script>
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -838,6 +843,84 @@
             updateProgressBar("sinr", p.sinr);
         }
 
+        function copyToClipboard(text) {
+            if (!text || text === '--') return false;
+            // 使用 Clipboard API
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).catch(() => {
+                    fallbackCopy(text);
+                });
+            } else {
+                fallbackCopy(text);
+            }
+            return true;
+        }
+
+        function fallbackCopy(text) {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            ta.style.top = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); } catch (e) {}
+            document.body.removeChild(ta);
+        }
+
+        let copyToastTimer = null;
+
+        function showCopyToast(label) {
+            const toast = getDomElement('copy_toast');
+            if (!toast) return;
+            if (copyToastTimer) clearTimeout(copyToastTimer);
+            toast.textContent = label ? `已复制: ${label}` : '已复制到剪贴板';
+            toast.classList.remove('opacity-0', 'translate-y-4');
+            toast.classList.add('opacity-100', 'translate-y-0');
+            copyToastTimer = setTimeout(() => {
+                toast.classList.remove('opacity-100', 'translate-y-0');
+                toast.classList.add('opacity-0', 'translate-y-4');
+            }, 2000);
+        }
+
+        function initCopyOnClick() {
+            // 需要支持双击复制的元素 ID 列表
+            const copyableIds = [
+                'info_sim', 'info_provider', 'info_mccmnc', 'info_apn',
+                'info_mode', 'info_bands', 'info_bandwidth', 'info_earfcn',
+                'info_pci', 'info_ipv4', 'info_ipv6', 'info_uptime',
+                'sig_assessment', 'sig_traffic', 'sig_cell_id', 'sig_enb', 'sig_tac',
+                'net_conn_status', 'net_current_apn', 'net_ipv4', 'net_ipv6',
+                'dev_manufacturer', 'dev_model', 'dev_firmware', 'dev_imei',
+                'dev_serial', 'dev_hw_ver', 'dev_type',
+                'dev_sim_status', 'dev_imsi', 'dev_iccid', 'dev_phone',
+                'dev_net_status', 'dev_signal', 'dev_temp',
+                'dev_bands', 'dev_rate', 'dev_volte', 'dev_gnss',
+                'rsrq_val', 'rsrp_val', 'sinr_val'
+            ];
+
+            copyableIds.forEach(id => {
+                const el = getDomElement(id);
+                if (!el) return;
+                // 添加可点击样式和光标
+                el.classList.add('cursor-pointer', 'hover:text-emerald-400', 'transition-colors', 'duration-200');
+                el.title = el.title || '点击复制';
+
+                el.addEventListener('click', () => {
+                    // 对进度条数值元素特殊处理：只复制数值部分
+                    let text = '';
+                    if (id.endsWith('_val')) {
+                        text = el.innerText.split('/')[0].trim();
+                    } else {
+                        text = el.innerText;
+                    }
+                    if (copyToClipboard(text)) {
+                        showCopyToast(text.length > 20 ? text.substring(0, 20) + '...' : text);
+                    }
+                });
+            });
+        }
+
         function updateProgressBar(idPrefix, valueString) {
             const barElement = getDomElement(`${idPrefix}_bar`);
             const valElement = getDomElement(`${idPrefix}_val`);
@@ -1114,6 +1197,7 @@
         initSettingsPanel();
         initSmsPanel();
         initDevicePanel();
+        initCopyOnClick();
     </script>
 </body>
 

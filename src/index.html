@@ -8,16 +8,16 @@
     <link rel="stylesheet" href="/style.css">
 </head>
 
-<body class="bg-brandBg text-white font-sans min-h-full p-4 md:p-8">
+<body class="bg-brandBg text-white font-sans min-h-full p-4 md:p-8 select-none transition-all duration-300">
 
-    <div class="max-w-7xl mx-auto space-y-6">
+    <div id="main_container" class="max-w-7xl mx-auto space-y-6 transition-all duration-300">
 
         <!-- 头部标题区 -->
         <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-brandBorder gap-2">
             <div class="flex items-center space-x-3">
-                <div class="relative">
+                <div class="relative flex items-center">
                     <span class="text-xl font-bold tracking-wider text-emerald-500">QUECTEL RM520N</span>
-                    <div id="ws_status_dot" class="absolute -top-1 -right-2 w-2 h-2 bg-red-500 rounded-full border border-brandBg transition-colors duration-300"></div>
+                    <div id="ws_status_dot" class="ml-3 w-2.5 h-2.5 bg-red-500 rounded-full transition-all duration-500 shadow-lg shadow-red-500/50"></div>
                 </div>
                 <span class="hidden sm:inline-block text-xs bg-slate-800 text-slate-400 px-2 py-1 rounded uppercase tracking-tighter">5G NR SA/NSA</span>
             </div>
@@ -50,21 +50,19 @@
             <!-- 1. 顶部四大指标卡片 -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
-                <div
-                    class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
+                <div class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
                     <div class="flex justify-center items-center">
                         <svg class="w-12 h-12 text-amber-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2V5a3 3 0 116 0v14zm0 0h6m-6-4h6m-6-4h4m-4-4h4"></path>
                         </svg>
                     </div>
                     <div class="text-center mt-2">
-                        <span id="temp" class="text-3xl font-semibold font-mono group-hover:text-amber-400 transition-colors">-- °C</span>
+                        <span id="temp" class="text-3xl font-semibold font-mono group-hover:text-amber-400 transition-colors">--</span>
                     </div>
                     <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">Temperature</div>
                 </div>
 
-                <div
-                    class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
+                <div class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
                     <div class="flex justify-center items-center">
                         <svg class="w-12 h-12 text-purple-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                             <rect x="5" y="3" width="14" height="18" rx="2" stroke-linejoin="round"></rect>
@@ -77,8 +75,7 @@
                     <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">SIM Status</div>
                 </div>
 
-                <div
-                    class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
+                <div class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
                     <div class="flex justify-center items-center">
                         <svg class="w-12 h-12 text-blue-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M18 10h.01M15 13h.01M12 16h.01M9 19h.01M21 6h.01"></path>
@@ -86,13 +83,12 @@
                         </svg>
                     </div>
                     <div class="text-center mt-2">
-                        <span id="signal_pct" class="text-3xl font-semibold font-mono group-hover:text-blue-400 transition-colors">--%</span>
+                        <span id="signal_pct" class="text-3xl font-semibold font-mono group-hover:text-blue-400 transition-colors">--</span>
                     </div>
                     <div class="text-xs text-center text-brandMuted border-t border-brandBorder/40 pt-2 mt-2">Signal Percentage</div>
                 </div>
 
-                <div
-                    class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
+                <div class="bg-brandCard/50 backdrop-blur-md border border-brandBorder rounded-xl p-6 flex flex-col justify-between min-h-[160px] shadow-md hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
                     <div class="flex justify-center items-center">
                         <svg class="w-12 h-12 text-teal-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path>
@@ -411,7 +407,7 @@
             </div>
         </div>
 
-        <!-- Console 面板 (原 AT Terminal) -->
+        <!-- Console 面板 -->
         <div id="panel_console" class="hidden space-y-4">
             <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden min-h-[500px]">
                 <div class="p-4 border-b border-brandBorder">
@@ -510,10 +506,8 @@
         let isVisible = true;
         let currentTab = 'dashboard';
 
-        // All tab IDs in order
         const allTabs = ['dashboard', 'network', 'scan', 'settings', 'sms', 'console', 'device'];
 
-        // DOM cache
         const domElements = {};
         function getDomElement(id) {
             if (!domElements[id]) {
@@ -522,14 +516,16 @@
             return domElements[id];
         }
 
+        // 安全的文本渲染：当值为 null/undefined 时自动转换成占位符 '--'，避免产生 literal 文本 'null'
         function updateText(id, value) {
             const el = getDomElement(id);
-            if (el && el.innerText !== value) {
-                el.innerText = value;
+            if (!el) return;
+            const textValue = (value === null || value === undefined) ? "--" : value;
+            if (el.innerText !== textValue) {
+                el.innerText = textValue;
             }
         }
 
-        // Tab switching — generic for all tabs
         function switchTab(tab) {
             currentTab = tab;
             allTabs.forEach(t => {
@@ -547,7 +543,6 @@
                 }
             });
 
-            // Request full device info when switching to device tab
             if (tab === 'device' && socket && socket.readyState === WebSocket.OPEN) {
                 sendWsCommand('get_device_info');
             }
@@ -561,18 +556,34 @@
             }
         }
 
+        function handleConnectionState(connected) {
+            const dot = getDomElement("ws_status_dot");
+            const container = getDomElement("main_container");
+            if (connected) {
+                if (dot) {
+                    dot.className = "ml-3 w-2.5 h-2.5 bg-emerald-500 rounded-full shadow-lg shadow-emerald-500/50 animate-pulse";
+                }
+                if (container) {
+                    container.classList.remove("opacity-60", "pointer-events-none");
+                }
+                updateText('settings_ws_status', 'Connected');
+            } else {
+                if (dot) {
+                    dot.className = "ml-3 w-2.5 h-2.5 bg-red-500 rounded-full shadow-lg shadow-red-500/50 animate-ping";
+                }
+                if (container) {
+                    container.classList.add("opacity-60", "pointer-events-none");
+                }
+                updateText('settings_ws_status', 'Disconnected');
+            }
+        }
+
         function connectWs() {
             socket = new WebSocket(wsUrl);
 
             socket.onopen = () => {
                 console.log("WebSocket connected.");
-                const dot = getDomElement("ws_status_dot");
-                if (dot) {
-                    dot.classList.remove('bg-red-500');
-                    dot.classList.add('bg-emerald-500', 'animate-pulse');
-                }
-                updateText('settings_ws_status', 'Connected');
-                // Request static info on connect
+                handleConnectionState(true);
                 socket.send(JSON.stringify({ action: "get_static_info" }));
             };
 
@@ -593,9 +604,9 @@
                         handleDeviceInfo(data.data);
                     } else if (data.type === "settings_info") {
                         handleSettingsInfo(data.data);
-                    } else if (data.type === "realtime" || data.update_type === "full" || data.update_type === "delta") {
+                    } else if (data.update_type === "full" || data.update_type === "delta") {
                         const payload = data.data || data;
-                        if (data.update_type === "full" || data.update_type === "realtime" || !data.update_type) {
+                        if (data.update_type === "full" || !data.update_type) {
                             telemetryCache = { ...payload };
                         } else {
                             Object.assign(telemetryCache, payload);
@@ -609,35 +620,24 @@
 
             socket.onclose = () => {
                 console.warn("WebSocket disconnected. Retrying in 3 seconds...");
-                const dot = getDomElement("ws_status_dot");
-                if (dot) {
-                    dot.classList.remove('bg-emerald-500', 'animate-pulse');
-                    dot.classList.add('bg-red-500');
-                }
-                updateText('settings_ws_status', 'Disconnected');
+                handleConnectionState(false);
                 setTimeout(connectWs, 3000);
             };
 
             socket.onerror = () => {
-                const dot = getDomElement("ws_status_dot");
-                if (dot) {
-                    dot.classList.remove('bg-emerald-500', 'animate-pulse');
-                    dot.classList.add('bg-red-500');
-                }
-                updateText('settings_ws_status', 'Error');
+                handleConnectionState(false);
                 socket.close();
             };
         }
 
         function handleStaticInfo(data) {
-            updateText("firmware_ver", data.firmware_version || "--");
-            updateText("info_sim", data.active_sim || "--");
-            updateText("info_provider", data.network_provider || "--");
-            updateText("info_apn", data.apn || "--");
+            updateText("firmware_ver", data.firmware_version);
+            updateText("info_sim", data.active_sim);
+            updateText("info_provider", data.network_provider);
+            updateText("info_apn", data.apn);
 
-            // Device info tab
-            updateText("dev_firmware", data.firmware_version || "--");
-            updateText("dev_sim_status", data.active_sim || "--");
+            updateText("dev_firmware", data.firmware_version);
+            updateText("dev_sim_status", data.active_sim);
         }
 
         function decodeUcs2Hex(hex) {
@@ -657,7 +657,6 @@
         }
 
         function handleAtResponse(raw) {
-            // If this is an SMS list response (+CMGL:), parse it into the SMS inbox
             if (raw.includes('+CMGL:')) {
                 const messages = [];
                 const lines = raw.split('\n');
@@ -665,13 +664,11 @@
                 while (i < lines.length) {
                     const line = lines[i].trim();
                     if (line.startsWith('+CMGL:')) {
-                        // +CMGL: <index>,<stat>,<oa/da>,[<alpha>],[<scts>][,<tooa/toda>,<length>]
-                        const header = line.substring(6); // remove "+CMGL: "
+                        const header = line.substring(6);
                         const parts = header.split(',').map(s => s.trim().replace(/^"|"$/g, ''));
                         const stat = parts[1] || '';
                         const sender = parts[2] || 'Unknown';
                         const timestamp = parts[4] || '';
-                        // Next line(s) contain the message body
                         i++;
                         let text = '';
                         while (i < lines.length && !lines[i].trim().startsWith('+CMGL:') && lines[i].trim() !== 'OK' && lines[i].trim() !== '') {
@@ -692,7 +689,6 @@
                 return;
             }
 
-            // Otherwise display in console
             const output = getDomElement('console_output');
             if (!output) return;
             const escaped = raw
@@ -705,10 +701,10 @@
         }
 
         function handleNetworkStatus(data) {
-            updateText("net_conn_status", data.status || "--");
-            updateText("net_current_apn", data.apn || "--");
-            updateText("net_ipv4", data.ipv4 || "--");
-            updateText("net_ipv6", data.ipv6 || "--");
+            updateText("net_conn_status", data.status);
+            updateText("net_current_apn", data.apn);
+            updateText("net_ipv4", data.ipv4);
+            updateText("net_ipv6", data.ipv6);
         }
 
         function handleScanResult(data) {
@@ -736,7 +732,6 @@
                     if (status) status.innerText = `Scan complete. Found ${data.networks.length} network(s).`;
                 }
             }
-            // Restore scan button
             const btnText = getDomElement('scan_btn_text');
             const scanBtn = getDomElement('scan_start_btn');
             if (btnText) btnText.innerText = 'Start Scan';
@@ -764,29 +759,29 @@
         }
 
         function handleDeviceInfo(data) {
-            updateText("dev_manufacturer", data.manufacturer || "--");
-            updateText("dev_model", data.model || "--");
-            updateText("dev_firmware", data.firmware_version || "--");
-            updateText("dev_imei", data.imei || "--");
-            updateText("dev_serial", data.serial || "--");
-            updateText("dev_hw_ver", data.hw_version || "--");
-            updateText("dev_type", data.module_type || "--");
-            updateText("dev_sim_status", data.sim_status || "--");
-            updateText("dev_imsi", data.imsi || "--");
-            updateText("dev_iccid", data.iccid || "--");
-            updateText("dev_phone", data.phone || "--");
-            updateText("dev_net_status", data.net_status || "--");
-            updateText("dev_signal", data.signal || "--");
-            updateText("dev_temp", data.temperature || "--");
-            updateText("dev_bands", data.bands || "--");
-            updateText("dev_rate", data.max_rate || "--");
-            updateText("dev_volte", data.volte || "--");
-            updateText("dev_gnss", data.gnss || "--");
+            updateText("dev_manufacturer", data.manufacturer);
+            updateText("dev_model", data.model);
+            updateText("dev_firmware", data.firmware_version);
+            updateText("dev_imei", data.imei);
+            updateText("dev_serial", data.serial);
+            updateText("dev_hw_ver", data.hw_version);
+            updateText("dev_type", data.module_type);
+            updateText("dev_sim_status", data.sim_status);
+            updateText("dev_imsi", data.imsi);
+            updateText("dev_iccid", data.iccid);
+            updateText("dev_phone", data.phone);
+            updateText("dev_net_status", data.net_status);
+            updateText("dev_signal", data.signal);
+            updateText("dev_temp", data.temperature);
+            updateText("dev_bands", data.bands);
+            updateText("dev_rate", data.max_rate);
+            updateText("dev_volte", data.volte);
+            updateText("dev_gnss", data.gnss);
         }
 
         function handleSettingsInfo(data) {
-            updateText("settings_port", data.serial_port || "--");
-            updateText("settings_views", data.active_views || "--");
+            updateText("settings_port", data.serial_port);
+            updateText("settings_views", data.active_views);
             if (data.interval) {
                 const input = getDomElement('settings_interval');
                 if (input) input.value = data.interval;
@@ -798,38 +793,36 @@
         function updateUI() {
             const p = telemetryCache;
 
-            updateText("temp", p.temperature || "-- °C");
-            updateText("sim_status", p.sim_status || "--");
-            updateText("signal_pct", p.signal_percentage || "--%");
-            updateText("conn_status", p.internet_connection || "--");
+            updateText("temp", p.temperature);
+            updateText("sim_status", p.sim_status);
+            updateText("signal_pct", p.signal_percentage);
+            updateText("conn_status", p.internet_connection);
 
-            updateText("info_sim", p.active_sim || "--");
-            updateText("info_provider", p.network_provider || "--");
-            updateText("info_mccmnc", p.mccmnc || "--");
-            updateText("info_apn", p.apn || "--");
-            updateText("info_mode", p.network_mode || "--");
-            updateText("info_bands", p.bands || "--");
-            updateText("info_bandwidth", p.bandwidth || "--");
-            updateText("info_earfcn", p.earfcn || "--");
-            updateText("info_pci", p.pci || "--");
-            updateText("info_ipv4", p.ipv4 || "--");
-            updateText("info_ipv6", p.ipv6 || "--");
-            updateText("info_uptime", p.uptime || "--");
+            updateText("info_sim", p.active_sim);
+            updateText("info_provider", p.network_provider);
+            updateText("info_mccmnc", p.mccmnc);
+            updateText("info_apn", p.apn);
+            updateText("info_mode", p.network_mode);
+            updateText("info_bands", p.bands);
+            updateText("info_bandwidth", p.bandwidth);
+            updateText("info_earfcn", p.earfcn);
+            updateText("info_pci", p.pci);
+            updateText("info_ipv4", p.ipv4);
+            updateText("info_ipv6", p.ipv6);
+            updateText("info_uptime", p.uptime);
 
-            updateText("sig_assessment", p.assessment || "--");
-            updateText("sig_traffic", p.traffic_stats || "--");
-            updateText("sig_cell_id", p.cell_id || "--");
-            updateText("sig_enb", p.enb_id || "--");
-            updateText("sig_tac", p.tac || "--");
+            updateText("sig_assessment", p.assessment);
+            updateText("sig_traffic", p.traffic_stats);
+            updateText("sig_cell_id", p.cell_id);
+            updateText("sig_enb", p.enb_id);
+            updateText("sig_tac", p.tac);
 
-            // Network panel updates
-            updateText("net_conn_status", p.internet_connection || "--");
-            updateText("net_current_apn", p.apn || "--");
-            updateText("net_ipv4", p.ipv4 || "--");
-            updateText("net_ipv6", p.ipv6 || "--");
+            updateText("net_conn_status", p.internet_connection);
+            updateText("net_current_apn", p.apn);
+            updateText("net_ipv4", p.ipv4);
+            updateText("net_ipv6", p.ipv6);
 
-            // Settings panel updates
-            updateText("settings_port", p.serial_port || "--");
+            updateText("settings_port", p.serial_port);
 
             if (p.updated && p.updated.trim() !== "") {
                 updateText("last_updated", p.updated);
@@ -873,7 +866,6 @@
             }
         }
 
-        // ── Console (AT Terminal) functions ──
         function sendAtCommand(cmd) {
             if (!cmd || !cmd.trim()) return;
             const output = getDomElement('console_output');
@@ -926,7 +918,6 @@
             }
         }
 
-        // ── Network panel functions ──
         function initNetworkPanel() {
             const applyBtn = getDomElement('net_apply_btn');
             if (applyBtn) {
@@ -970,7 +961,6 @@
             }
         }
 
-        // ── Scan panel functions ──
         function initScanPanel() {
             const scanBtn = getDomElement('scan_start_btn');
             if (scanBtn) {
@@ -985,7 +975,6 @@
             }
         }
 
-        // ── Settings panel functions ──
         function appendSettingsLog(msg) {
             const log = getDomElement('settings_log');
             if (log) {
@@ -1021,7 +1010,7 @@
             const resetBtn = getDomElement('settings_reset_btn');
             if (resetBtn) {
                 resetBtn.addEventListener('click', () => {
-                    if (confirm('⚠️ This will factory reset the module. Are you sure?')) {
+                    if (confirm('This will factory reset the module. Are you sure?')) {
                         sendWsCommand('factory_reset');
                         appendSettingsLog('Factory reset command sent.');
                     }
@@ -1045,7 +1034,6 @@
             }
         }
 
-        // ── SMS panel functions ──
         function initSmsPanel() {
             const sendBtn = getDomElement('sms_send_btn');
             if (sendBtn) {
@@ -1059,7 +1047,6 @@
                     }
                     sendWsCommand('send_sms', { recipient, message });
                     if (status) status.innerHTML = '<span class="text-emerald-400">Sending...</span>';
-                    // Clear message after send
                     const msgInput = getDomElement('sms_message');
                     if (msgInput) msgInput.value = '';
                     const counter = getDomElement('sms_char_count');
@@ -1084,7 +1071,6 @@
             }
         }
 
-        // ── Device Info panel functions ──
         function initDevicePanel() {
             const refreshBtn = getDomElement('dev_refresh_btn');
             if (refreshBtn) {
@@ -1094,7 +1080,6 @@
             }
         }
 
-        // ── Interval setter (Dashboard) ──
         function initIntervalSetter() {
             const select = getDomElement('refreshRateSelect');
             const btn = getDomElement('setRefreshBtn');
@@ -1108,7 +1093,6 @@
             });
         }
 
-        // ── Visibility handler ──
         function initVisibilityHandler() {
             document.addEventListener('visibilitychange', () => {
                 isVisible = !document.hidden;
@@ -1121,7 +1105,6 @@
             });
         }
 
-        // ── Initialize everything ──
         connectWs();
         initIntervalSetter();
         initVisibilityHandler();

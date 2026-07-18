@@ -302,15 +302,15 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
     // Use first line (PCC/main carrier) for base fields
     let pcc = &serving_cells[0];
 
-    telemetry.network_mode = format!("{} {}", pcc.rat, pcc.opmode);
-    telemetry.mccmnc = format!("{}{}", pcc.mcc, pcc.mnc);
-    telemetry.cell_id = pcc.cell_id.clone();
+    telemetry.network_mode = Some(format!("{} {}", pcc.rat, pcc.opmode));
+    telemetry.mccmnc = Some(format!("{}{}", pcc.mcc, pcc.mnc));
+    telemetry.cell_id = Some(pcc.cell_id.clone());
     if pcc.cell_id.len() >= 6 {
-        telemetry.enb_id = pcc.cell_id[..pcc.cell_id.len() - 3].to_string();
+        telemetry.enb_id = Some(pcc.cell_id[..pcc.cell_id.len() - 3].to_string());
     } else {
-        telemetry.enb_id = pcc.cell_id.clone();
+        telemetry.enb_id = Some(pcc.cell_id.clone());
     }
-    telemetry.tac = pcc.tac.clone();
+    telemetry.tac = Some(pcc.tac.clone());
 
     // Signal metrics
     let rsrp: i32 = pcc.rsrp.parse().unwrap_or(-140);
@@ -321,17 +321,17 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
     let rsrq_pct = ((rsrq + 20) as f32 / 17.0 * 100.0).clamp(0.0, 100.0) as i32;
     let sinr_pct = ((sinr + 20) as f32 / 50.0 * 100.0).clamp(0.0, 100.0) as i32;
 
-    telemetry.assessment = if rsrp > -80 && sinr > 20 {
+    telemetry.assessment = Some(if rsrp > -80 && sinr > 20 {
         "Excellent"
     } else {
         "Good"
     }
-    .to_string();
+    .to_string());
 
-    telemetry.ss_rsrp = format!("{} / {}%", rsrp, rsrp_pct);
-    telemetry.ss_rsrq = format!("{} / {}%", rsrq, rsrq_pct);
-    telemetry.sinr = format!("{} / {}%", sinr, sinr_pct);
-    telemetry.signal_percentage = format!("{}%", rsrp_pct);
+    telemetry.ss_rsrp = Some(format!("{} / {}%", rsrp, rsrp_pct));
+    telemetry.ss_rsrq = Some(format!("{} / {}%", rsrq, rsrq_pct));
+    telemetry.sinr = Some(format!("{} / {}%", sinr, sinr_pct));
+    telemetry.signal_percentage = Some(format!("{}%", rsrp_pct));
 
     // Carrier aggregation: process multiple lines
     if serving_cells.len() > 1 {
@@ -343,7 +343,7 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
                 bands.push(band);
             }
         }
-        telemetry.bands = bands.join(", ");
+        telemetry.bands = Some(bands.join(", "));
 
         // Bandwidth: sum all CC bandwidths
         let mut total_bw = 0i32;
@@ -355,21 +355,21 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
             }
         }
         if !bw_parts.is_empty() {
-            telemetry.bandwidth = format!("NR {} MHz ({})", total_bw, bw_parts.join("+"));
+            telemetry.bandwidth = Some(format!("NR {} MHz ({})", total_bw, bw_parts.join("+")));
         }
 
         // EARFCN / PCI: comma-joined
         let earfcns: Vec<&str> = serving_cells.iter().map(|c| c.earfcn.as_str()).collect();
-        telemetry.earfcn = earfcns.join(", ");
+        telemetry.earfcn = Some(earfcns.join(", "));
 
         let pcis: Vec<&str> = serving_cells.iter().map(|c| c.pci.as_str()).collect();
-        telemetry.pci = pcis.join(", ");
+        telemetry.pci = Some(pcis.join(", "));
     } else {
         // Single carrier
-        telemetry.bands = format!("NR5G BAND {}", pcc.band);
-        telemetry.bandwidth = format!("{} MHz", pcc.bandwidth);
-        telemetry.earfcn = pcc.earfcn.clone();
-        telemetry.pci = pcc.pci.clone();
+        telemetry.bands = Some(format!("NR5G BAND {}", pcc.band));
+        telemetry.bandwidth = Some(format!("{} MHz", pcc.bandwidth));
+        telemetry.earfcn = Some(pcc.earfcn.clone());
+        telemetry.pci = Some(pcc.pci.clone());
     }
 }
 
@@ -420,20 +420,20 @@ pub fn parse_qcainfo(qca_res: &str, telemetry: &mut crate::TelemetryData) {
     }
 
     if !bands.is_empty() {
-        telemetry.bands = bands.join(", ");
+        telemetry.bands = Some(bands.join(", "));
     }
     if !bw_parts.is_empty() {
-        telemetry.bandwidth = format!("NR {} MHz ({})", total_bw, bw_parts.join("+"));
+        telemetry.bandwidth = Some(format!("NR {} MHz ({})", total_bw, bw_parts.join("+")));
     }
     if !earfcns.is_empty() {
-        telemetry.earfcn = earfcns.join(", ");
+        telemetry.earfcn = Some(earfcns.join(", "));
     }
     if !pcis.is_empty() {
-        telemetry.pci = pcis.join(", ");
+        telemetry.pci = Some(pcis.join(", "));
     }
 
     eprintln!(
-        "🔍 QCAINFO parsed: bands={} bw={} earfcn={} pci={}",
+        "🔍 QCAINFO parsed: bands={:?} bw={:?} earfcn={:?} pci={:?}",
         telemetry.bands, telemetry.bandwidth, telemetry.earfcn, telemetry.pci
     );
 }
@@ -451,25 +451,20 @@ pub fn parse_cgpaddr(gpad_res: &str, telemetry: &mut crate::TelemetryData) {
             if !ipv4.is_empty()
                 && ipv4 != "0.0.0.0"
                 && is_valid_ipv4(&ipv4)
-                && telemetry.ipv4.is_empty()
+                && telemetry.ipv4.is_none()
             {
-                telemetry.ipv4 = ipv4.to_string();
+                telemetry.ipv4 = Some(ipv4.to_string());
             }
             if !ipv6.is_empty() && ipv6 != "0.0.0.0" {
                 let normalized = convert_dotted_ipv6_to_standard(&ipv6);
-                if is_valid_ipv6(&normalized) && telemetry.ipv6.is_empty() {
-                    telemetry.ipv6 = normalized;
+                if is_valid_ipv6(&normalized) && telemetry.ipv6.is_none() {
+                    telemetry.ipv6 = Some(normalized);
                 }
             }
         }
     }
 
-    if telemetry.ipv4.is_empty() {
-        telemetry.ipv4 = "--".to_string();
-    }
-    if telemetry.ipv6.is_empty() {
-        telemetry.ipv6 = "--".to_string();
-    }
+    // Don't set default "--" for Option<String>; keep as None
 }
 
 /// Parse AT+QTEMP response and extract module temperature from cpuss/mdmss sensors
@@ -830,8 +825,8 @@ OK\r\n";
              +CGPADDR: 5,\"0.0.0.0\",\"0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0\"";
         let mut telemetry = crate::TelemetryData::default();
         parse_cgpaddr(raw, &mut telemetry);
-        assert_eq!(telemetry.ipv4, "10.172.99.214");
-        assert_eq!(telemetry.ipv6, "2409:8970:b68:1d9c:18be:3323:1cfc:5996");
+        assert_eq!(telemetry.ipv4, Some("10.172.99.214".to_string()));
+        assert_eq!(telemetry.ipv6, Some("2409:8970:b68:1d9c:18be:3323:1cfc:5996".to_string()));
     }
 
     #[test]
@@ -840,8 +835,8 @@ OK\r\n";
         let raw = "+CGPADDR: 1,\"0.0.0.0\",\"0.0.0.0\"\n+CGPADDR: 2,\"0.0.0.0\"";
         let mut telemetry = crate::TelemetryData::default();
         parse_cgpaddr(raw, &mut telemetry);
-        assert_eq!(telemetry.ipv4, "--");
-        assert_eq!(telemetry.ipv6, "--");
+        assert!(telemetry.ipv4.is_none());
+        assert!(telemetry.ipv6.is_none());
     }
 
     #[test]
@@ -851,26 +846,26 @@ OK\r\n";
         let mut telemetry = crate::TelemetryData::default();
         parse_qeng(raw, &mut telemetry);
 
-        assert_eq!(telemetry.network_mode, "NR5G-SA TDD");
-        assert_eq!(telemetry.mccmnc, "46000");
-        assert_eq!(telemetry.cell_id, "39074C001");
-        assert_eq!(telemetry.enb_id, "39074C");
-        assert_eq!(telemetry.tac, "72002F");
-        assert_eq!(telemetry.bands, "NR5G BAND 41");
-        assert_eq!(telemetry.bandwidth, "12 MHz");
-        assert_eq!(telemetry.earfcn, "504990");
-        assert_eq!(telemetry.pci, "751");
+        assert_eq!(telemetry.network_mode, Some("NR5G-SA TDD".to_string()));
+        assert_eq!(telemetry.mccmnc, Some("46000".to_string()));
+        assert_eq!(telemetry.cell_id, Some("39074C001".to_string()));
+        assert_eq!(telemetry.enb_id, Some("39074C".to_string()));
+        assert_eq!(telemetry.tac, Some("72002F".to_string()));
+        assert_eq!(telemetry.bands, Some("NR5G BAND 41".to_string()));
+        assert_eq!(telemetry.bandwidth, Some("12 MHz".to_string()));
+        assert_eq!(telemetry.earfcn, Some("504990".to_string()));
+        assert_eq!(telemetry.pci, Some("751".to_string()));
 
         // 信号百分比计算：rsrp=-65 → (-65+140)/96*100 = 78
-        assert_eq!(telemetry.signal_percentage, "78%");
-        assert_eq!(telemetry.ss_rsrp, "-65 / 78%");
+        assert_eq!(telemetry.signal_percentage, Some("78%".to_string()));
+        assert_eq!(telemetry.ss_rsrp, Some("-65 / 78%".to_string()));
         // rsrq=-11 → (-11+20)/17*100 = 52
-        assert_eq!(telemetry.ss_rsrq, "-11 / 52%");
+        assert_eq!(telemetry.ss_rsrq, Some("-11 / 52%".to_string()));
         // sinr=19 → (19+20)/50*100 = 78
-        assert_eq!(telemetry.sinr, "19 / 78%");
+        assert_eq!(telemetry.sinr, Some("19 / 78%".to_string()));
 
         // assessment: rsrp=-65 > -80 (true), sinr=19 > 20 (false) → "Good"
-        assert_eq!(telemetry.assessment, "Good");
+        assert_eq!(telemetry.assessment, Some("Good".to_string()));
     }
 
     #[test]
@@ -882,11 +877,11 @@ OK\r\n";
         let mut telemetry = crate::TelemetryData::default();
         parse_qcainfo(raw, &mut telemetry);
 
-        assert_eq!(telemetry.bands, "NR5G BAND 41, NR5G BAND 28");
-        assert_eq!(telemetry.bandwidth, "NR 15 MHz (12+3)");
-        assert_eq!(telemetry.earfcn, "504990, 156490");
+        assert_eq!(telemetry.bands, Some("NR5G BAND 41, NR5G BAND 28".to_string()));
+        assert_eq!(telemetry.bandwidth, Some("NR 15 MHz (12+3)".to_string()));
+        assert_eq!(telemetry.earfcn, Some("504990, 156490".to_string()));
         // SCC pci 通过结构化 AST 正确匹配 scc_pci 字段，无字段偏移问题
-        assert_eq!(telemetry.pci, "751, 0");
+        assert_eq!(telemetry.pci, Some("751, 0".to_string()));
     }
 
     #[test]
@@ -894,8 +889,8 @@ OK\r\n";
         let mut telemetry = crate::TelemetryData::default();
         parse_qcainfo("", &mut telemetry);
         // 空响应不应改动 telemetry
-        assert!(telemetry.bands.is_empty());
-        assert!(telemetry.bandwidth.is_empty());
+        assert!(telemetry.bands.is_none());
+        assert!(telemetry.bandwidth.is_none());
     }
 
     #[test]
@@ -967,45 +962,45 @@ OK\r\n";
 
         // 第 1 步：CGPADDR → ipv4 / ipv6
         parse_cgpaddr(cgpaddr_raw, &mut telemetry);
-        assert_eq!(telemetry.ipv4, "10.172.99.214");
-        assert_eq!(telemetry.ipv6, "2409:8970:b68:1d9c:18be:3323:1cfc:5996");
+        assert_eq!(telemetry.ipv4, Some("10.172.99.214".to_string()));
+        assert_eq!(telemetry.ipv6, Some("2409:8970:b68:1d9c:18be:3323:1cfc:5996".to_string()));
 
         // 第 2 步：QENG → 网络模式 / 小区 / 信号
         parse_qeng(qeng_raw, &mut telemetry);
-        assert_eq!(telemetry.network_mode, "NR5G-SA TDD");
-        assert_eq!(telemetry.mccmnc, "46000");
-        assert_eq!(telemetry.cell_id, "39074C001");
-        assert_eq!(telemetry.enb_id, "39074C");
-        assert_eq!(telemetry.tac, "72002F");
-        assert_eq!(telemetry.signal_percentage, "78%");
-        assert_eq!(telemetry.ss_rsrp, "-65 / 78%");
-        assert_eq!(telemetry.ss_rsrq, "-11 / 52%");
-        assert_eq!(telemetry.sinr, "19 / 78%");
-        assert_eq!(telemetry.assessment, "Good");
+        assert_eq!(telemetry.network_mode, Some("NR5G-SA TDD".to_string()));
+        assert_eq!(telemetry.mccmnc, Some("46000".to_string()));
+        assert_eq!(telemetry.cell_id, Some("39074C001".to_string()));
+        assert_eq!(telemetry.enb_id, Some("39074C".to_string()));
+        assert_eq!(telemetry.tac, Some("72002F".to_string()));
+        assert_eq!(telemetry.signal_percentage, Some("78%".to_string()));
+        assert_eq!(telemetry.ss_rsrp, Some("-65 / 78%".to_string()));
+        assert_eq!(telemetry.ss_rsrq, Some("-11 / 52%".to_string()));
+        assert_eq!(telemetry.sinr, Some("19 / 78%".to_string()));
+        assert_eq!(telemetry.assessment, Some("Good".to_string()));
         // QENG 设置了 bands/bandwidth/earfcn/pci，后续会被 QCAINFO 覆盖
-        assert_eq!(telemetry.bands, "NR5G BAND 41");
-        assert_eq!(telemetry.bandwidth, "12 MHz");
-        assert_eq!(telemetry.earfcn, "504990");
-        assert_eq!(telemetry.pci, "751");
+        assert_eq!(telemetry.bands, Some("NR5G BAND 41".to_string()));
+        assert_eq!(telemetry.bandwidth, Some("12 MHz".to_string()));
+        assert_eq!(telemetry.earfcn, Some("504990".to_string()));
+        assert_eq!(telemetry.pci, Some("751".to_string()));
 
         // 第 3 步：QCAINFO → 覆盖 bands/bandwidth/earfcn/pci（载波聚合）
         parse_qcainfo(qcainfo_raw, &mut telemetry);
-        assert_eq!(telemetry.bands, "NR5G BAND 41, NR5G BAND 28");
-        assert_eq!(telemetry.bandwidth, "NR 15 MHz (12+3)");
-        assert_eq!(telemetry.earfcn, "504990, 156490");
-        assert_eq!(telemetry.pci, "751, 0"); // SCC pci 因字段偏移为 "0"
+        assert_eq!(telemetry.bands, Some("NR5G BAND 41, NR5G BAND 28".to_string()));
+        assert_eq!(telemetry.bandwidth, Some("NR 15 MHz (12+3)".to_string()));
+        assert_eq!(telemetry.earfcn, Some("504990, 156490".to_string()));
+        assert_eq!(telemetry.pci, Some("751, 0".to_string())); // SCC pci 因字段偏移为 "0"
 
         // 第 4 步：QTEMP → 温度
         assert_eq!(parse_qtemp_temperature(qtemp_raw), Some("42 °C".to_string()));
-        telemetry.temperature = parse_qtemp_temperature(qtemp_raw).unwrap_or_default();
-        assert_eq!(telemetry.temperature, "42 °C");
+        telemetry.temperature = parse_qtemp_temperature(qtemp_raw);
+        assert_eq!(telemetry.temperature, Some("42 °C".to_string()));
 
         // 验证 QENG 设置的字段不被后续解析破坏
-        assert_eq!(telemetry.network_mode, "NR5G-SA TDD");
-        assert_eq!(telemetry.mccmnc, "46000");
-        assert_eq!(telemetry.cell_id, "39074C001");
-        assert_eq!(telemetry.signal_percentage, "78%");
-        assert_eq!(telemetry.assessment, "Good");
+        assert_eq!(telemetry.network_mode, Some("NR5G-SA TDD".to_string()));
+        assert_eq!(telemetry.mccmnc, Some("46000".to_string()));
+        assert_eq!(telemetry.cell_id, Some("39074C001".to_string()));
+        assert_eq!(telemetry.signal_percentage, Some("78%".to_string()));
+        assert_eq!(telemetry.assessment, Some("Good".to_string()));
     }
 
     #[test]
@@ -1017,12 +1012,12 @@ OK\r\n";
         let mut telemetry = crate::TelemetryData::default();
         parse_qeng(raw, &mut telemetry);
 
-        assert_eq!(telemetry.bands, "NR5G BAND 41, NR5G BAND 28");
-        assert_eq!(telemetry.bandwidth, "NR 15 MHz (12+3)");
-        assert_eq!(telemetry.earfcn, "504990, 156490");
-        assert_eq!(telemetry.pci, "751, 250");
+        assert_eq!(telemetry.bands, Some("NR5G BAND 41, NR5G BAND 28".to_string()));
+        assert_eq!(telemetry.bandwidth, Some("NR 15 MHz (12+3)".to_string()));
+        assert_eq!(telemetry.earfcn, Some("504990, 156490".to_string()));
+        assert_eq!(telemetry.pci, Some("751, 250".to_string()));
         // 使用 PCC（首行）的信号值
-        assert_eq!(telemetry.signal_percentage, "78%");
+        assert_eq!(telemetry.signal_percentage, Some("78%".to_string()));
     }
 
     // ── 从 main.rs 移入的 bitmask 解析测试 ──

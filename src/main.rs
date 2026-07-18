@@ -24,7 +24,7 @@ use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 use at::{
     parse_cgpaddr, parse_cops_scan, parse_net_status, parse_qcainfo, parse_qcfg_bands,
     parse_qeng, parse_qtemp_temperature, parse_signal_quality, parse_traffic_line,
-    decode_cmgl_body, decode_hex_ucs2, normalize_at_command, set_default,
+    decode_cmgl_body, decode_hex_ucs2, normalize_at_command,
 };
 use fs2::FileExt;
 
@@ -61,77 +61,41 @@ struct AtRequest {
 struct AppState {
     /// 广播 Arc 包装的遥测实体，减少硬件线程中的序列化损耗
     tx: broadcast::Sender<Arc<GlobalTelemetry>>,
-    /// 低优先级通道（预留：后台任务使用）
-    #[allow(dead_code)]
-    actor_tx: mpsc::Sender<AtRequest>,
-    /// 高优先级通道：用户交互指令
-    actor_tx_high: mpsc::Sender<AtRequest>,
+    /// 扁平、高优先级的单一串行指令通道
+    command_tx: mpsc::Sender<AtRequest>,
     active_views: AtomicUsize,
     /// 全局状态 — fetch_static_info 和 hardware_polling_actor 获取的所有值均汇聚于此，ws.send 全部从此读取
     global: RwLock<GlobalTelemetry>,
 }
 
-#[derive(Clone, Serialize, Debug)]
+#[derive(Clone, Serialize, Debug, Default)]
 struct GlobalTelemetry {
-    firmware_version: String,
-    temperature: String,
-    sim_status: String,
-    signal_percentage: String,
-    internet_connection: String,
-    active_sim: String,
-    network_provider: String,
-    mccmnc: String,
-    apn: String,
-    network_mode: String,
-    bands: String,
-    bandwidth: String,
-    earfcn: String,
-    pci: String,
-    ipv4: String,
-    ipv6: String,
-    uptime: String,
-    assessment: String,
-    traffic_stats: String,
-    cell_id: String,
-    enb_id: String,
-    tac: String,
-    ss_rsrq: String,
-    ss_rsrp: String,
-    sinr: String,
-    updated: String,
-}
-
-impl Default for GlobalTelemetry {
-    fn default() -> Self {
-        Self {
-            firmware_version: "NA".to_string(),
-            temperature: "NA".to_string(),
-            sim_status: "NA".to_string(),
-            signal_percentage: "NA".to_string(),
-            internet_connection: "NA".to_string(),
-            active_sim: "NA".to_string(),
-            network_provider: "NA".to_string(),
-            mccmnc: "NA".to_string(),
-            apn: "NA".to_string(),
-            network_mode: "NA".to_string(),
-            bands: "NA".to_string(),
-            bandwidth: "NA".to_string(),
-            earfcn: "NA".to_string(),
-            pci: "NA".to_string(),
-            ipv4: "NA".to_string(),
-            ipv6: "NA".to_string(),
-            uptime: "NA".to_string(),
-            assessment: "NA".to_string(),
-            traffic_stats: "NA".to_string(),
-            cell_id: "NA".to_string(),
-            enb_id: "NA".to_string(),
-            tac: "NA".to_string(),
-            ss_rsrq: "NA".to_string(),
-            ss_rsrp: "NA".to_string(),
-            sinr: "NA".to_string(),
-            updated: "NA".to_string(),
-        }
-    }
+    firmware_version: Option<String>,
+    temperature: Option<String>,
+    sim_status: Option<String>,
+    signal_percentage: Option<String>,
+    internet_connection: Option<String>,
+    active_sim: Option<String>,
+    network_provider: Option<String>,
+    mccmnc: Option<String>,
+    apn: Option<String>,
+    network_mode: Option<String>,
+    bands: Option<String>,
+    bandwidth: Option<String>,
+    earfcn: Option<String>,
+    pci: Option<String>,
+    ipv4: Option<String>,
+    ipv6: Option<String>,
+    uptime: Option<String>,
+    assessment: Option<String>,
+    traffic_stats: Option<String>,
+    cell_id: Option<String>,
+    enb_id: Option<String>,
+    tac: Option<String>,
+    ss_rsrq: Option<String>,
+    ss_rsrp: Option<String>,
+    sinr: Option<String>,
+    updated: Option<String>,
 }
 
 impl GlobalTelemetry {
@@ -139,12 +103,11 @@ impl GlobalTelemetry {
     /// 动态字段仅当解析器返回有效值（非空、非 NA/N/A/--）时才覆盖，
     /// 否则保留上一次的全局值，避免一次 AT 失败就冲掉全部数据。
     /// 静态字段始终从 global 保留。
-    fn from_telemetry_and_global(t: &TelemetryData, g: &GlobalTelemetry, uptime: String, updated: String) -> Self {
-        fn keep_valid(new: &str, old: &str) -> String {
-            if !new.is_empty() && new != "NA" && new != "N/A" && new != "--" {
-                new.to_string()
-            } else {
-                old.to_string()
+    fn from_telemetry_and_global(t: &TelemetryData, g: &GlobalTelemetry, uptime: Option<String>, updated: Option<String>) -> Self {
+        fn keep_valid(new: &Option<String>, old: &Option<String>) -> Option<String> {
+            match new {
+                Some(val) if !val.is_empty() && val != "NA" && val != "N/A" && val != "--" => Some(val.clone()),
+                _ => old.clone(),
             }
         }
 
@@ -186,37 +149,37 @@ struct WsCommand {
     payload: Option<serde_json::Value>,
 }
 
-#[derive(Serialize, Default, Debug)]
+#[derive(Serialize, Default, Debug, Clone)]
 struct TelemetryData {
-    temperature: String,
-    sim_status: String,
-    signal_percentage: String,
-    internet_connection: String,
-    active_sim: String,
-    network_provider: String,
-    mccmnc: String,
-    apn: String,
-    network_mode: String,
-    bands: String,
-    bandwidth: String,
-    earfcn: String,
-    pci: String,
-    ipv4: String,
-    ipv6: String,
-    uptime: String,
-    assessment: String,
-    traffic_stats: String,
-    cell_id: String,
-    enb_id: String,
-    tac: String,
-    ss_rsrq: String,
-    ss_rsrp: String,
-    sinr: String,
-    updated: String,
+    temperature: Option<String>,
+    sim_status: Option<String>,
+    signal_percentage: Option<String>,
+    internet_connection: Option<String>,
+    active_sim: Option<String>,
+    network_provider: Option<String>,
+    mccmnc: Option<String>,
+    apn: Option<String>,
+    network_mode: Option<String>,
+    bands: Option<String>,
+    bandwidth: Option<String>,
+    earfcn: Option<String>,
+    pci: Option<String>,
+    ipv4: Option<String>,
+    ipv6: Option<String>,
+    uptime: Option<String>,
+    assessment: Option<String>,
+    traffic_stats: Option<String>,
+    cell_id: Option<String>,
+    enb_id: Option<String>,
+    tac: Option<String>,
+    ss_rsrq: Option<String>,
+    ss_rsrp: Option<String>,
+    sinr: Option<String>,
+    updated: Option<String>,
 }
 
 // ============================================================================
-// HardwareBackend trait + RealBackend（真机后端，失败返回 NA）
+// HardwareBackend trait + RealBackend（真机后端）
 // ============================================================================
 
 /// 设备信息（HardwareBackend::read_device_info 返回值）
@@ -509,7 +472,7 @@ impl HardwareBackend for RealBackend {
                 if let Some(status) = trimmed.strip_prefix("+CPIN:") {
                     let s = status.trim().trim_matches('"');
                     if !s.is_empty() {
-                        telemetry.sim_status = s.to_string();
+                        telemetry.sim_status = Some(s.to_string());
                     }
                     break;
                 }
@@ -517,7 +480,7 @@ impl HardwareBackend for RealBackend {
         }
         if let Ok(qtemp_resp) = send_at_command_dedup(&self.serial_path, "AT+QTEMP").await {
             if let Some(temp) = parse_qtemp_temperature(&qtemp_resp) {
-                telemetry.temperature = temp;
+                telemetry.temperature = Some(temp);
             }
         }
 
@@ -528,9 +491,8 @@ impl HardwareBackend for RealBackend {
                 r.lines()
                     .find(|l| l.contains("+QGDNRCNT:"))
                     .and_then(|l| parse_traffic_line(l, "+QGDNRCNT:", false))
-            })
-            .unwrap_or_default();
-        if telemetry.traffic_stats.is_empty() {
+            });
+        if telemetry.traffic_stats.is_none() {
             telemetry.traffic_stats = send_at_command_dedup(&self.serial_path, "AT+QGDAT?")
                 .await
                 .ok()
@@ -538,14 +500,8 @@ impl HardwareBackend for RealBackend {
                     r.lines()
                         .find(|l| l.contains("+QGDAT:"))
                         .and_then(|l| parse_traffic_line(l, "+QGDAT:", true))
-                })
-                .unwrap_or_default();
+                });
         }
-
-        set_default(&mut telemetry.traffic_stats, "N/A");
-        set_default(&mut telemetry.signal_percentage, "NA");
-        set_default(&mut telemetry.network_mode, "NA");
-        set_default(&mut telemetry.sim_status, "NA");
 
         telemetry
     }
@@ -555,7 +511,6 @@ impl HardwareBackend for RealBackend {
 
         let firmware_version;
         let mut active_sim = String::new();
-        let mut apn = String::new();
 
         println!("📋 [1/4] 获取固件版本 (AT+CGMR)...");
         firmware_version = send_at_get_line(&self.serial_path, "AT+CGMR")
@@ -571,12 +526,15 @@ impl HardwareBackend for RealBackend {
                 }
             }
         }
-        set_default(&mut active_sim, "NA");
+        if active_sim.is_empty() {
+            active_sim = "NA".to_string();
+        }
 
         println!("📋 [3/5] 获取运营商...");
         let network_provider = fetch_network_provider(&self.serial_path).await;
 
         println!("📋 [4/5] 获取 APN (AT+CGCONTRDP)...");
+        let mut apn = String::new();
         let mut found_apn = false;
         if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+CGCONTRDP").await {
             for line in resp.lines() {
@@ -632,7 +590,9 @@ impl HardwareBackend for RealBackend {
                 }
             }
         }
-        set_default(&mut apn, "N/A");
+        if apn.is_empty() {
+            apn = "N/A".to_string();
+        }
 
         println!(
             "📋 静态信息已获取: FW={}, SIM={}, Provider={}, APN={}",
@@ -727,7 +687,6 @@ struct SerialFileLock {
 
 impl Drop for SerialFileLock {
     fn drop(&mut self) {
-        // 文件关闭时内核自动释放 flock；显式 unlock 更可靠
         if let Some(ref file) = self.file {
             let _ = file.unlock();
         }
@@ -738,10 +697,8 @@ impl Drop for SerialFileLock {
 const LOCK_FILE_PATH: &str = "/tmp/atcmd_rs.lock";
 
 /// 获取跨进程排他文件锁。
-/// 同一时间仅允许一个进程持有锁，其他进程的 flock(LOCK_EX) 在内核态阻塞等待。
 async fn acquire_serial_lock() -> Result<SerialFileLock, String> {
     let result = tokio::task::spawn_blocking(|| -> Result<std::fs::File, String> {
-        // 以 CREATE+WRITE 模式打开锁文件，保证文件始终存在
         let file = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -749,7 +706,6 @@ async fn acquire_serial_lock() -> Result<SerialFileLock, String> {
             .open(LOCK_FILE_PATH)
             .map_err(|e| format!("无法打开锁文件 {}: {}", LOCK_FILE_PATH, e))?;
 
-        // LOCK_EX：排他锁，阻塞等待直到获取到锁
         file.lock_exclusive()
             .map_err(|e| format!("获取 {} 排他锁失败: {}", LOCK_FILE_PATH, e))?;
 
@@ -790,8 +746,6 @@ impl AtCommandQueue {
         }
     }
 
-    /// 提交 AT 命令到队列并等待结果。
-    /// 如果相同命令已在执行中，则合并请求共享相同的结果。
     async fn execute(&self, serial_path: &str, cmd: &str) -> Result<String, String> {
         use std::collections::hash_map::Entry;
 
@@ -799,20 +753,17 @@ impl AtCommandQueue {
 
         match guard.entry(cmd.to_string()) {
             Entry::Occupied(mut entry) => {
-                // 相同命令已在执行中，订阅其结果
                 let (tx, rx) = oneshot::channel();
                 entry.get_mut().waiters.push(tx);
                 drop(guard);
                 rx.await.unwrap_or_else(|_| Err("AT命令队列等待被取消".to_string()))
             }
             Entry::Vacant(entry) => {
-                // 首次请求，我们负责执行
                 entry.insert(AtPendingCmd { waiters: vec![] });
                 drop(guard);
 
                 let result = send_at_command_inner(serial_path, cmd).await;
 
-                // 广播结果给所有等待者
                 let mut guard = self.inner.lock().await;
                 if let Some(pending) = guard.remove(cmd) {
                     for waiter in pending.waiters {
@@ -826,7 +777,6 @@ impl AtCommandQueue {
 }
 
 /// 带队列去重的 AT 命令发送。
-/// 相同命令同时请求时会被合并，避免重复执行。
 async fn send_at_command_dedup(serial_path: &str, cmd: &str) -> Result<String, String> {
     get_at_queue().execute(serial_path, cmd).await
 }
@@ -840,9 +790,6 @@ async fn send_at_command_inner_with_timeout(
     let start = std::time::Instant::now();
 
     let _lock = get_at_lock().lock().await;
-
-    // 跨进程排他锁：防止其他后台进程（如监控守护）同时操作 /dev/smd11
-    // 导致数据被劫持或响应混乱
     let _file_lock = acquire_serial_lock().await?;
 
     let child = tokio::process::Command::new("/opt/atcmd_rs")
@@ -873,7 +820,6 @@ async fn send_at_command_inner_with_timeout(
 
     let raw = String::from_utf8_lossy(&output.stdout).into_owned();
 
-    // 检测错误（在原始响应中搜索 ERROR/+CME ERROR:）
     if raw.contains("ERROR") || raw.contains("+CME ERROR:") {
         let elapsed = start.elapsed();
         println!("⚠️ [AT] {} 返回 ERROR ({}ms)", cmd, elapsed.as_millis());
@@ -881,7 +827,6 @@ async fn send_at_command_inner_with_timeout(
     }
 
     let elapsed = start.elapsed();
-    // 取首行非空非 AT 回显的内容作为日志预览
     let preview = raw
         .lines()
         .find(|l| {
@@ -905,7 +850,6 @@ async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, S
 
 /// 从设备查询频段信息（NR + LTE），通过多条 AT 命令从模组获取
 async fn query_device_bands(serial_path: &str) -> String {
-    // ── 方法 1: AT+QENG="servingcell" 获取当前服务小区频段 ──
     let mut nr_bands: Vec<String> = Vec::new();
     let mut lte_bands: Vec<String> = Vec::new();
 
@@ -915,8 +859,6 @@ async fn query_device_bands(serial_path: &str) -> String {
             if !trimmed.starts_with("+QENG: \"servingcell\"") {
                 continue;
             }
-            // 格式: +QENG: "servingcell","NOCONN","NR5G-SA","TDD",460,00,...,<band>,...
-            // band 字段位置: LTE=9, NR5G=9 (基于现有 parser 的索引)
             let rest = trimmed
                 .strip_prefix("+QENG: \"servingcell\"")
                 .unwrap_or("")
@@ -924,8 +866,6 @@ async fn query_device_bands(serial_path: &str) -> String {
                 .strip_prefix(',')
                 .unwrap_or("");
             let parts: Vec<&str> = rest.split(',').map(|s| s.trim().trim_matches('"')).collect();
-            // parts[0]=connection_status, parts[1]=rat
-            // LTE: band at index 8, NR5G: band at index 9 (extra tac field)
             let band_idx = if parts.get(1).map_or(false, |r| r.contains("NR5G")) { 9 } else { 8 };
             if let Some(band) = parts.get(band_idx) {
                 let b = band.trim();
@@ -944,7 +884,6 @@ async fn query_device_bands(serial_path: &str) -> String {
         }
     }
 
-    // ── 方法 2: AT+QCAINFO 补充载波聚合频段 ──
     if let Ok(resp) = send_at_command_dedup(serial_path, "AT+QCAINFO").await {
         for line in resp.lines() {
             let trimmed = line.trim();
@@ -953,7 +892,6 @@ async fn query_device_bands(serial_path: &str) -> String {
             }
             let rest = trimmed.strip_prefix("+QCAINFO:").unwrap_or("").trim();
             let parts: Vec<&str> = rest.split(',').map(|s| s.trim().trim_matches('"')).collect();
-            // parts[3]=band, e.g. "NR5G BAND 41" or just "41"
             if let Some(raw) = parts.get(3) {
                 let band_str = raw.trim();
                 if band_str.starts_with("NR5G BAND ") {
@@ -962,9 +900,7 @@ async fn query_device_bands(serial_path: &str) -> String {
                         nr_bands.push(format!("n{}", num));
                     }
                 } else if let Ok(_) = band_str.parse::<i32>() {
-                    // Could be NR or LTE — try to classify by value
                     if band_str.parse::<u32>().unwrap_or(0) > 100 {
-                        // >100 are NR band numbers
                         if !nr_bands.contains(&format!("n{}", band_str)) {
                             nr_bands.push(format!("n{}", band_str));
                         }
@@ -978,7 +914,6 @@ async fn query_device_bands(serial_path: &str) -> String {
         }
     }
 
-    // ── 方法 3: AT+QCFG="band" 获取配置的完整频段列表 ──
     if nr_bands.len() <= 1 || lte_bands.len() <= 1 {
         if let Ok(resp) = send_at_command_dedup(serial_path, "AT+QCFG=\"band\"").await {
             if let Some(line) = resp.lines().find(|l| l.trim().starts_with("+QCFG:")) {
@@ -993,7 +928,6 @@ async fn query_device_bands(serial_path: &str) -> String {
         }
     }
 
-    // ── 格式化输出 ──
     nr_bands.sort_by_key(|b| {
         b.trim_start_matches('n').parse::<u32>().unwrap_or(999)
     });
@@ -1100,8 +1034,6 @@ fn generate_telemetry_diff(old: &GlobalTelemetry, new: &GlobalTelemetry) -> serd
 /// 将 GlobalTelemetry 的 Arc 广播到所有 WS 客户端
 fn broadcast_state(state: &AppState, global: &GlobalTelemetry) {
     let global_arc = Arc::new(global.clone());
-    let send_rc = state.tx.receiver_count();
-    eprintln!("📤 WS 广播遥测数据 ({} 接收者)", send_rc);
     let _ = state.tx.send(global_arc);
 }
 
@@ -1122,8 +1054,7 @@ async fn handle_channel_req(
     }
 }
 
-/// 处理单个 AT 请求（高低优先级通道共用此函数）
-/// Actor 严格顺序消费，移除所有 tokio::spawn 异步派发，消除伪并发竞态
+/// 处理单个 AT 请求（Actor 严格顺序消费）
 async fn handle_at_request(
     req: AtRequest,
     backend: &Arc<dyn HardwareBackend>,
@@ -1251,14 +1182,8 @@ async fn handle_at_request(
 }
 
 /// 统一硬件任务：定时轮询 + 用户 AT 指令。严格串行 Actor + 离线检测 + 动态空闲降频
-///
-/// 核心设计：
-/// 1. 严格串行 Actor：移除所有 tokio::spawn，所有硬件操作按消费顺序依次 .await
-/// 2. 轮询 busy-bypass：try_lock() 探活串口，忙碌时直接广播缓存不阻塞 Actor
-/// 3. 高优先级通道优先消费，确保用户交互指令不会被轮询阻塞
 async fn hardware_task(
-    mut actor_rx_high: mpsc::Receiver<AtRequest>,
-    mut actor_rx: mpsc::Receiver<AtRequest>,
+    mut command_rx: mpsc::Receiver<AtRequest>,
     backend: Arc<dyn HardwareBackend>,
     state: Arc<AppState>,
 ) {
@@ -1267,19 +1192,13 @@ async fn hardware_task(
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
     interval.tick().await;
     let mut consecutive_failures = 0u32;
-    // 当前计时器周期，避免无意义重建 Interval（保留漂移补偿能力）
     let mut current_interval_secs = interval_secs;
 
     loop {
         tokio::select! {
             biased;
 
-            req = actor_rx_high.recv() => {
-                if !handle_channel_req(req, &backend, &mut interval_secs, &mut interval, &mut current_interval_secs).await {
-                    break;
-                }
-            }
-            req = actor_rx.recv() => {
+            req = command_rx.recv() => {
                 if !handle_channel_req(req, &backend, &mut interval_secs, &mut interval, &mut current_interval_secs).await {
                     break;
                 }
@@ -1288,19 +1207,16 @@ async fn hardware_task(
                 let active = state.active_views.load(Ordering::Relaxed) > 0;
 
                 if active && get_at_lock().try_lock().is_ok() {
-                    // ── 锁可用：正常物理轮询 ──
                     let start_poll = std::time::Instant::now();
                     let mut telemetry = backend.poll_telemetry().await;
 
-                    // 离线检测（在 CPU 温度回退之前检查，避免 sysinfo 掩盖模组无响应）
-                    let telemetry_dead = telemetry.sim_status == "NA"
-                        && telemetry.network_mode == "NA"
-                        && telemetry.signal_percentage == "NA"
-                        && (telemetry.ipv4.is_empty() || telemetry.ipv4 == "--");
+                    let telemetry_dead = telemetry.sim_status.is_none()
+                        && telemetry.network_mode.is_none()
+                        && telemetry.signal_percentage.is_none()
+                        && telemetry.ipv4.is_none();
                     consecutive_failures = if telemetry_dead { consecutive_failures + 1 } else { 0 };
 
-                    // CPU 温度 fallback（仅当 AT+QTEMP 未提供时）
-                    if telemetry.temperature.is_empty() || telemetry.temperature == "-- °C" {
+                    if telemetry.temperature.is_none() {
                         components.refresh(true);
                         if let Some(temp) = components.iter()
                             .find(|c| {
@@ -1309,15 +1225,15 @@ async fn hardware_task(
                             })
                             .and_then(|c| c.temperature())
                         {
-                            telemetry.temperature = format!("{:.0} °C", temp);
+                            telemetry.temperature = Some(format!("{:.0} °C", temp));
                         }
                     }
 
-                    telemetry.internet_connection = if !telemetry.ipv4.is_empty() && telemetry.ipv4 != "--" {
+                    telemetry.internet_connection = Some(if telemetry.ipv4.is_some() {
                         "Connected".to_string()
                     } else {
                         "Disconnected".to_string()
-                    };
+                    });
 
                     let uptime_sec = System::uptime();
                     let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
@@ -1336,14 +1252,14 @@ async fn hardware_task(
                             global.active_sim = sim;
                             global.network_provider = prov;
                             global.apn = apn;
-                            global.internet_connection = "Disconnected".to_string();
-                            global.uptime = format!("{} minutes", uptime_sec / 60);
-                            global.updated = updated_str;
+                            global.internet_connection = Some("Disconnected".to_string());
+                            global.uptime = Some(format!("{} minutes", uptime_sec / 60));
+                            global.updated = Some(updated_str);
                         } else {
                             *global = GlobalTelemetry::from_telemetry_and_global(
                                 &telemetry, &global,
-                                format!("{} minutes", uptime_sec / 60),
-                                updated_str,
+                                Some(format!("{} minutes", uptime_sec / 60)),
+                                Some(updated_str),
                             );
                         }
 
@@ -1353,26 +1269,24 @@ async fn hardware_task(
                     println!("✅ 轮询任务完成，总耗时: {}ms", start_poll.elapsed().as_millis());
 
                 } else if active {
-                    // ── 串口繁忙：跳过物理查询，只更新时间戳 ──
                     println!("⚠️ Modem 串口忙（可能正在执行长耗时 AT），跳过物理轮询，发送缓存状态");
                     let uptime_sec = System::uptime();
                     let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
                     let mut global = state.global.write().await;
-                    global.uptime = format!("{} minutes", uptime_sec / 60);
-                    global.updated = updated_str;
+                    global.uptime = Some(format!("{} minutes", uptime_sec / 60));
+                    global.updated = Some(updated_str);
                     broadcast_state(&state, &global);
 
                 } else {
                     println!("💤 硬件轮询处于空闲模式 (无活跃视图)");
                 }
 
-                // 动态空闲降频：仅在周期真正发生改变时才重建 Interval
                 let next_secs = if active { interval_secs } else { IDLE_INTERVAL_SECS };
                 if next_secs != current_interval_secs {
                     current_interval_secs = next_secs;
                     interval = tokio::time::interval(Duration::from_secs(next_secs));
-                    interval.tick().await; // 消耗新 Interval 就绪的第一拍
+                    interval.tick().await;
                 }
             }
         }
@@ -1386,35 +1300,30 @@ async fn main() {
     println!("🔌 使用串口设备: {}", serial_path);
 
     let (tx, _) = broadcast::channel(100);
-    let (actor_tx, actor_rx) = mpsc::channel(32);
-    let (actor_tx_high, actor_rx_high) = mpsc::channel(32);
+    let (command_tx, command_rx) = mpsc::channel(32);
 
     let app_state = Arc::new(AppState {
         tx: tx.clone(),
-        actor_tx,
-        actor_tx_high,
+        command_tx,
         active_views: AtomicUsize::new(0),
         global: RwLock::new(GlobalTelemetry::default()),
     });
 
-    // 创建后端（设备不存在时命令失败返回 NA）
     let backend: Arc<dyn HardwareBackend> = Arc::new(RealBackend { serial_path: serial_path.clone() });
 
-    // 获取一次静态信息
     let (firmware_version, active_sim, network_provider, apn) = backend.read_static_info().await;
     {
         let mut guard = app_state.global.write().await;
-        guard.firmware_version = firmware_version;
-        guard.active_sim = active_sim;
-        guard.network_provider = network_provider;
-        guard.apn = apn;
+        guard.firmware_version = Some(firmware_version);
+        guard.active_sim = Some(active_sim);
+        guard.network_provider = Some(network_provider);
+        guard.apn = Some(apn);
     }
 
-    // 启动统一硬件任务（单消费者，串行处理所有 /opt/atcmd_rs）
     tokio::spawn({
         let backend = backend.clone();
         let state = app_state.clone();
-        async move { hardware_task(actor_rx_high, actor_rx, backend, state).await }
+        async move { hardware_task(command_rx, backend, state).await }
     });
 
     let app = Router::new()
@@ -1448,7 +1357,6 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
 
     tokio::select! {
         _ = async {
-            // 保存当前连接上一次发送的完整数据副本，用于差分对比
             let mut last_sent_telemetry: Option<GlobalTelemetry> = None;
 
             loop {
@@ -1456,7 +1364,6 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                     Ok(new_telemetry_arc) = broadcast_rx.recv() => {
                         let msg_to_send = match last_sent_telemetry {
                             None => {
-                                // 首次连接：记录并发送全量数据
                                 last_sent_telemetry = Some((*new_telemetry_arc).clone());
                                 serde_json::json!({
                                     "update_type": "full",
@@ -1464,7 +1371,6 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                                 }).to_string()
                             }
                             Some(ref old) => {
-                                // 后续更新：计算差异并生成增量消息
                                 let diff = generate_telemetry_diff(old, &new_telemetry_arc);
                                 last_sent_telemetry = Some((*new_telemetry_arc).clone());
 
@@ -1474,7 +1380,6 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                                         "data": diff
                                     }).to_string()
                                 } else {
-                                    // 数据无变化，跳过网络发送
                                     continue;
                                 }
                             }
@@ -1573,8 +1478,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                         }
                     };
 
-                    // 将动作通过高优先级通道派发给 Actor
-                    if state_inner.actor_tx_high.send(AtRequest { action, resp_tx }).await.is_ok() {
+                    if state_inner.command_tx.send(AtRequest { action, resp_tx }).await.is_ok() {
                         if let Ok(reply) = resp_rx.await {
                             if local_tx.send(reply.to_string()).await.is_err() {
                                 break;
@@ -1606,4 +1510,3 @@ async fn style_handler() -> impl IntoResponse {
         "text/css; charset=utf-8",
     )
 }
-

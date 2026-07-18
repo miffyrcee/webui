@@ -130,7 +130,8 @@ pub fn normalize_at_command(cmd: &str) -> String {
     }
 }
 
-/// If field is empty, set to default value
+/// If field is empty, set to default value (kept for backward compatibility)
+#[allow(dead_code)]
 pub fn set_default(field: &mut String, default: &str) {
     if field.is_empty() {
         *field = default.to_string();

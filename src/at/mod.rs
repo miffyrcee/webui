@@ -21,5 +21,4 @@ pub use utils::{
     decode_cmgl_body,
     decode_hex_ucs2,
     normalize_at_command,
-    set_default,
 };

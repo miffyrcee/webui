@@ -304,11 +304,11 @@ impl HardwareBackend for RealBackend {
     }
 
     async fn scan_available_networks(&self) -> Vec<serde_json::Value> {
-        println!("🔍 开始网络扫描 (AT+COPS=?, 180s 超时)...");
+        println!("🔍 开始网络扫描 (AT+COPS=?, 240s 超时)...");
         match send_at_command_inner_with_timeout(
             &self.serial_path,
             "AT+COPS=?",
-            Duration::from_secs(180),
+            Duration::from_secs(240),
         )
         .await
         {

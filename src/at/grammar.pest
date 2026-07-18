@@ -100,10 +100,6 @@ creg_fields = { generic_value ~ (COMMA ~ generic_value)* }
 csq_resp = { "+CSQ:" ~ csq_fields }
 csq_fields = { generic_value ~ (COMMA ~ generic_value)* }
 
-// ─── QCFG "band" ───
-// +QCFG: "band",<GSM>,<WCDMA>,<LTE_hex>,<NR_hex>
-qcfg_band_resp = { "+QCFG: \"band\"" ~ COMMA ~ generic_value ~ COMMA ~ generic_value ~ COMMA ~ generic_value ~ COMMA ~ generic_value }
-
 // ─── QTEMP (single sensor line) ───
 // +QTEMP:"sensor_name","value"
 qtemp_resp = { "+QTEMP:" ~ quoted_value ~ COMMA ~ quoted_value }

@@ -1198,78 +1198,74 @@ async fn hardware_task(
             _ = interval.tick() => {
                 let active = state.active_views.load(Ordering::Relaxed) > 0;
 
-                if active && get_at_lock().try_lock().is_ok() {
-                    let start_poll = std::time::Instant::now();
-                    let mut telemetry = backend.poll_telemetry().await;
+                if active {
+                    // 将 try_lock() 返回的 Guard 显式绑定到 _guard 变量，
+                    // 使其在整个 if let 块内持续持有互斥锁，确保 poll_telemetry() 执行期独占串口！
+                    if let Ok(_guard) = get_at_lock().try_lock() {
+                        let start_poll = std::time::Instant::now();
+                        let mut telemetry = backend.poll_telemetry().await;
 
-                    let telemetry_dead = telemetry.sim_status.is_none()
-                        && telemetry.network_mode.is_none()
-                        && telemetry.signal_percentage.is_none()
-                        && telemetry.ipv4.is_none();
-                    consecutive_failures = if telemetry_dead { consecutive_failures + 1 } else { 0 };
+                        let telemetry_dead = telemetry.sim_status.is_none()
+                            && telemetry.network_mode.is_none()
+                            && telemetry.signal_percentage.is_none()
+                            && telemetry.ipv4.is_none();
+                        consecutive_failures = if telemetry_dead { consecutive_failures + 1 } else { 0 };
 
-                    if telemetry.temperature.is_none() {
-                        components.refresh(true);
-                        if let Some(temp) = components.iter()
-                            .find(|c| {
-                                let lower = c.label().to_lowercase();
-                                lower.contains("cpu") || lower.contains("package")
-                            })
-                            .and_then(|c| c.temperature())
-                        {
-                            telemetry.temperature = Some(format!("{:.0} °C", temp));
+                        if telemetry.temperature.is_none() {
+                            components.refresh(true);
+                            if let Some(temp) = components.iter()
+                                .find(|c| {
+                                    let lower = c.label().to_lowercase();
+                                    lower.contains("cpu") || lower.contains("package")
+                                })
+                                .and_then(|c| c.temperature())
+                            {
+                                telemetry.temperature = Some(format!("{:.0} °C", temp));
+                            }
                         }
-                    }
 
-                    telemetry.internet_connection = Some(if telemetry.ipv4.is_some() {
-                        "Connected".to_string()
-                    } else {
-                        "Disconnected".to_string()
-                    });
-
-                    let uptime_sec = System::uptime();
-                    let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
-
-                    {
-                        let mut global = state.global.write().await;
-
-                        if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                            push_log("ERROR", "Poll", &format!("模组连续 {} 次无响应，标记为离线", MAX_CONSECUTIVE_FAILURES));
-                            let fw = global.firmware_version.clone();
-                            let sim = global.active_sim.clone();
-                            let prov = global.network_provider.clone();
-                            let apn = global.apn.clone();
-                            *global = GlobalTelemetry::default();
-                            global.firmware_version = fw;
-                            global.active_sim = sim;
-                            global.network_provider = prov;
-                            global.apn = apn;
-                            global.internet_connection = Some("Disconnected".to_string());
-                            global.uptime = Some(format!("{} minutes", uptime_sec / 60));
-                            global.updated = Some(updated_str);
+                        telemetry.internet_connection = Some(if telemetry.ipv4.is_some() {
+                            "Connected".to_string()
                         } else {
-                            *global = GlobalTelemetry::from_telemetry_and_global(
-                                &telemetry, &global,
-                                Some(format!("{} minutes", uptime_sec / 60)),
-                                Some(updated_str),
-                            );
+                            "Disconnected".to_string()
+                        });
+
+                        let uptime_sec = System::uptime();
+                        let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
+
+                        {
+                            let mut global = state.global.write().await;
+
+                            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                                push_log("ERROR", "Poll", &format!("模组连续 {} 次无响应，标记为离线", MAX_CONSECUTIVE_FAILURES));
+                                let fw = global.firmware_version.clone();
+                                let sim = global.active_sim.clone();
+                                let prov = global.network_provider.clone();
+                                let apn = global.apn.clone();
+                                *global = GlobalTelemetry::default();
+                                global.firmware_version = fw;
+                                global.active_sim = sim;
+                                global.network_provider = prov;
+                                global.apn = apn;
+                                global.internet_connection = Some("Disconnected".to_string());
+                                global.uptime = Some(format!("{} minutes", uptime_sec / 60));
+                                global.updated = Some(updated_str);
+                            } else {
+                                *global = GlobalTelemetry::from_telemetry_and_global(
+                                    &telemetry, &global,
+                                    Some(format!("{} minutes", uptime_sec / 60)),
+                                    Some(updated_str),
+                                );
+                            }
+
+                            broadcast_state(&state, &global);
                         }
 
-                        broadcast_state(&state, &global);
+                        push_log("INFO", "Poll", &format!("轮询完成 (耗时 {}ms)", start_poll.elapsed().as_millis()));
+                    } else {
+                        // 锁获取失败：高优先级任务正在占用串口，优雅退回
+                        push_log("WARN", "Poll", "串口被高优先级指令占用，跳过本次轮询");
                     }
-
-                    push_log("INFO", "Poll", &format!("轮询完成 (耗时 {}ms)", start_poll.elapsed().as_millis()));
-
-                } else if active {
-                    push_log("WARN", "Poll", "串口忙或正在执行慢命令，跳过当次采集，复用缓存");
-                    let uptime_sec = System::uptime();
-                    let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
-
-                    let mut global = state.global.write().await;
-                    global.uptime = Some(format!("{} minutes", uptime_sec / 60));
-                    global.updated = Some(updated_str);
-                    broadcast_state(&state, &global);
-
                 } else {
                     push_log("INFO", "Poll", "硬件轮询处于空闲模式 (无活跃视图)");
                 }

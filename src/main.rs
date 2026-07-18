@@ -22,7 +22,7 @@ use sysinfo::{Components, System};
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 
 use at::{
-    parse_cgpaddr, parse_cops_scan, parse_net_status, parse_qcainfo, parse_qcfg_bands,
+    parse_cgpaddr, parse_cops_scan, parse_net_status, parse_qcainfo,
     parse_qeng, parse_qtemp_temperature, parse_signal_quality, parse_traffic_line,
     decode_cmgl_body, decode_hex_ucs2, normalize_at_command,
 };
@@ -362,13 +362,7 @@ impl HardwareBackend for RealBackend {
             .await
             .unwrap_or_else(|| "Unknown".to_string());
         let serial = imei.clone();
-        let hw_ver = send_at_get_line(&self.serial_path, "AT+QIMPVER")
-            .await
-            .and_then(|r| {
-                r.strip_prefix("+QIMPVER:")
-                    .map(|s| s.trim().trim_matches('"').to_string())
-            })
-            .unwrap_or_else(|| "Unknown".to_string());
+        let hw_ver = "Unknown".to_string();
         let module_type = model.clone();
         let sim_status = send_at_get_line(&self.serial_path, "AT+CPIN?")
             .await
@@ -909,20 +903,6 @@ async fn query_device_bands(serial_path: &str) -> String {
                             lte_bands.push(format!("B{}", band_str));
                         }
                     }
-                }
-            }
-        }
-    }
-
-    if nr_bands.len() <= 1 || lte_bands.len() <= 1 {
-        if let Ok(resp) = send_at_command_dedup(serial_path, "AT+QCFG=\"band\"").await {
-            if let Some(line) = resp.lines().find(|l| l.trim().starts_with("+QCFG:")) {
-                let parsed = parse_qcfg_bands(line.trim());
-                if !parsed.0.is_empty() {
-                    lte_bands = parsed.0;
-                }
-                if !parsed.1.is_empty() {
-                    nr_bands = parsed.1;
                 }
             }
         }

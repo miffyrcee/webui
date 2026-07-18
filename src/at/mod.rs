@@ -9,7 +9,6 @@ pub use parser::{
     parse_cops_scan,
     parse_net_status,
     parse_qcainfo,
-    parse_qcfg_bands,
     parse_qeng,
     parse_qtemp_temperature,
     parse_signal_quality,

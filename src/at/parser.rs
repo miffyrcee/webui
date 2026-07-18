@@ -110,6 +110,43 @@ pub enum ParsedLine {
     Other(String),
 }
 
+/// 将移远 5G NR 频宽索引代码转换为实际 MHz 数
+fn decode_nr_bandwidth(code: i32) -> f64 {
+    match code {
+        0 => 5.0,
+        1 => 10.0,
+        2 => 15.0,
+        3 => 20.0,
+        4 => 25.0,
+        5 => 30.0,
+        6 => 40.0,
+        7 => 50.0,
+        8 => 60.0,
+        9 => 70.0,
+        10 => 80.0,
+        11 => 90.0,
+        12 => 100.0,
+        13 => 200.0,
+        14 => 400.0,
+        15 => 35.0,
+        16 => 45.0,
+        other => other as f64,
+    }
+}
+
+/// 将移远 LTE 频宽代码（Resource Blocks）转换为实际 MHz 数
+fn decode_lte_bandwidth(code: i32) -> f64 {
+    match code {
+        6 => 1.4,
+        15 => 3.0,
+        25 => 5.0,
+        50 => 10.0,
+        75 => 15.0,
+        100 => 20.0,
+        other => other as f64,
+    }
+}
+
 /// 使用结构化 AST 匹配构建 QcainfoEntry，彻底弃用扁平 extract_values 的位置索引
 fn build_qcainfo_entry(pair: pest::iterators::Pair<'_, Rule>) -> QcainfoEntry {
     // 如果收到的是 qcainfo_resp，查找内部实际的 pcc/scc 子规则
@@ -384,13 +421,19 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
         }
         telemetry.bands = Some(bands.join(", "));
 
-        // Bandwidth: sum all CC bandwidths
-        let mut total_bw = 0i32;
+        // Bandwidth: decode codes then sum across all CCs
+        let mut total_bw = 0.0f64;
         let mut bw_parts: Vec<String> = Vec::new();
         for cell in &serving_cells {
-            if let Ok(bw) = cell.bandwidth.parse::<i32>() {
-                total_bw += bw;
-                bw_parts.push(bw.to_string());
+            if let Ok(code) = cell.bandwidth.parse::<i32>() {
+                let is_nr = cell.rat.starts_with("NR5G");
+                let actual_bw = if is_nr {
+                    decode_nr_bandwidth(code)
+                } else {
+                    decode_lte_bandwidth(code)
+                };
+                total_bw += actual_bw;
+                bw_parts.push(actual_bw.to_string());
             }
         }
         if !bw_parts.is_empty() {
@@ -406,7 +449,14 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
     } else {
         // Single carrier
         telemetry.bands = Some(format!("NR5G BAND {}", pcc.band));
-        telemetry.bandwidth = Some(format!("{} MHz", pcc.bandwidth));
+        let bw_value = pcc.bandwidth.parse::<i32>().map(|code| {
+            if pcc.rat.starts_with("NR5G") {
+                decode_nr_bandwidth(code)
+            } else {
+                decode_lte_bandwidth(code)
+            }
+        }).unwrap_or(0.0);
+        telemetry.bandwidth = Some(format!("{} MHz", bw_value));
         telemetry.earfcn = Some(pcc.earfcn.clone());
         telemetry.pci = Some(pcc.pci.clone());
     }
@@ -437,13 +487,19 @@ pub fn parse_qcainfo(qca_res: &str, telemetry: &mut crate::TelemetryData) {
     let mut bands: Vec<String> = Vec::new();
     let mut earfcns = Vec::new();
     let mut pcis = Vec::new();
-    let mut total_bw = 0i32;
+    let mut total_bw = 0.0f64;
     let mut bw_parts: Vec<String> = Vec::new();
 
     for entry in entries.iter() {
-        if let Ok(bw) = entry.bandwidth.parse::<i32>() {
-            total_bw += bw;
-            bw_parts.push(bw.to_string());
+        if let Ok(code) = entry.bandwidth.parse::<i32>() {
+            let is_nr = entry.band.starts_with("NR5G");
+            let actual_bw = if is_nr {
+                decode_nr_bandwidth(code)
+            } else {
+                decode_lte_bandwidth(code)
+            };
+            total_bw += actual_bw;
+            bw_parts.push(actual_bw.to_string());
         }
         earfcns.push(entry.earfcn.as_str());
         pcis.push(entry.pci.as_str());
@@ -801,7 +857,7 @@ OK\r\n";
         assert_eq!(telemetry.enb_id, Some("39074C".to_string()));
         assert_eq!(telemetry.tac, Some("72002F".to_string()));
         assert_eq!(telemetry.bands, Some("NR5G BAND 41".to_string()));
-        assert_eq!(telemetry.bandwidth, Some("12 MHz".to_string()));
+        assert_eq!(telemetry.bandwidth, Some("100 MHz".to_string()));
         assert_eq!(telemetry.earfcn, Some("504990".to_string()));
         assert_eq!(telemetry.pci, Some("751".to_string()));
 
@@ -819,7 +875,7 @@ OK\r\n";
 
     #[test]
     fn test_parse_qcainfo_real_pcc_scc() {
-        // 真实 CA 数据：PCC(NR5G BAND 41, 12MHz) + SCC(NR5G BAND 28, 3MHz)
+        // 真实 CA 数据：PCC(NR5G BAND 41, 12=100MHz) + SCC(NR5G BAND 28, 3=20MHz)
         let raw =
             "+QCAINFO: \"PCC\",504990,12,\"NR5G BAND 41\",751\n\
              +QCAINFO: \"SCC\",156490,3,\"NR5G BAND 28\",1,250,0,-,-";
@@ -827,7 +883,7 @@ OK\r\n";
         parse_qcainfo(raw, &mut telemetry);
 
         assert_eq!(telemetry.bands, Some("NR5G BAND 41, NR5G BAND 28".to_string()));
-        assert_eq!(telemetry.bandwidth, Some("NR 15 MHz (12+3)".to_string()));
+        assert_eq!(telemetry.bandwidth, Some("NR 120 MHz (100+20)".to_string()));
         assert_eq!(telemetry.earfcn, Some("504990, 156490".to_string()));
         // SCC pci 通过结构化 AST 正确匹配 scc_pci 字段，无字段偏移问题
         assert_eq!(telemetry.pci, Some("751, 0".to_string()));
@@ -928,14 +984,14 @@ OK\r\n";
         assert_eq!(telemetry.assessment, Some("Good".to_string()));
         // QENG 设置了 bands/bandwidth/earfcn/pci，后续会被 QCAINFO 覆盖
         assert_eq!(telemetry.bands, Some("NR5G BAND 41".to_string()));
-        assert_eq!(telemetry.bandwidth, Some("12 MHz".to_string()));
+        assert_eq!(telemetry.bandwidth, Some("100 MHz".to_string()));
         assert_eq!(telemetry.earfcn, Some("504990".to_string()));
         assert_eq!(telemetry.pci, Some("751".to_string()));
 
         // 第 3 步：QCAINFO → 覆盖 bands/bandwidth/earfcn/pci（载波聚合）
         parse_qcainfo(qcainfo_raw, &mut telemetry);
         assert_eq!(telemetry.bands, Some("NR5G BAND 41, NR5G BAND 28".to_string()));
-        assert_eq!(telemetry.bandwidth, Some("NR 15 MHz (12+3)".to_string()));
+        assert_eq!(telemetry.bandwidth, Some("NR 120 MHz (100+20)".to_string()));
         assert_eq!(telemetry.earfcn, Some("504990, 156490".to_string()));
         assert_eq!(telemetry.pci, Some("751, 0".to_string())); // SCC pci 因字段偏移为 "0"
 
@@ -962,7 +1018,7 @@ OK\r\n";
         parse_qeng(raw, &mut telemetry);
 
         assert_eq!(telemetry.bands, Some("NR5G BAND 41, NR5G BAND 28".to_string()));
-        assert_eq!(telemetry.bandwidth, Some("NR 15 MHz (12+3)".to_string()));
+        assert_eq!(telemetry.bandwidth, Some("NR 120 MHz (100+20)".to_string()));
         assert_eq!(telemetry.earfcn, Some("504990, 156490".to_string()));
         assert_eq!(telemetry.pci, Some("751, 250".to_string()));
         // 使用 PCC（首行）的信号值

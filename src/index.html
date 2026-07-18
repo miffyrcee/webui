@@ -358,11 +358,12 @@
 
             <!-- 日志区 -->
             <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
-                <div class="p-4 border-b border-brandBorder">
-                    <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Settings Log</h2>
+                <div class="p-4 border-b border-brandBorder flex items-center justify-between">
+                    <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">System Live Log (RAM Ring Buffer)</h2>
+                    <button id="log_refresh_btn" class="bg-brandCard/60 hover:bg-brandCard border border-brandBorder text-brandMuted hover:text-white px-3 py-1 text-xs rounded-lg transition-all active:scale-95">Refresh Logs</button>
                 </div>
                 <div id="settings_log" class="p-4 font-mono text-xs text-green-400 bg-black/30 max-h-[200px] overflow-y-auto space-y-1">
-                    <div class="text-brandMuted">Settings panel ready.</div>
+                    <div class="text-brandMuted">Logs will load when settings tab is active.</div>
                 </div>
             </div>
         </div>
@@ -548,6 +549,10 @@
                 }
             });
 
+            if (tab === 'settings' && socket && socket.readyState === WebSocket.OPEN) {
+                sendWsCommand('get_backend_log');
+            }
+
             if (tab === 'device' && socket && socket.readyState === WebSocket.OPEN) {
                 sendWsCommand('get_device_info');
             }
@@ -605,6 +610,8 @@
                         handleScanResult(data.data);
                     } else if (data.type === "sms_list") {
                         typeof data.data === 'string' ? handleAtResponse(data.data) : handleSmsList(data.data);
+                    } else if (data.type === "backend_log") {
+                        handleBackendLog(data.data);
                     } else if (data.type === "device_info") {
                         handleDeviceInfo(data.data);
                     } else if (data.type === "settings_info") {
@@ -791,6 +798,35 @@
                 const input = getDomElement('settings_interval');
                 if (input) input.value = data.interval;
             }
+        }
+
+        function handleBackendLog(logs) {
+            const logEl = getDomElement('settings_log');
+            if (!logEl) return;
+            if (!logs || logs.length === 0) {
+                logEl.innerHTML = '<div class="text-brandMuted">No logs found in memory.</div>';
+                return;
+            }
+
+            logEl.innerHTML = logs.map(log => {
+                let colorClass = "text-brandMuted";
+                if (log.includes("[ERROR]")) colorClass = "text-red-400 font-semibold";
+                else if (log.includes("[WARN]")) colorClass = "text-yellow-400 font-semibold";
+                else if (log.includes("[INFO]")) colorClass = "text-green-400";
+
+                return `<div class="${colorClass}">${escapeHtml(log)}</div>`;
+            }).join('');
+
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function escapeHtml(str) {
+            return str
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
         }
 
         let telemetryCache = {};
@@ -1077,6 +1113,13 @@
                     }
                     sendWsCommand('set_interval', interval.toString());
                     appendSettingsLog(`Polling interval set to ${interval}s`);
+                });
+            }
+
+            const logRefreshBtn = getDomElement('log_refresh_btn');
+            if (logRefreshBtn) {
+                logRefreshBtn.addEventListener('click', () => {
+                    sendWsCommand('get_backend_log');
                 });
             }
 

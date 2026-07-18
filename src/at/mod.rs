@@ -12,12 +12,12 @@ pub use parser::{
     parse_qeng,
     parse_qtemp_temperature,
     parse_signal_quality,
-    parse_traffic_line,
 };
 
 // 重新导出 main.rs 需要的工具函数
 pub use utils::{
     decode_cmgl_body,
     decode_hex_ucs2,
+    format_bytes,
     normalize_at_command,
 };

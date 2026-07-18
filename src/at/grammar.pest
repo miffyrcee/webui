@@ -112,13 +112,21 @@ cgcontrdp_resp = { "+CGCONTRDP:" ~ generic_value ~ (COMMA ~ generic_value)* }
 // +CNUM: [<contact>,"<number>",<type>]
 cnum_resp = { "+CNUM:" ~ generic_value ~ (COMMA ~ generic_value)* }
 
+// ─── QCCID ───
+// +QCCID: <iccid>
+qccid_resp = { "+QCCID:" ~ generic_value }
+
+// ─── CIMI ───
+// +CIMI: <imsi>
+cimi_resp = { "+CIMI:" ~ generic_value }
+
 // ─── AT command echo line ───
 // Matches the initial echo of the AT command in raw output (e.g. "AT+CGMR")
 at_echo_line = { "AT" ~ (!CRLF ~ ANY)* }
 
 // ─── Combined AT command response (cleaned, no echo) ───
 // A response can contain multiple AT result lines interspersed
-at_response_line = { (cpin_resp | quimslot_resp | qspn_resp | cops_resp | cgdcont_resp | qgdnrcnt_resp | qgdat_resp | cgpaddr_resp | qeng_servingcell | qcainfo_resp | status_line | cgmr_line) }
+at_response_line = { (cpin_resp | quimslot_resp | qspn_resp | cops_resp | cgdcont_resp | qgdnrcnt_resp | qgdat_resp | cgpaddr_resp | qeng_servingcell | qcainfo_resp | cnum_resp | cgcontrdp_resp | qccid_resp | cimi_resp | qtemp_resp | creg_resp | csq_resp | status_line | cgmr_line) }
 
 at_response = { SOI ~ (at_response_line ~ (CRLF ~ at_response_line)*)? ~ EOI }
 

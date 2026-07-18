@@ -4,7 +4,7 @@
 
 use crate::at::{
     response::*,
-    utils::{decode_hex_ucs2, format_bytes},
+    utils::decode_hex_ucs2,
 };
 use pest::Parser;
 
@@ -100,6 +100,11 @@ pub enum ParsedLine {
     Cgpaddr(CgpaddrEntry),
     QengServingCell(QengServingCell),
     Qcainfo(QcainfoEntry),
+    Cgcontrdp(CgcontrdpResponse),
+    Cnum(CnumResponse),
+    Qccid(String),
+    Cimi(String),
+    Qtemp(QtempResponse),
     Ok,
     Error,
     Other(String),
@@ -154,7 +159,7 @@ fn build_qcainfo_entry(pair: pest::iterators::Pair<'_, Rule>) -> QcainfoEntry {
 }
 
 /// Parse a single line of AT response using pest-based grammar
-fn parse_single_line(line: &str) -> Option<ParsedLine> {
+pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return None;
@@ -260,6 +265,40 @@ fn parse_single_line(line: &str) -> Option<ParsedLine> {
                         Rule::qcainfo_resp => {
                             ParsedLine::Qcainfo(build_qcainfo_entry(inner))
                         }
+
+                        Rule::cgcontrdp_resp => {
+                            let values = extract_values(inner);
+                            ParsedLine::Cgcontrdp(CgcontrdpResponse {
+                                apn: values.get(2).cloned().unwrap_or_default(),
+                            })
+                        }
+
+                        Rule::cnum_resp => {
+                            let values = extract_values(inner);
+                            ParsedLine::Cnum(CnumResponse {
+                                number: values.get(1).cloned().unwrap_or_default(),
+                            })
+                        }
+
+                        Rule::qccid_resp => {
+                            let values = extract_values(inner);
+                            ParsedLine::Qccid(values.into_iter().next().unwrap_or_default())
+                        }
+
+                        Rule::cimi_resp => {
+                            let values = extract_values(inner);
+                            ParsedLine::Cimi(values.into_iter().next().unwrap_or_default())
+                        }
+
+                        Rule::qtemp_resp => {
+                            let values = extract_values(inner);
+                            ParsedLine::Qtemp(QtempResponse {
+                                sensor: values.get(0).cloned().unwrap_or_default(),
+                                temperature: values.get(1)
+                                    .and_then(|v| v.parse::<f64>().ok()),
+                            })
+                        }
+
                         Rule::cgmr_line => ParsedLine::Other(trimmed.to_string()),
                         _ => ParsedLine::Other(trimmed.to_string()),
                     });
@@ -472,51 +511,17 @@ pub fn parse_qtemp_temperature(qtemp_res: &str) -> Option<String> {
     qtemp_res
         .lines()
         .find_map(|l| {
-            let l = l.trim();
-            if let Some(rest) = l.strip_prefix("+QTEMP:") {
-                let rest = rest.trim();
-                let parts: Vec<&str> = rest.split(',').collect();
-                if parts.len() >= 2 {
-                    let name = parts[0].trim().trim_matches('"');
-                    let val = parts[1].trim().trim_matches('"');
-                    (name.contains("cpuss") || name.contains("mdmss"))
-                        .then(|| val.parse::<f64>().ok())
-                        .flatten()
-                } else {
-                    None
+            match parse_single_line(l) {
+                Some(ParsedLine::Qtemp(qtemp)) => {
+                    if qtemp.sensor.contains("cpuss") || qtemp.sensor.contains("mdmss") {
+                        qtemp.temperature.map(|t| format!("{:.0} °C", t))
+                    } else {
+                        None
+                    }
                 }
-            } else {
-                None
+                _ => None,
             }
         })
-        .map(|t| format!("{:.0} °C", t))
-}
-
-// ============================================================================
-// 从 main.rs 移入的 AT 解析辅助函数
-// ============================================================================
-
-/// Parse traffic stats from a single AT response line (+QGDNRCNT or +QGDAT)
-pub fn parse_traffic_line(line: &str, prefix: &str, quoted: bool) -> Option<String> {
-    let parts: Vec<&str> = line
-        .trim()
-        .strip_prefix(prefix)?
-        .trim()
-        .split(',')
-        .collect();
-    if parts.len() >= 2 {
-        let parse_val = |s: &str| -> u64 {
-            let s = if quoted { s.trim().trim_matches('"') } else { s.trim() };
-            s.parse().unwrap_or(0)
-        };
-        Some(format!(
-            "TX {} / RX {}",
-            format_bytes(parse_val(parts[0])),
-            format_bytes(parse_val(parts[1]))
-        ))
-    } else {
-        None
-    }
 }
 
 /// Parse +CREG response to get network registration status

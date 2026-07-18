@@ -23,8 +23,8 @@ use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 
 use at::{
     parse_cgpaddr, parse_cops_scan, parse_net_status, parse_qcainfo,
-    parse_qeng, parse_qtemp_temperature, parse_signal_quality, parse_traffic_line,
-    decode_cmgl_body, decode_hex_ucs2, normalize_at_command,
+    parse_qeng, parse_qtemp_temperature, parse_signal_quality,
+    decode_cmgl_body, decode_hex_ucs2, format_bytes, normalize_at_command,
 };
 use fs2::FileExt;
 
@@ -397,29 +397,40 @@ impl HardwareBackend for RealBackend {
         let sim_status = send_at_get_line(&self.serial_path, "AT+CPIN?")
             .await
             .and_then(|r| {
-                r.strip_prefix("+CPIN:")
-                    .map(|s| s.trim().trim_matches('"').to_string())
+                match at::parser::parse_single_line(&r) {
+                    Some(at::parser::ParsedLine::Cpin(cpin)) => Some(cpin.status),
+                    _ => None,
+                }
             })
             .unwrap_or_else(|| "Unknown".to_string());
         let imsi = send_at_get_line(&self.serial_path, "AT+CIMI")
             .await
-            .and_then(|r| r.strip_prefix("+CIMI:").map(|s| s.trim().to_string()))
+            .and_then(|r| {
+                match at::parser::parse_single_line(&r) {
+                    Some(at::parser::ParsedLine::Cimi(imsi)) => Some(imsi),
+                    Some(at::parser::ParsedLine::Other(val)) => {
+                        // 裸 IMSI（无 +CIMI: 前缀）
+                        Some(val.trim().to_string())
+                    }
+                    _ => None,
+                }
+            })
             .unwrap_or_default();
         let iccid = send_at_get_line(&self.serial_path, "AT+QCCID")
             .await
             .and_then(|r| {
-                r.strip_prefix("+QCCID:")
-                    .map(|s| s.trim().trim_matches('"').to_string())
+                match at::parser::parse_single_line(&r) {
+                    Some(at::parser::ParsedLine::Qccid(iccid)) => Some(iccid),
+                    _ => None,
+                }
             })
             .unwrap_or_else(|| "Unknown".to_string());
         let phone = send_at_get_line(&self.serial_path, "AT+CNUM")
             .await
             .and_then(|r| {
-                let r = r.trim();
-                if r.starts_with("+CNUM:") {
-                    r.split(',').nth(1).map(|s| s.trim().trim_matches('"').to_string())
-                } else {
-                    None
+                match at::parser::parse_single_line(&r) {
+                    Some(at::parser::ParsedLine::Cnum(cnum)) => Some(cnum.number),
+                    _ => None,
                 }
             })
             .unwrap_or_default();
@@ -491,15 +502,17 @@ impl HardwareBackend for RealBackend {
         if let Ok(cpin_resp) =
             send_at_command_dedup(&self.serial_path, "AT+CPIN?").await
         {
-            for line in cpin_resp.lines() {
-                let trimmed = line.trim();
-                if let Some(status) = trimmed.strip_prefix("+CPIN:") {
-                    let s = status.trim().trim_matches('"');
-                    if !s.is_empty() {
-                        telemetry.sim_status = Some(s.to_string());
+            if let Some(status) = cpin_resp.lines().find_map(|l| {
+                match at::parser::parse_single_line(l) {
+                    Some(at::parser::ParsedLine::Cpin(cpin))
+                        if !cpin.status.is_empty() =>
+                    {
+                        Some(cpin.status)
                     }
-                    break;
+                    _ => None,
                 }
+            }) {
+                telemetry.sim_status = Some(status);
             }
         }
         if let Ok(qtemp_resp) = send_at_command_dedup(&self.serial_path, "AT+QTEMP").await {
@@ -512,18 +525,36 @@ impl HardwareBackend for RealBackend {
             .await
             .ok()
             .and_then(|r| {
-                r.lines()
-                    .find(|l| l.contains("+QGDNRCNT:"))
-                    .and_then(|l| parse_traffic_line(l, "+QGDNRCNT:", false))
+                r.lines().find_map(|l| {
+                    match at::parser::parse_single_line(l) {
+                        Some(at::parser::ParsedLine::TrafficStats(stats)) => {
+                            Some(format!(
+                                "TX {} / RX {}",
+                                format_bytes(stats.tx_bytes),
+                                format_bytes(stats.rx_bytes)
+                            ))
+                        }
+                        _ => None,
+                    }
+                })
             });
         if telemetry.traffic_stats.is_none() {
             telemetry.traffic_stats = send_at_command_dedup(&self.serial_path, "AT+QGDAT?")
                 .await
                 .ok()
                 .and_then(|r| {
-                    r.lines()
-                        .find(|l| l.contains("+QGDAT:"))
-                        .and_then(|l| parse_traffic_line(l, "+QGDAT:", true))
+                    r.lines().find_map(|l| {
+                        match at::parser::parse_single_line(l) {
+                            Some(at::parser::ParsedLine::TrafficStats(stats)) => {
+                                Some(format!(
+                                    "TX {} / RX {}",
+                                    format_bytes(stats.tx_bytes),
+                                    format_bytes(stats.rx_bytes)
+                                ))
+                            }
+                            _ => None,
+                        }
+                    })
                 });
         }
 
@@ -543,11 +574,15 @@ impl HardwareBackend for RealBackend {
 
         push_log("INFO", "System", "[2/5] 获取 SIM 槽位 (AT+QUIMSLOT?)...");
         if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+QUIMSLOT?").await {
-            if let Some(line) = resp.lines().find(|l| l.contains("+QUIMSLOT:")) {
-                let parts: Vec<&str> = line.split(':').collect();
-                if parts.len() >= 2 {
-                    active_sim = format!("SIM {}", parts[1].trim());
+            if let Some(slot_name) = resp.lines().find_map(|l| {
+                match at::parser::parse_single_line(l) {
+                    Some(at::parser::ParsedLine::Quimslot(slot_resp)) => {
+                        Some(format!("SIM {}", slot_resp.slot))
+                    }
+                    _ => None,
                 }
+            }) {
+                active_sim = slot_name;
             }
         }
         if active_sim.is_empty() {
@@ -561,55 +596,49 @@ impl HardwareBackend for RealBackend {
         let mut apn = String::new();
         let mut found_apn = false;
         if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+CGCONTRDP").await {
-            for line in resp.lines() {
-                if line.contains("+CGCONTRDP:") {
-                    let after_prefix = line.trim().strip_prefix("+CGCONTRDP:").unwrap_or(line).trim();
-                    let parts: Vec<&str> = after_prefix.split(',').collect();
-                    if parts.len() >= 3 {
-                        let a = parts[2].trim().trim_matches('"').to_string();
-                        if !a.is_empty() {
-                            apn = a;
-                            found_apn = true;
-                            break;
-                        }
+            if let Some(parsed_apn) = resp.lines().find_map(|l| {
+                match at::parser::parse_single_line(l) {
+                    Some(at::parser::ParsedLine::Cgcontrdp(c_resp))
+                        if !c_resp.apn.is_empty() =>
+                    {
+                        Some(c_resp.apn)
                     }
+                    _ => None,
                 }
+            }) {
+                apn = parsed_apn;
+                found_apn = true;
             }
         }
         if !found_apn {
             push_log("INFO", "System", "[4/5] 回退 AT+CGDCONT? 获取 APN...");
             if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+CGDCONT?").await {
-                for line in resp.lines() {
-                    if line.contains("+CGDCONT:") {
-                        let after_prefix = line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
-                        let parts: Vec<&str> = after_prefix.split(',').collect();
-                        if parts.len() >= 3 {
-                            let a = parts[2].trim().trim_matches('"').to_string();
-                            if !a.is_empty()
-                                && !a.contains("placeholder")
-                                && !a.starts_with("apn")
+                let cgdcont_entries: Vec<_> = resp
+                    .lines()
+                    .filter_map(|l| {
+                        match at::parser::parse_single_line(l) {
+                            Some(at::parser::ParsedLine::Cgdcont(entry))
+                                if !entry.apn.is_empty() =>
                             {
-                                apn = a;
-                                found_apn = true;
-                                break;
+                                Some(entry)
                             }
+                            _ => None,
                         }
-                    }
+                    })
+                    .collect();
+
+                // 优先选取非 placeholder 的有效 APN
+                if let Some(entry) = cgdcont_entries.iter().find(|e| {
+                    !e.apn.contains("placeholder") && !e.apn.starts_with("apn")
+                }) {
+                    apn = entry.apn.clone();
+                    found_apn = true;
                 }
+
+                // 次选：无差别选取第一个被成功解析出来的 APN
                 if !found_apn {
-                    for line in resp.lines() {
-                        if line.contains("+CGDCONT:") {
-                            let after_prefix =
-                                line.trim().strip_prefix("+CGDCONT:").unwrap_or(line).trim();
-                            let parts: Vec<&str> = after_prefix.split(',').collect();
-                            if parts.len() >= 3 {
-                                let a = parts[2].trim().trim_matches('"').to_string();
-                                if !a.is_empty() {
-                                    apn = a;
-                                    break;
-                                }
-                            }
-                        }
+                    if let Some(entry) = cgdcont_entries.first() {
+                        apn = entry.apn.clone();
                     }
                 }
             }
@@ -631,66 +660,60 @@ impl HardwareBackend for RealBackend {
 
 /// 三段式回退获取运营商名称：QSPN → COPS → QENG MCC/MNC
 async fn fetch_network_provider(serial_path: &str) -> String {
-    // 1. AT+QSPN
+    // 1. AT+QSPN (Pest 化)
     if let Ok(resp) = send_at_command_inner(serial_path, "AT+QSPN").await {
-        for line in resp.lines() {
-            if line.contains("+QSPN:") {
-                let after_prefix = line.trim().strip_prefix("+QSPN:").unwrap_or(line).trim();
-                let parts: Vec<&str> = after_prefix.split(',').collect();
-                if let Some(raw) = parts.first() {
-                    let raw = raw.trim().trim_matches('"').trim();
-                    if !raw.is_empty() && raw != "????" {
-                        let decoded = decode_hex_ucs2(raw);
-                        return if decoded.is_empty() {
-                            raw.to_string()
-                        } else {
-                            decoded
-                        };
-                    }
+        if let Some(provider) = resp.lines().find_map(|l| {
+            match at::parser::parse_single_line(l) {
+                Some(at::parser::ParsedLine::Qspn(qspn))
+                    if !qspn.fnn.is_empty() && qspn.fnn != "????" =>
+                {
+                    let decoded = decode_hex_ucs2(&qspn.fnn);
+                    Some(if decoded.is_empty() { qspn.fnn } else { decoded })
                 }
+                _ => None,
             }
+        }) {
+            return provider;
         }
     }
 
-    // 2. AT+COPS?
+    // 2. AT+COPS? (Pest 化)
     if let Ok(resp) = send_at_command_inner(serial_path, "AT+COPS?").await {
-        for line in resp.lines() {
-            if line.contains("+COPS:") {
-                let after_prefix = line.trim().strip_prefix("+COPS:").unwrap_or(line).trim();
-                let parts: Vec<&str> = after_prefix.split(',').collect();
-                if parts.len() >= 2 {
-                    let raw = parts[1].trim().trim_matches('"').trim();
-                    if !raw.is_empty() && raw != "????" {
-                        let decoded = decode_hex_ucs2(raw);
-                        return if decoded.is_empty() {
-                            raw.to_string()
-                        } else {
-                            decoded
-                        };
+        if let Some(provider) = resp.lines().find_map(|l| {
+            match at::parser::parse_single_line(l) {
+                Some(at::parser::ParsedLine::Cops(cops)) => {
+                    if let Some(oper) = cops.oper {
+                        let trimmed = oper.trim();
+                        if !trimmed.is_empty() && trimmed != "????" {
+                            let decoded = decode_hex_ucs2(trimmed);
+                            return Some(if decoded.is_empty() { trimmed.to_string() } else { decoded });
+                        }
                     }
+                    None
                 }
+                _ => None,
             }
+        }) {
+            return provider;
         }
     }
 
-    // 3. AT+QENG="servingcell" 通过 MCC/MNC 映射
+    // 3. AT+QENG="servingcell" 通过 MCC/MNC 映射 (Pest 化)
     if let Ok(resp) = send_at_command_inner(serial_path, "AT+QENG=\"servingcell\"").await {
-        for line in resp.lines() {
-            if line.contains("+QENG: \"servingcell\"") {
-                let parts: Vec<&str> = line
-                    .split(',')
-                    .map(|s| s.trim().trim_matches('"'))
-                    .collect();
-                if parts.len() >= 6 {
-                    return match format!("{}{}", parts[4], parts[5]).as_str() {
-                        "46000" | "46002" | "46007" => "中国移动".to_string(),
-                        "46001" => "中国联通".to_string(),
-                        "46003" | "46011" => "中国电信".to_string(),
-                        _ => "Unknown".to_string(),
-                    };
+        if let Some(mccmnc) = resp.lines().find_map(|l| {
+            match at::parser::parse_single_line(l) {
+                Some(at::parser::ParsedLine::QengServingCell(cell)) => {
+                    Some(format!("{}{}", cell.mcc, cell.mnc))
                 }
-                break;
+                _ => None,
             }
+        }) {
+            return match mccmnc.as_str() {
+                "46000" | "46002" | "46007" => "中国移动".to_string(),
+                "46001" => "中国联通".to_string(),
+                "46003" | "46011" => "中国电信".to_string(),
+                _ => "Unknown".to_string(),
+            };
         }
     }
 
@@ -872,28 +895,19 @@ async fn query_device_bands(serial_path: &str) -> String {
     if let Ok(resp) = send_at_command_dedup(serial_path, "AT+QENG=\"servingcell\"").await {
         for line in resp.lines() {
             let trimmed = line.trim();
-            if !trimmed.starts_with("+QENG: \"servingcell\"") {
-                continue;
-            }
-            let rest = trimmed
-                .strip_prefix("+QENG: \"servingcell\"")
-                .unwrap_or("")
-                .trim()
-                .strip_prefix(',')
-                .unwrap_or("");
-            let parts: Vec<&str> = rest.split(',').map(|s| s.trim().trim_matches('"')).collect();
-            let band_idx = if parts.get(1).map_or(false, |r| r.contains("NR5G")) { 9 } else { 8 };
-            if let Some(band) = parts.get(band_idx) {
-                let b = band.trim();
-                if !b.is_empty() && b != "-" {
-                    if parts.get(1).map_or(false, |r| r.contains("NR5G")) {
-                        if !nr_bands.contains(&format!("n{}", b)) {
-                            nr_bands.push(format!("n{}", b));
-                        }
-                    } else if parts.get(1).map_or(false, |r| *r == "LTE") {
-                        if !lte_bands.contains(&format!("B{}", b)) {
-                            lte_bands.push(format!("B{}", b));
-                        }
+            if let Some(at::parser::ParsedLine::QengServingCell(cell)) =
+                at::parser::parse_single_line(trimmed)
+            {
+                if cell.band.is_empty() || cell.band == "-" {
+                    continue;
+                }
+                if cell.rat.contains("NR5G") {
+                    if !nr_bands.contains(&format!("n{}", cell.band)) {
+                        nr_bands.push(format!("n{}", cell.band));
+                    }
+                } else if cell.rat == "LTE" {
+                    if !lte_bands.contains(&format!("B{}", cell.band)) {
+                        lte_bands.push(format!("B{}", cell.band));
                     }
                 }
             }
@@ -903,26 +917,22 @@ async fn query_device_bands(serial_path: &str) -> String {
     if let Ok(resp) = send_at_command_dedup(serial_path, "AT+QCAINFO").await {
         for line in resp.lines() {
             let trimmed = line.trim();
-            if !trimmed.starts_with("+QCAINFO:") {
-                continue;
-            }
-            let rest = trimmed.strip_prefix("+QCAINFO:").unwrap_or("").trim();
-            let parts: Vec<&str> = rest.split(',').map(|s| s.trim().trim_matches('"')).collect();
-            if let Some(raw) = parts.get(3) {
-                let band_str = raw.trim();
-                if band_str.starts_with("NR5G BAND ") {
-                    let num = band_str.strip_prefix("NR5G BAND ").unwrap_or("").trim();
+            if let Some(at::parser::ParsedLine::Qcainfo(entry)) =
+                at::parser::parse_single_line(trimmed)
+            {
+                if entry.band.starts_with("NR5G BAND ") {
+                    let num = entry.band.strip_prefix("NR5G BAND ").unwrap_or("").trim();
                     if !num.is_empty() && !nr_bands.contains(&format!("n{}", num)) {
                         nr_bands.push(format!("n{}", num));
                     }
-                } else if let Ok(_) = band_str.parse::<i32>() {
-                    if band_str.parse::<u32>().unwrap_or(0) > 100 {
-                        if !nr_bands.contains(&format!("n{}", band_str)) {
-                            nr_bands.push(format!("n{}", band_str));
+                } else if let Ok(band_num) = entry.band.parse::<u32>() {
+                    if band_num > 100 {
+                        if !nr_bands.contains(&format!("n{}", band_num)) {
+                            nr_bands.push(format!("n{}", band_num));
                         }
                     } else {
-                        if !lte_bands.contains(&format!("B{}", band_str)) {
-                            lte_bands.push(format!("B{}", band_str));
+                        if !lte_bands.contains(&format!("B{}", band_num)) {
+                            lte_bands.push(format!("B{}", band_num));
                         }
                     }
                 }

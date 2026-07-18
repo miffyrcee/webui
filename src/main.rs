@@ -81,6 +81,16 @@ enum AtAction {
     FactoryReset,
     /// true=ON, false=OFF
     FlightMode(bool),
+    /// (is_nr5g, bands) — true=NR5G, false=LTE; "all" 或 "" 恢复所有频段
+    SetBandLock { is_nr5g: bool, bands: String },
+    /// (tech, pci, earfcn, band, enable) — enable=false 解除锁定
+    SetCellLock { tech: String, pci: u32, earfcn: u32, band: Option<u32>, enable: bool },
+    /// USB 网络模式（有效值: 0,1,2,3,5）
+    SetUsbNet(u8),
+    /// SIM 卡槽编号
+    SwitchSimSlot(u8),
+    /// 诊断子命令
+    GetDiagnostics(DiagnosticType),
 }
 
 struct AtRequest {
@@ -179,6 +189,26 @@ struct WsCommand {
     payload: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticType {
+    Neighbour,
+    Qlts,
+    MbnList,
+    MbnAutoclose,
+}
+
+impl std::fmt::Display for DiagnosticType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DiagnosticType::Neighbour => write!(f, "neighbour"),
+            DiagnosticType::Qlts => write!(f, "qlts"),
+            DiagnosticType::MbnList => write!(f, "mbn_list"),
+            DiagnosticType::MbnAutoclose => write!(f, "mbn_autoclose"),
+        }
+    }
+}
+
 #[derive(Serialize, Default, Debug, Clone)]
 struct TelemetryData {
     temperature: Option<String>,
@@ -243,8 +273,8 @@ trait HardwareBackend: Send + Sync {
     /// 配置 APN
     async fn configure_apn(&self, apn: &str, user: &str, pass: &str, auth_type: u8);
 
-    /// 设置网络模式偏好
-    async fn set_network_mode_pref(&self, mode: &str);
+    /// 设置网络模式偏好（支持 SA/NSA 切换）
+    async fn set_network_mode_pref(&self, mode: &str) -> Result<String, String>;
 
     /// 设置数据会话连接/断开
     async fn set_data_session(&self, connect: bool);
@@ -266,6 +296,21 @@ trait HardwareBackend: Send + Sync {
 
     /// 设置飞行模式
     async fn set_airplane_mode(&self, on: bool);
+
+    /// 设置频段锁定（is_nr5g=true → NR5G, false → LTE; bands="all"/"" 恢复全频段）
+    async fn set_band_lock(&self, is_nr5g: bool, bands: &str) -> Result<String, String>;
+
+    /// 设置小区锁定（enable=false 解除锁定; 5G 锁需要 band）
+    async fn set_cell_lock(&self, tech: &str, pci: u32, earfcn: u32, band: Option<u32>, enable: bool) -> Result<String, String>;
+
+    /// 设置 USB 网络模式（0: ECM, 1: NCM, 2: MBIM, 3: RNDIS, 5: QMI）
+    async fn set_usb_net(&self, mode: u8) -> Result<String, String>;
+
+    /// 切换 SIM 卡槽（含 CFUN 重注册）
+    async fn switch_sim_slot(&self, slot: u8) -> Result<String, String>;
+
+    /// 获取诊断信息（子命令: Neighbour/Qlts/MbnList/MbnAutoclose）
+    async fn get_diagnostics(&self, diag: &DiagnosticType) -> Result<String, String>;
 
     /// 轮询采集遥测数据
     async fn poll_telemetry(&self) -> TelemetryData;
@@ -313,15 +358,20 @@ impl HardwareBackend for RealBackend {
         }
     }
 
-    async fn set_network_mode_pref(&self, mode: &str) {
+    async fn set_network_mode_pref(&self, mode: &str) -> Result<String, String> {
         let at_mode = match mode {
             "nr5g" => "AT+QNWPREFCFG=\"mode_pref\",NR5G",
             "lte" => "AT+QNWPREFCFG=\"mode_pref\",LTE",
             "nr5g_lte" => "AT+QNWPREFCFG=\"mode_pref\",NR5G:LTE",
             "wcdma" => "AT+QNWPREFCFG=\"mode_pref\",WCDMA",
-            _ => "AT+QNWPREFCFG=\"mode_pref\",AUTO",
+            "auto" => "AT+QNWPREFCFG=\"mode_pref\",AUTO",
+            // SA/NSA 切换扩展
+            "disable_sa" => "AT+QNWPREFCFG=\"nr5g_disable_mode\",1",
+            "disable_nsa" => "AT+QNWPREFCFG=\"nr5g_disable_mode\",2",
+            "enable_all_5g" => "AT+QNWPREFCFG=\"nr5g_disable_mode\",0",
+            _ => return Err(format!("不支持的网络模式参数: {}", mode)),
         };
-        let _ = send_at_command_inner(&self.serial_path, at_mode).await;
+        send_at_command_inner(&self.serial_path, at_mode).await
     }
 
     async fn set_data_session(&self, connect: bool) {
@@ -479,6 +529,75 @@ impl HardwareBackend for RealBackend {
     async fn set_airplane_mode(&self, on: bool) {
         let cfun_val = if on { "4" } else { "1" };
         let _ = send_at_command_inner(&self.serial_path, &format!("AT+CFUN={}", cfun_val)).await;
+    }
+
+    async fn set_band_lock(&self, is_nr5g: bool, bands: &str) -> Result<String, String> {
+        let cmd = if is_nr5g {
+            let b = if bands.is_empty() || bands == "all" {
+                "1:2:3:5:7:8:12:20:25:28:38:40:41:48:66:71:77:78:79"
+            } else {
+                bands
+            };
+            format!("AT+QNWPREFCFG=\"nr5g_band\",{}", b)
+        } else {
+            let b = if bands.is_empty() || bands == "all" {
+                "1:3:5:8:34:38:39:40:41"
+            } else {
+                bands
+            };
+            format!("AT+QNWPREFCFG=\"lte_band\",{}", b)
+        };
+        send_at_command_inner(&self.serial_path, &cmd).await
+    }
+
+    async fn set_cell_lock(&self, tech: &str, pci: u32, earfcn: u32, band: Option<u32>, enable: bool) -> Result<String, String> {
+        if !enable {
+            // 解除锁定
+            if tech.eq_ignore_ascii_case("5g") {
+                send_at_command_inner(&self.serial_path, "AT+QNWLOCK=\"common/5g\",0").await
+            } else {
+                send_at_command_inner(&self.serial_path, "AT+QNWLOCK=\"common/lte\",0").await
+            }
+        } else if tech.eq_ignore_ascii_case("5g") {
+            let b = band.ok_or_else(|| "5G 锁小区必须提供 Band".to_string())?;
+            send_at_command_inner(&self.serial_path, &format!("AT+QNWLOCK=\"common/5g\",{},{},30,{}", pci, earfcn, b)).await
+        } else {
+            send_at_command_inner(&self.serial_path, &format!("AT+QNWLOCK=\"common/lte\",1,{},{}", earfcn, pci)).await
+        }
+    }
+
+    async fn set_usb_net(&self, mode: u8) -> Result<String, String> {
+        if ![0, 1, 2, 3, 5].contains(&mode) {
+            return Err("非法的 usbnet 模式代码，有效值: 0(ECM) 1(NCM) 2(MBIM) 3(RNDIS) 5(QMI)".to_string());
+        }
+        send_at_command_inner(&self.serial_path, &format!("AT+QCFG=\"usbnet\",{}", mode)).await
+    }
+
+    async fn switch_sim_slot(&self, slot: u8) -> Result<String, String> {
+        if slot != 1 && slot != 2 {
+            return Err("SIM 卡槽只能为 1 或 2".to_string());
+        }
+        send_at_command_inner(&self.serial_path, &format!("AT+QUIMSLOT={}", slot)).await?;
+        // CFUN 循环使 SIM 切换生效
+        push_log("INFO", "System", "执行 CFUN=0 软射频关闭...");
+        let _ = send_at_command_inner(&self.serial_path, "AT+CFUN=0").await;
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        push_log("INFO", "System", "执行 CFUN=1 重新激活搜网...");
+        send_at_command_inner(&self.serial_path, "AT+CFUN=1").await
+    }
+
+    async fn get_diagnostics(&self, diag: &DiagnosticType) -> Result<String, String> {
+        match diag {
+            DiagnosticType::Neighbour => send_at_command_inner(&self.serial_path, "AT+QENG=\"neighbourcell\"").await,
+            DiagnosticType::Qlts => {
+                match send_at_command_inner(&self.serial_path, "AT+QLTS=2").await {
+                    Ok(res) => Ok(res),
+                    Err(_) => send_at_command_inner(&self.serial_path, "AT+QLTS").await,
+                }
+            }
+            DiagnosticType::MbnList => send_at_command_inner(&self.serial_path, "AT+QMBNCFG=\"List\"").await,
+            DiagnosticType::MbnAutoclose => send_at_command_inner(&self.serial_path, "AT+QMBNCFG=\"AutoSel\",0").await,
+        }
     }
 
     async fn poll_telemetry(&self) -> TelemetryData {
@@ -1109,10 +1228,10 @@ async fn handle_at_request(
         }
         AtAction::SetNetworkMode(mode) => {
             push_log("INFO", "Actor", &format!("切换网络模式为: {}", mode));
-            backend.set_network_mode_pref(&mode).await;
+            let res = backend.set_network_mode_pref(&mode).await;
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "network_status",
-                "data": { "status": format!("Network mode set to {}", mode) }
+                "data": { "success": res.is_ok(), "msg": res.unwrap_or_else(|e| e) }
             }));
         }
         AtAction::NetConnect(connect) => {
@@ -1188,6 +1307,55 @@ async fn handle_at_request(
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "settings_log",
                 "data": { "msg": format!("Flight mode turned {}", if on { "ON" } else { "OFF" }) }
+            }));
+        }
+        AtAction::SetBandLock { is_nr5g, bands } => {
+            push_log("INFO", "Actor", &format!("设置频段锁定: is_nr5g={}, bands={}", is_nr5g, bands));
+            let res = backend.set_band_lock(is_nr5g, &bands).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "band_lock_res",
+                "data": { "success": res.is_ok(), "msg": res.unwrap_or_else(|e| e) }
+            }));
+        }
+        AtAction::SetCellLock { tech, pci, earfcn, band, enable } => {
+            push_log("INFO", "Actor", &format!("设置小区锁定: tech={}, pci={}, earfcn={}, band={:?}, enable={}", tech, pci, earfcn, band, enable));
+            let res = backend.set_cell_lock(&tech, pci, earfcn, band, enable).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "cell_lock_res",
+                "data": { "success": res.is_ok(), "msg": res.unwrap_or_else(|e| e) }
+            }));
+        }
+        AtAction::SetUsbNet(mode) => {
+            push_log("INFO", "Actor", &format!("设置USB网络模式: {}", mode));
+            let res = backend.set_usb_net(mode).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "usbnet_res",
+                "data": {
+                    "success": res.is_ok(),
+                    "advise": "reboot_required",
+                    "msg": res.unwrap_or_else(|e| e)
+                }
+            }));
+        }
+        AtAction::SwitchSimSlot(slot) => {
+            push_log("INFO", "Actor", &format!("切换SIM卡槽: {}", slot));
+            let res = backend.switch_sim_slot(slot).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "sim_slot_res",
+                "data": {
+                    "success": res.is_ok(),
+                    "advise": "reconnecting",
+                    "msg": res.unwrap_or_else(|e| e)
+                }
+            }));
+        }
+        AtAction::GetDiagnostics(diag) => {
+            push_log("INFO", "Actor", &format!("获取诊断信息: {}", diag));
+            let res = backend.get_diagnostics(&diag).await;
+            let data = res.as_ref().ok().and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok()).unwrap_or_default();
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "diagnostics_res",
+                "data": { "success": res.is_ok(), "msg": res.unwrap_or_else(|e| e), "data": data }
             }));
         }
     }
@@ -1494,6 +1662,48 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                         "flight_mode" => {
                             let on = cmd.payload.as_ref().and_then(|p| p.as_str()).unwrap_or("0") == "1";
                             AtAction::FlightMode(on)
+                        }
+                        "set_band_lock" => {
+                            let payload = cmd.payload.as_ref();
+                            let is_nr5g = payload.and_then(|p| p.get("nr5g")).or_else(|| payload.and_then(|p| p.get("is_nr5g"))).and_then(|v| v.as_bool()).unwrap_or(false);
+                            let bands = payload.and_then(|p| p.get("bands")).or_else(|| payload.and_then(|p| p.get("band"))).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            AtAction::SetBandLock { is_nr5g, bands }
+                        }
+                        "set_cell_lock" => {
+                            let payload = cmd.payload.as_ref();
+                            let tech = payload.and_then(|p| p.get("tech")).and_then(|v| v.as_str()).unwrap_or("lte").to_string();
+                            let pci = payload.and_then(|p| p.get("pci")).and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                            let earfcn = payload.and_then(|p| p.get("earfcn")).and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                            let band = payload.and_then(|p| p.get("band")).and_then(|v| v.as_u64()).map(|v| v as u32);
+                            let enable = payload.and_then(|p| p.get("enable")).and_then(|v| v.as_bool()).unwrap_or(true);
+                            AtAction::SetCellLock { tech, pci, earfcn, band, enable }
+                        }
+                        "set_usbnet" => {
+                            let mode = cmd.payload.as_ref().and_then(|p| p.as_u64()).unwrap_or(0) as u8;
+                            AtAction::SetUsbNet(mode)
+                        }
+                        "switch_sim_slot" => {
+                            let slot = cmd.payload.as_ref().and_then(|p| p.as_u64()).unwrap_or(1) as u8;
+                            AtAction::SwitchSimSlot(slot)
+                        }
+                        "get_diagnostics" => {
+                            let sub = cmd.payload.as_ref().and_then(|p| p.as_str()).unwrap_or("");
+                            let diag = match sub {
+                                "neighbour" | "neighbor" => DiagnosticType::Neighbour,
+                                "qlt" | "qlts" => DiagnosticType::Qlts,
+                                "mbn_list" | "qmbncfg" => DiagnosticType::MbnList,
+                                "mbn_autoclose" | "autosel" => DiagnosticType::MbnAutoclose,
+                                _ => {
+                                    push_log("WARN", "WS", &format!("未知诊断子命令: {}", sub));
+                                    continue;
+                                }
+                            };
+                            AtAction::GetDiagnostics(diag)
+                        }
+                        // `set_mode_pref` 是 `set_network_mode` 的别名
+                        "set_mode_pref" => {
+                            let mode = cmd.payload.as_ref().and_then(|p| p.as_str()).unwrap_or("auto").to_string();
+                            AtAction::SetNetworkMode(mode)
                         }
                         unknown_action => {
                             push_log("WARN", "WS", &format!("未知 WebSocket 动作: {:?}", unknown_action));

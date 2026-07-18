@@ -242,6 +242,14 @@
                                 <option value="wcdma">WCDMA Only</option>
                             </select>
                             <button id="net_mode_btn" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Set Network Mode</button>
+                            <div class="border-t border-brandBorder/40 pt-3 mt-1">
+                                <h3 class="text-xs font-semibold tracking-wide text-brandMuted uppercase mb-2">SA/NSA Mode Control</h3>
+                                <div class="flex flex-wrap gap-2">
+                                    <button id="net_disable_sa_btn" class="flex-1 min-w-[90px] bg-amber-600 hover:bg-amber-700 text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95">Disable SA</button>
+                                    <button id="net_disable_nsa_btn" class="flex-1 min-w-[90px] bg-amber-600 hover:bg-amber-700 text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95">Disable NSA</button>
+                                    <button id="net_enable_all_5g_btn" class="flex-1 min-w-[90px] bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95">Enable All 5G</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -354,6 +362,125 @@
                         <button id="settings_flight_off_btn" class="w-full bg-brandCard/60 hover:bg-brandCard border border-brandBorder text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95">Flight Mode OFF</button>
                     </div>
                 </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+            <!-- 频段锁定 -->
+            <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                <div class="p-4 border-b border-brandBorder">
+                    <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Band Locking</h2>
+                </div>
+                <div class="p-4 space-y-3">
+                    <div class="flex space-x-4">
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="radio" name="band_rat" value="nr5g" checked class="accent-emerald-500">
+                            <span class="text-xs text-white">NR5G</span>
+                        </label>
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="radio" name="band_rat" value="lte" class="accent-emerald-500">
+                            <span class="text-xs text-white">LTE</span>
+                        </label>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs text-brandMuted">Bands (comma-separated, e.g. N41,N78 or B1,B3; "all"=全频段)</label>
+                        <input id="band_lock_input" type="text" placeholder="N41,N78"
+                            class="bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="band_lock_apply_btn" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Apply Band Lock</button>
+                        <button id="band_lock_reset_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg">Reset All</button>
+                    </div>
+                    <div id="band_lock_status" class="text-xs font-mono text-brandMuted pt-1">Ready.</div>
+                </div>
+            </div>
+
+            <!-- 小区锁定 -->
+            <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                <div class="p-4 border-b border-brandBorder">
+                    <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Cell Lock</h2>
+                </div>
+                <div class="p-4 space-y-3">
+                    <div class="flex space-x-4">
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="radio" name="cell_tech" value="lte" checked class="accent-emerald-500">
+                            <span class="text-xs text-white">LTE</span>
+                        </label>
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="radio" name="cell_tech" value="5g" class="accent-emerald-500">
+                            <span class="text-xs text-white">5G NR</span>
+                        </label>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="flex flex-col gap-1">
+                            <label class="text-xs text-brandMuted">PCI</label>
+                            <input id="cell_pci_input" type="number" placeholder="e.g. 751"
+                                class="bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-xs text-brandMuted">EARFCN</label>
+                            <input id="cell_earfcn_input" type="number" placeholder="e.g. 504990"
+                                class="bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                        </div>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs text-brandMuted">Band (必须，5G 锁小区需要)</label>
+                        <input id="cell_band_input" type="number" placeholder="e.g. 41"
+                            class="bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="cell_lock_apply_btn" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Apply Cell Lock</button>
+                        <button id="cell_lock_unlock_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg">Unlock</button>
+                    </div>
+                    <div id="cell_lock_status" class="text-xs font-mono text-brandMuted pt-1">Ready.</div>
+                </div>
+            </div>
+
+            <!-- USB Net & SIM Slot -->
+            <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                <div class="p-4 border-b border-brandBorder">
+                    <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">USB Net &amp; SIM Slot</h2>
+                </div>
+                <div class="p-4 space-y-3">
+                    <div class="flex flex-col gap-1">
+                        <label class="text-xs text-brandMuted">USB Network Mode</label>
+                        <select id="usbnet_mode_select"
+                            class="bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                            <option value="0">ECM (0)</option>
+                            <option value="1">NCM (1)</option>
+                            <option value="2" selected>MBIM (2)</option>
+                            <option value="3">RNDIS (3)</option>
+                            <option value="5">QMI (5)</option>
+                        </select>
+                    </div>
+                    <button id="usbnet_apply_btn" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Set USB Mode</button>
+                    <div class="border-t border-brandBorder/40 pt-3 mt-1">
+                        <h3 class="text-xs font-semibold tracking-wide text-brandMuted uppercase mb-2">SIM Slot Switch</h3>
+                        <div class="flex space-x-2">
+                            <button id="sim_slot_1_btn" class="flex-1 bg-brandCard/60 hover:bg-brandCard border border-brandBorder text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95">SIM 1</button>
+                            <button id="sim_slot_2_btn" class="flex-1 bg-brandCard/60 hover:bg-brandCard border border-brandBorder text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95">SIM 2</button>
+                        </div>
+                    </div>
+                    <div id="usbnet_sim_status" class="text-xs font-mono text-brandMuted pt-1">Ready.</div>
+                </div>
+            </div>
+
+            <!-- Diagnostics -->
+            <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                <div class="p-4 border-b border-brandBorder">
+                    <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Diagnostics</h2>
+                </div>
+                <div class="p-4 space-y-3">
+                    <div class="flex flex-wrap gap-2">
+                        <button id="diag_neighbour_btn" class="flex-1 min-w-[100px] bg-brandCard/60 hover:bg-brandCard border border-brandBorder text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95">Neighbour Cells</button>
+                        <button id="diag_qlts_btn" class="flex-1 min-w-[100px] bg-brandCard/60 hover:bg-brandCard border border-brandBorder text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95">QLTS</button>
+                        <button id="diag_mbn_list_btn" class="flex-1 min-w-[100px] bg-brandCard/60 hover:bg-brandCard border border-brandBorder text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95">MBN List</button>
+                        <button id="diag_autosel_btn" class="flex-1 min-w-[100px] bg-brandCard/60 hover:bg-brandCard border border-brandBorder text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95">AutoSel</button>
+                    </div>
+                    <pre id="diag_output" class="p-3 bg-black/30 rounded-lg border border-brandBorder/20 text-xs font-mono text-green-400 max-h-[250px] overflow-y-auto whitespace-pre-wrap">Press a button to fetch diagnostics.</pre>
+                </div>
+            </div>
+
             </div>
 
             <!-- 日志区 -->
@@ -644,6 +771,18 @@
                         handleDeviceInfo(data.data);
                     } else if (data.type === "settings_info") {
                         handleSettingsInfo(data.data);
+                    } else if (data.type === "band_lock_res") {
+                        handleBandLockRes(data.data);
+                    } else if (data.type === "cell_lock_res") {
+                        handleCellLockRes(data.data);
+                    } else if (data.type === "usbnet_res") {
+                        handleUsbnetRes(data.data);
+                    } else if (data.type === "sim_slot_res") {
+                        handleSimSlotRes(data.data);
+                    } else if (data.type === "diagnostics_res") {
+                        handleDiagnosticsRes(data.data);
+                    } else if (data.type === "settings_log") {
+                        if (data.data && data.data.msg) appendSettingsLog(data.data.msg);
                     } else if (data.update_type === "full" || data.update_type === "delta") {
                         const payload = data.data || data;
                         if (data.update_type === "full" || !data.update_type) {
@@ -738,10 +877,82 @@
         }
 
         function handleNetworkStatus(data) {
-            updateText("net_conn_status", data.status);
-            updateText("net_current_apn", data.apn);
-            updateText("net_ipv4", data.ipv4);
-            updateText("net_ipv6", data.ipv6);
+            if (data.success !== undefined) {
+                // 新格式: {success, msg} — 来自 SetNetworkMode 的 Result 返回
+                if (data.success) {
+                    appendSettingsLog('✓ ' + (data.msg || 'Network mode updated'));
+                } else {
+                    appendSettingsLog('✗ ' + (data.msg || 'Failed'));
+                }
+            } else {
+                // 向后兼容:
+                updateText("net_conn_status", data.status);
+                updateText("net_current_apn", data.apn);
+                updateText("net_ipv4", data.ipv4);
+                updateText("net_ipv6", data.ipv6);
+            }
+        }
+
+        function handleBandLockRes(data) {
+            const el = getDomElement('band_lock_status');
+            if (!el) return;
+            if (data.success) {
+                el.innerHTML = '<span class="text-emerald-400">✓ ' + escapeHtml(data.msg || 'OK') + '</span>';
+            } else {
+                el.innerHTML = '<span class="text-red-400">✗ ' + escapeHtml(data.msg || 'Failed') + '</span>';
+            }
+        }
+
+        function handleCellLockRes(data) {
+            const el = getDomElement('cell_lock_status');
+            if (!el) return;
+            if (data.success) {
+                el.innerHTML = '<span class="text-emerald-400">✓ ' + escapeHtml(data.msg || 'OK') + '</span>';
+            } else {
+                el.innerHTML = '<span class="text-red-400">✗ ' + escapeHtml(data.msg || 'Failed') + '</span>';
+            }
+        }
+
+        function handleUsbnetRes(data) {
+            const el = getDomElement('usbnet_sim_status');
+            if (!el) return;
+            if (data.success) {
+                let html = '<span class="text-emerald-400">✓ ' + escapeHtml(data.msg || 'OK') + '</span>';
+                if (data.advise === 'reboot_required') {
+                    html += '<div class="text-amber-400 mt-1">⚠ 需要重启模组才能生效。 <button onclick="if(confirm(\'立即重启模组？\')){sendWsCommand(\'reboot\');}" class="underline hover:text-white">立即重启</button></div>';
+                }
+                el.innerHTML = html;
+            } else {
+                el.innerHTML = '<span class="text-red-400">✗ ' + escapeHtml(data.msg || 'Failed') + '</span>';
+            }
+        }
+
+        function handleSimSlotRes(data) {
+            const el = getDomElement('usbnet_sim_status');
+            if (!el) return;
+            if (data.success) {
+                let html = '<span class="text-emerald-400">✓ ' + escapeHtml(data.msg || 'OK') + '</span>';
+                if (data.advise === 'reconnecting') {
+                    html += '<div class="text-amber-400 mt-1">⏳ 射频重载中，网络短暂中断...</div>';
+                }
+                el.innerHTML = html;
+            } else {
+                el.innerHTML = '<span class="text-red-400">✗ ' + escapeHtml(data.msg || 'Failed') + '</span>';
+            }
+        }
+
+        function handleDiagnosticsRes(data) {
+            const el = getDomElement('diag_output');
+            if (!el) return;
+            if (data.success) {
+                const raw = data.data ? JSON.stringify(data.data, null, 2) : (data.msg || '');
+                el.textContent = raw || '(empty response)';
+                el.className = 'p-3 bg-black/30 rounded-lg border border-brandBorder/20 text-xs font-mono text-green-400 max-h-[250px] overflow-y-auto whitespace-pre-wrap';
+                el.classList.remove('text-red-400');
+            } else {
+                el.textContent = 'ERROR: ' + (data.msg || 'Unknown error');
+                el.className = 'p-3 bg-black/30 rounded-lg border border-brandBorder/20 text-xs font-mono text-red-400 max-h-[250px] overflow-y-auto whitespace-pre-wrap';
+            }
         }
 
         function handleScanResult(data) {
@@ -1123,6 +1334,20 @@
                     console.log('Disconnect command sent');
                 });
             }
+
+            // SA/NSA 模式控制
+            function setupSaNsaBtn(id, mode) {
+                const btn = getDomElement(id);
+                if (btn) {
+                    btn.addEventListener('click', () => {
+                        sendWsCommand('set_mode_pref', mode);
+                        appendSettingsLog('SA/NSA: ' + mode);
+                    });
+                }
+            }
+            setupSaNsaBtn('net_disable_sa_btn', 'disable_sa');
+            setupSaNsaBtn('net_disable_nsa_btn', 'disable_nsa');
+            setupSaNsaBtn('net_enable_all_5g_btn', 'enable_all_5g');
         }
 
         function initScanPanel() {
@@ -1203,6 +1428,103 @@
                     appendSettingsLog('Flight mode OFF');
                 });
             }
+
+            // ── 频段锁定 ──
+            const bandLockApply = getDomElement('band_lock_apply_btn');
+            if (bandLockApply) {
+                bandLockApply.addEventListener('click', () => {
+                    const nr5g = document.querySelector('input[name="band_rat"]:checked')?.value === 'nr5g';
+                    const bands = (getDomElement('band_lock_input')?.value || '').trim();
+                    sendWsCommand('set_band_lock', { nr5g, bands });
+                    const status = getDomElement('band_lock_status');
+                    if (status) status.innerHTML = '<span class="text-amber-400">⏳ 发送中...</span>';
+                });
+            }
+            const bandLockReset = getDomElement('band_lock_reset_btn');
+            if (bandLockReset) {
+                bandLockReset.addEventListener('click', () => {
+                    const nr5g = document.querySelector('input[name="band_rat"]:checked')?.value === 'nr5g';
+                    sendWsCommand('set_band_lock', { nr5g, bands: 'all' });
+                    const status = getDomElement('band_lock_status');
+                    if (status) status.innerHTML = '<span class="text-amber-400">⏳ 重置中...</span>';
+                });
+            }
+
+            // ── 小区锁定 ──
+            const cellLockApply = getDomElement('cell_lock_apply_btn');
+            if (cellLockApply) {
+                cellLockApply.addEventListener('click', () => {
+                    const tech = document.querySelector('input[name="cell_tech"]:checked')?.value || 'lte';
+                    const pci = parseInt(getDomElement('cell_pci_input')?.value, 10) || 0;
+                    const earfcn = parseInt(getDomElement('cell_earfcn_input')?.value, 10) || 0;
+                    const bandStr = (getDomElement('cell_band_input')?.value || '').trim();
+                    const band = bandStr ? parseInt(bandStr, 10) : undefined;
+                    if (!pci || !earfcn) {
+                        const status = getDomElement('cell_lock_status');
+                        if (status) status.innerHTML = '<span class="text-red-400">✗ 请填写 PCI 和 EARFCN</span>';
+                        return;
+                    }
+                    const payload = { tech, pci, earfcn, enable: true };
+                    if (band !== undefined) payload.band = band;
+                    sendWsCommand('set_cell_lock', payload);
+                    const status = getDomElement('cell_lock_status');
+                    if (status) status.innerHTML = '<span class="text-amber-400">⏳ 发送中...</span>';
+                });
+            }
+            const cellLockUnlock = getDomElement('cell_lock_unlock_btn');
+            if (cellLockUnlock) {
+                cellLockUnlock.addEventListener('click', () => {
+                    const tech = document.querySelector('input[name="cell_tech"]:checked')?.value || 'lte';
+                    sendWsCommand('set_cell_lock', { tech, enable: false });
+                    const status = getDomElement('cell_lock_status');
+                    if (status) status.innerHTML = '<span class="text-amber-400">⏳ 解锁中...</span>';
+                });
+            }
+
+            // ── USB Net ──
+            const usbnetApply = getDomElement('usbnet_apply_btn');
+            if (usbnetApply) {
+                usbnetApply.addEventListener('click', () => {
+                    const mode = parseInt(getDomElement('usbnet_mode_select')?.value, 10) || 0;
+                    sendWsCommand('set_usbnet', mode);
+                    const status = getDomElement('usbnet_sim_status');
+                    if (status) status.innerHTML = '<span class="text-amber-400">⏳ 设置 USB 模式...</span>';
+                });
+            }
+
+            // ── SIM Slot ──
+            function setupSimSlotBtn(id, slot) {
+                const btn = getDomElement(id);
+                if (btn) {
+                    btn.addEventListener('click', () => {
+                        if (!confirm('确认切换到 SIM ' + slot + '？切换后网络会短暂中断。')) return;
+                        sendWsCommand('switch_sim_slot', slot);
+                        const status = getDomElement('usbnet_sim_status');
+                        if (status) status.innerHTML = '<span class="text-amber-400">⏳ 切换卡槽中...</span>';
+                    });
+                }
+            }
+            setupSimSlotBtn('sim_slot_1_btn', 1);
+            setupSimSlotBtn('sim_slot_2_btn', 2);
+
+            // ── Diagnostics ──
+            function setupDiagBtn(id, subCmd) {
+                const btn = getDomElement(id);
+                if (btn) {
+                    btn.addEventListener('click', () => {
+                        const output = getDomElement('diag_output');
+                        if (output) {
+                            output.textContent = '⏳ 查询中...';
+                            output.className = 'p-3 bg-black/30 rounded-lg border border-brandBorder/20 text-xs font-mono text-amber-400 max-h-[250px] overflow-y-auto whitespace-pre-wrap';
+                        }
+                        sendWsCommand('get_diagnostics', subCmd);
+                    });
+                }
+            }
+            setupDiagBtn('diag_neighbour_btn', 'neighbour');
+            setupDiagBtn('diag_qlts_btn', 'qlts');
+            setupDiagBtn('diag_mbn_list_btn', 'mbn_list');
+            setupDiagBtn('diag_autosel_btn', 'mbn_autoclose');
         }
 
         function initSmsPanel() {

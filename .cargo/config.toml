@@ -1,8 +1,8 @@
 [target.armv7-unknown-linux-musleabihf]
 linker = "rust-lld"
 rustflags = [
-    "-C", "target-cpu=cortex-a7",       # 指导指令流水线与排程优化
-    "-C", "target-feature=+crt-static,+neon,+vfp4,+d32,+hwdiv", 
+    "-C", "target-cpu=cortex-a7",       # 传入此项后，LLVM 内部已自动开启该 CPU 的 neon, vfp4, d32 和硬件除法
+    "-C", "target-feature=+crt-static",  # 仅保留用于 musl 静态链接的稳定选项
     "-C", "link-self-contained=yes",     
     "-C", "linker-flavor=ld.lld"         
 ]

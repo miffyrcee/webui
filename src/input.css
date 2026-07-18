@@ -9,3 +9,28 @@
     --color-brandBorder: #2a2f3b;
     --color-brandMuted: #9ca3af;
 }
+
+/* 自定义滚动条工具 */
+@utility scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    &::-webkit-scrollbar {
+        display: none;
+    }
+}
+
+@utility scrollbar-thin {
+    scrollbar-width: thin;
+    -ms-overflow-style: auto;
+    &::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+    }
+    &::-webkit-scrollbar-thumb {
+        background: #4b5563;
+        border-radius: 2px;
+    }
+    &::-webkit-scrollbar-track {
+        background: transparent;
+    }
+}

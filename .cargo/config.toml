@@ -1,8 +1,16 @@
 [target.armv7-unknown-linux-musleabihf]
 linker = "rust-lld"
 rustflags = [
-    "-C", "target-cpu=cortex-a7",       # 指定 CPU 即可，会自动应用最匹配的特性
-    "-C", "target-feature=+crt-static", 
+    "-C", "target-cpu=cortex-a7",       # 指导指令流水线与排程优化
+    "-C", "target-feature=+crt-static,+neon,+vfp4,+d32,+hwdiv", 
     "-C", "link-self-contained=yes",     
     "-C", "linker-flavor=ld.lld"         
 ]
+
+[profile.release]
+opt-level = 3            # 如果主要追求运算速度，设为 3
+# opt-level = "s"        # 如果嵌入式存储空间较紧张，可设为 "s"（优化体积）或 "z"（进一步优化体积）
+lto = true               # 开启全局链接时优化 (Link-Time Optimization)
+codegen-units = 1        # 限制代码生成单元为 1，能让 LTO 做出更彻底的内联和死代码消除
+panic = "abort"          # 发生 panic 时直接终止，省去异常栈回溯代码（能显著缩减体积）
+strip = true             # 编译后自动移除所有调试符号和符号表，极大减小二进制文件体积

@@ -528,7 +528,7 @@
     </div>
 
     <!-- 复制成功提示 -->
-    <div id="copy_toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-sm px-4 py-2 rounded-lg shadow-xl transition-all duration-300 opacity-0 translate-y-4 pointer-events-none z-50">
+    <div id="copy_toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-sm px-4 py-2 rounded-lg shadow-xl transition-all duration-300 opacity-0 translate-y-4 z-50 cursor-pointer select-none">
         已复制到剪贴板
     </div>
 
@@ -934,6 +934,16 @@
         }
 
         let copyToastTimer = null;
+        let copyToastFirstShown = null;
+
+        function hideCopyToast() {
+            const toast = getDomElement('copy_toast');
+            if (!toast) return;
+            toast.classList.remove('opacity-100', 'translate-y-0');
+            toast.classList.add('opacity-0', 'translate-y-4');
+            copyToastTimer = null;
+            copyToastFirstShown = null;
+        }
 
         function showCopyToast(label) {
             const toast = getDomElement('copy_toast');
@@ -942,10 +952,13 @@
             toast.textContent = label ? `已复制: ${label}` : '已复制到剪贴板';
             toast.classList.remove('opacity-0', 'translate-y-4');
             toast.classList.add('opacity-100', 'translate-y-0');
-            copyToastTimer = setTimeout(() => {
-                toast.classList.remove('opacity-100', 'translate-y-0');
-                toast.classList.add('opacity-0', 'translate-y-4');
-            }, 2000);
+            if (!copyToastFirstShown) {
+                copyToastFirstShown = Date.now();
+            }
+            // 从第一次显示算起，最多再展示剩余时间，最少 200ms，防止频繁点击导致悬浮不消失
+            const elapsed = Date.now() - copyToastFirstShown;
+            const remaining = Math.max(200, 2000 - elapsed);
+            copyToastTimer = setTimeout(hideCopyToast, remaining);
         }
 
         function initCopyOnClick() {
@@ -984,6 +997,12 @@
                     }
                 });
             });
+        }
+
+        // 点击 toast 可手动关闭
+        function initCopyToastDismiss() {
+            const toast = getDomElement('copy_toast');
+            if (toast) toast.addEventListener('click', hideCopyToast);
         }
 
         function updateProgressBar(idPrefix, valueString) {
@@ -1349,6 +1368,7 @@
         initSmsPanel();
         initDevicePanel();
         initCopyOnClick();
+        initCopyToastDismiss();
     </script>
 </body>
 

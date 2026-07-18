@@ -382,28 +382,55 @@
                     </div>
                 </div>
 
-                <!-- 短信详情 / 发送 -->
-                <div class="lg:col-span-2 bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden max-h-[600px]">
-                    <div class="p-4 border-b border-brandBorder">
-                        <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Send SMS</h2>
-                    </div>
-                    <div class="p-4 space-y-3">
-                        <div class="flex flex-col gap-1">
-                            <label class="text-xs text-brandMuted">Recipient Number</label>
-                            <input id="sms_recipient" type="text" placeholder="+8613800138000"
-                                class="bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                <!-- 右侧面板 (短信详情 / 发送) -->
+                <div class="lg:col-span-2 space-y-4 overflow-y-auto max-h-[600px] scrollbar-thin">
+
+                    <!-- 1. 新增：短信阅读器 (点击左侧列表后在此渲染完整内容) -->
+                    <div id="sms_reader_card" class="hidden bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden transition-all duration-300">
+                        <div class="p-4 border-b border-brandBorder flex justify-between items-center bg-black/10">
+                            <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">SMS Reader</h2>
+                            <button id="sms_reader_close" class="text-xs text-brandMuted hover:text-white border border-brandBorder/40 rounded px-2 py-0.5 hover:bg-white/10 transition-colors">Close</button>
                         </div>
-                        <div class="flex flex-col gap-1">
-                            <label class="text-xs text-brandMuted">Message (max 160 chars)</label>
-                            <textarea id="sms_message" rows="4" maxlength="160" placeholder="Type your message..."
-                                class="bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500 resize-none"></textarea>
-                            <div class="flex justify-between items-center">
-                                <span class="text-xs text-brandMuted">Characters: <span id="sms_char_count">0</span>/160</span>
+                        <div class="p-4 space-y-3">
+                            <div class="flex justify-between items-center text-xs text-brandMuted">
+                                <span>Sender: <strong id="sms_reader_sender" class="text-white select-text font-mono">--</strong></span>
+                                <span id="sms_reader_time" class="font-mono">--</span>
+                            </div>
+                            <!-- 允许文本选择并自动换行显示完整短信 -->
+                            <div id="sms_reader_body" class="p-3 bg-black/30 rounded-lg border border-brandBorder/20 text-sm select-text break-words leading-relaxed whitespace-pre-wrap text-slate-100 font-sans">
+                                --
+                            </div>
+                            <div class="flex space-x-2 pt-1 justify-end">
+                                <button id="sms_reader_reply" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-1 text-xs rounded transition-all active:scale-95 shadow shadow-emerald-900/20">Reply</button>
+                                <button id="sms_reader_copy" class="bg-brandCard/60 hover:bg-brandCard border border-brandBorder text-brandMuted hover:text-white px-4 py-1 text-xs rounded transition-all active:scale-95">Copy Text</button>
                             </div>
                         </div>
-                        <button id="sms_send_btn" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Send SMS</button>
                     </div>
-                    <div id="sms_send_status" class="px-4 pb-4 text-xs font-mono text-brandMuted"></div>
+
+                    <!-- 2. 发送短信表单 -->
+                    <div class="bg-brandCard/40 backdrop-blur-sm border border-brandBorder rounded-xl flex flex-col shadow-md overflow-hidden">
+                        <div class="p-4 border-b border-brandBorder">
+                            <h2 class="text-sm font-semibold tracking-wide text-brandMuted uppercase">Send SMS</h2>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <div class="flex flex-col gap-1">
+                                <label class="text-xs text-brandMuted">Recipient Number</label>
+                                <input id="sms_recipient" type="text" placeholder="+8613800138000"
+                                    class="bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="text-xs text-brandMuted">Message (max 160 chars)</label>
+                                <textarea id="sms_message" rows="4" maxlength="160" placeholder="Type your message..."
+                                    class="bg-[#12141a] border border-brandBorder text-sm rounded px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500 resize-none"></textarea>
+                                <div class="flex justify-between items-center">
+                                    <span class="text-xs text-brandMuted">Characters: <span id="sms_char_count">0</span>/160</span>
+                                </div>
+                            </div>
+                            <button id="sms_send_btn" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-lg shadow-emerald-900/20">Send SMS</button>
+                        </div>
+                        <div id="sms_send_status" class="px-4 pb-4 text-xs font-mono text-brandMuted"></div>
+                    </div>
+
                 </div>
             </div>
         </div>
@@ -511,6 +538,7 @@
         let socket;
         let isVisible = true;
         let currentTab = 'dashboard';
+        let currentSmsMessages = []; // 用于本地缓存短信对象，方便点击时按索引读取详情
 
         const allTabs = ['dashboard', 'network', 'scan', 'settings', 'sms', 'console', 'device'];
 
@@ -754,11 +782,12 @@
             const listEl = getDomElement('sms_list');
             if (!listEl) return;
             if (data.messages && Array.isArray(data.messages)) {
+                currentSmsMessages = data.messages; // 缓存到全局数组
                 if (data.messages.length === 0) {
                     listEl.innerHTML = '<div class="p-4 text-center text-xs text-brandMuted">No messages.</div>';
                 } else {
                     listEl.innerHTML = data.messages.map((msg, i) =>
-                        `<div class="p-3 hover:bg-brandCard/30 transition-colors cursor-pointer select-none">
+                        `<div class="sms-item p-3 hover:bg-brandCard/30 transition-colors cursor-pointer" data-index="${i}">
                             <div class="flex justify-between items-center mb-1">
                                 <span class="text-white text-xs font-semibold">${msg.sender || 'Unknown'}</span>
                                 <span class="text-brandMuted text-[10px]">${msg.timestamp || ''}</span>
@@ -1161,6 +1190,7 @@
         }
 
         function initSmsPanel() {
+            // 发送短信事件
             const sendBtn = getDomElement('sms_send_btn');
             if (sendBtn) {
                 sendBtn.addEventListener('click', () => {
@@ -1195,6 +1225,84 @@
                     sendWsCommand('get_sms_list');
                 });
             }
+
+            // 新增：点击收件箱列表项展示详情逻辑
+            const smsList = getDomElement('sms_list');
+            if (smsList) {
+                smsList.addEventListener('click', (e) => {
+                    const item = e.target.closest('.sms-item');
+                    if (!item) return;
+                    const index = parseInt(item.dataset.index, 10);
+                    if (isNaN(index)) return;
+                    const msg = currentSmsMessages[index];
+                    if (msg) {
+                        showSmsDetail(msg);
+                    }
+                });
+            }
+
+            // 新增：关闭详情
+            const closeBtn = getDomElement('sms_reader_close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    getDomElement('sms_reader_card')?.classList.add('hidden');
+                });
+            }
+
+            // 新增：快捷一键回复
+            const replyBtn = getDomElement('sms_reader_reply');
+            if (replyBtn) {
+                replyBtn.addEventListener('click', () => {
+                    const senderNum = getDomElement('sms_reader_sender')?.innerText;
+                    const recipientInput = getDomElement('sms_recipient');
+                    const messageInput = getDomElement('sms_message');
+                    if (senderNum && recipientInput) {
+                        recipientInput.value = senderNum;
+                        if (messageInput) {
+                            messageInput.focus();
+                        }
+                    }
+                });
+            }
+
+            // 新增：一键无障碍复制短信文本
+            const copyBtn = getDomElement('sms_reader_copy');
+            if (copyBtn) {
+                copyBtn.addEventListener('click', () => {
+                    const bodyText = getDomElement('sms_reader_body')?.innerText;
+                    if (bodyText) {
+                        navigator.clipboard.writeText(bodyText).then(() => {
+                            const originalText = copyBtn.innerText;
+                            copyBtn.innerText = 'Copied!';
+                            copyBtn.classList.add('text-emerald-400');
+                            setTimeout(() => {
+                                copyBtn.innerText = originalText;
+                                copyBtn.classList.remove('text-emerald-400');
+                            }, 2000);
+                        }).catch(err => {
+                            console.error('Failed to copy: ', err);
+                        });
+                    }
+                });
+            }
+        }
+
+        // 新增：全局渲染选中的短信详情函数
+        function showSmsDetail(msg) {
+            const card = getDomElement('sms_reader_card');
+            const sender = getDomElement('sms_reader_sender');
+            const time = getDomElement('sms_reader_time');
+            const body = getDomElement('sms_reader_body');
+
+            if (!card || !sender || !time || !body) return;
+
+            sender.innerText = msg.sender || 'Unknown';
+            time.innerText = msg.timestamp || '';
+            body.innerText = msg.text || '';
+
+            card.classList.remove('hidden');
+            // 自动平滑滚动对齐至视口
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
         function initDevicePanel() {

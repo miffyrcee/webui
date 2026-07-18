@@ -593,8 +593,14 @@
                         handleDeviceInfo(data.data);
                     } else if (data.type === "settings_info") {
                         handleSettingsInfo(data.data);
-                    } else if (data.type === "realtime" || !data.type) {
-                        updateUI(data);
+                    } else if (data.type === "realtime" || data.update_type === "full" || data.update_type === "delta") {
+                        const payload = data.data || data;
+                        if (data.update_type === "full" || data.update_type === "realtime" || !data.update_type) {
+                            telemetryCache = { ...payload };
+                        } else {
+                            Object.assign(telemetryCache, payload);
+                        }
+                        updateUI();
                     }
                 } catch (e) {
                     console.error("Error parsing websocket packet: ", e);
@@ -787,42 +793,46 @@
             }
         }
 
-        function updateUI(payload) {
-            updateText("temp", payload.temperature || "-- °C");
-            updateText("sim_status", payload.sim_status || "--");
-            updateText("signal_pct", payload.signal_percentage || "--%");
-            updateText("conn_status", payload.internet_connection || "--");
+        let telemetryCache = {};
 
-            updateText("info_sim", payload.active_sim || "--");
-            updateText("info_provider", payload.network_provider || "--");
-            updateText("info_mccmnc", payload.mccmnc || "--");
-            updateText("info_apn", payload.apn || "--");
-            updateText("info_mode", payload.network_mode || "--");
-            updateText("info_bands", payload.bands || "--");
-            updateText("info_bandwidth", payload.bandwidth || "--");
-            updateText("info_earfcn", payload.earfcn || "--");
-            updateText("info_pci", payload.pci || "--");
-            updateText("info_ipv4", payload.ipv4 || "--");
-            updateText("info_ipv6", payload.ipv6 || "--");
-            updateText("info_uptime", payload.uptime || "--");
+        function updateUI() {
+            const p = telemetryCache;
 
-            updateText("sig_assessment", payload.assessment || "--");
-            updateText("sig_traffic", payload.traffic_stats || "--");
-            updateText("sig_cell_id", payload.cell_id || "--");
-            updateText("sig_enb", payload.enb_id || "--");
-            updateText("sig_tac", payload.tac || "--");
+            updateText("temp", p.temperature || "-- °C");
+            updateText("sim_status", p.sim_status || "--");
+            updateText("signal_pct", p.signal_percentage || "--%");
+            updateText("conn_status", p.internet_connection || "--");
+
+            updateText("info_sim", p.active_sim || "--");
+            updateText("info_provider", p.network_provider || "--");
+            updateText("info_mccmnc", p.mccmnc || "--");
+            updateText("info_apn", p.apn || "--");
+            updateText("info_mode", p.network_mode || "--");
+            updateText("info_bands", p.bands || "--");
+            updateText("info_bandwidth", p.bandwidth || "--");
+            updateText("info_earfcn", p.earfcn || "--");
+            updateText("info_pci", p.pci || "--");
+            updateText("info_ipv4", p.ipv4 || "--");
+            updateText("info_ipv6", p.ipv6 || "--");
+            updateText("info_uptime", p.uptime || "--");
+
+            updateText("sig_assessment", p.assessment || "--");
+            updateText("sig_traffic", p.traffic_stats || "--");
+            updateText("sig_cell_id", p.cell_id || "--");
+            updateText("sig_enb", p.enb_id || "--");
+            updateText("sig_tac", p.tac || "--");
 
             // Network panel updates
-            updateText("net_conn_status", payload.internet_connection || "--");
-            updateText("net_current_apn", payload.apn || "--");
-            updateText("net_ipv4", payload.ipv4 || "--");
-            updateText("net_ipv6", payload.ipv6 || "--");
+            updateText("net_conn_status", p.internet_connection || "--");
+            updateText("net_current_apn", p.apn || "--");
+            updateText("net_ipv4", p.ipv4 || "--");
+            updateText("net_ipv6", p.ipv6 || "--");
 
             // Settings panel updates
-            updateText("settings_port", payload.serial_port || "--");
+            updateText("settings_port", p.serial_port || "--");
 
-            if (payload.updated && payload.updated.trim() !== "") {
-                updateText("last_updated", payload.updated);
+            if (p.updated && p.updated.trim() !== "") {
+                updateText("last_updated", p.updated);
             } else {
                 const now = new Date();
                 const pad = (n) => n.toString().padStart(2, '0');
@@ -830,9 +840,9 @@
                 updateText("last_updated", timeStr);
             }
 
-            updateProgressBar("rsrq", payload.ss_rsrq);
-            updateProgressBar("rsrp", payload.ss_rsrp);
-            updateProgressBar("sinr", payload.sinr);
+            updateProgressBar("rsrq", p.ss_rsrq);
+            updateProgressBar("rsrp", p.ss_rsrp);
+            updateProgressBar("sinr", p.sinr);
         }
 
         function updateProgressBar(idPrefix, valueString) {

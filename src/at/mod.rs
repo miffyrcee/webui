@@ -7,7 +7,6 @@ pub mod utils;
 pub use parser::{
     parse_cgpaddr,
     parse_cops_scan,
-    parse_multi_line_sms_list,
     parse_net_status,
     parse_qcainfo,
     parse_qcfg_bands,

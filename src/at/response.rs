@@ -93,12 +93,3 @@ pub struct QcainfoEntry {
     pub sinr: Option<String>,
 }
 
-/// A parsed SMS message from +CMGL multi-line response
-#[derive(Debug, Clone, Serialize)]
-pub struct SmsMessage {
-    pub index: u32,
-    pub status: String,
-    pub sender: String,
-    pub timestamp: String,
-    pub body: String,
-}

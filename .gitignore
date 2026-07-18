@@ -65,8 +65,7 @@ ode_ggv
 /target/
 
 # 忽略前端 Tailwind CLI 自动生成的 Askama 目标模板（防止其污染代码库）
-/templates/dist_index.html
-/templates/style.css
+/templates/
 
 # 忽略本地开发可能产生的 Node 临时模块（如果你没用 Standalone CLI 的话）
 /node_modules/

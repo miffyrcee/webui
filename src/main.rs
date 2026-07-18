@@ -59,7 +59,8 @@ struct AtRequest {
 }
 
 struct AppState {
-    tx: broadcast::Sender<String>,
+    /// 广播 Arc 包装的遥测实体，减少硬件线程中的序列化损耗
+    tx: broadcast::Sender<Arc<GlobalTelemetry>>,
     /// 低优先级通道（预留：后台任务使用）
     #[allow(dead_code)]
     actor_tx: mpsc::Sender<AtRequest>,
@@ -1055,13 +1056,53 @@ async fn index_handler() -> impl IntoResponse {
 // 统一硬件任务：串行消费 /opt/atcmd_rs，定时轮询 + 用户指令均经此通道
 // ============================================================================
 
-/// 将 GlobalTelemetry 序列化并广播到所有 WS 客户端
-fn broadcast_state(state: &AppState, global: &GlobalTelemetry) {
-    if let Ok(json_str) = serde_json::to_string(global) {
-        let send_rc = state.tx.receiver_count();
-        eprintln!("📤 WS 广播遥测数据 ({} 接收者, {} 字节)", send_rc, json_str.len());
-        let _ = state.tx.send(json_str);
+/// 对比新老 Telemetry 差异并生成差分 JSON（仅包含发生变化的字段）
+fn generate_telemetry_diff(old: &GlobalTelemetry, new: &GlobalTelemetry) -> serde_json::Value {
+    let mut diff_map = serde_json::Map::new();
+
+    macro_rules! compare_field {
+        ($field:ident) => {
+            if old.$field != new.$field {
+                diff_map.insert(stringify!($field).to_string(), serde_json::json!(&new.$field));
+            }
+        };
     }
+
+    compare_field!(temperature);
+    compare_field!(sim_status);
+    compare_field!(signal_percentage);
+    compare_field!(internet_connection);
+    compare_field!(active_sim);
+    compare_field!(network_provider);
+    compare_field!(mccmnc);
+    compare_field!(apn);
+    compare_field!(network_mode);
+    compare_field!(bands);
+    compare_field!(bandwidth);
+    compare_field!(earfcn);
+    compare_field!(pci);
+    compare_field!(ipv4);
+    compare_field!(ipv6);
+    compare_field!(uptime);
+    compare_field!(assessment);
+    compare_field!(traffic_stats);
+    compare_field!(cell_id);
+    compare_field!(enb_id);
+    compare_field!(tac);
+    compare_field!(ss_rsrq);
+    compare_field!(ss_rsrp);
+    compare_field!(sinr);
+    compare_field!(updated);
+
+    serde_json::Value::Object(diff_map)
+}
+
+/// 将 GlobalTelemetry 的 Arc 广播到所有 WS 客户端
+fn broadcast_state(state: &AppState, global: &GlobalTelemetry) {
+    let global_arc = Arc::new(global.clone());
+    let send_rc = state.tx.receiver_count();
+    eprintln!("📤 WS 广播遥测数据 ({} 接收者)", send_rc);
+    let _ = state.tx.send(global_arc);
 }
 
 /// 处理单个 channel 消息，返回 false 表示 channel 已关闭
@@ -1082,7 +1123,7 @@ async fn handle_channel_req(
 }
 
 /// 处理单个 AT 请求（高低优先级通道共用此函数）
-/// 🌟 所有涉及物理串口读写的操作，通过 tokio::spawn 异步派发，保证 Actor 绝不卡死
+/// Actor 严格顺序消费，移除所有 tokio::spawn 异步派发，消除伪并发竞态
 async fn handle_at_request(
     req: AtRequest,
     backend: &Arc<dyn HardwareBackend>,
@@ -1093,13 +1134,9 @@ async fn handle_at_request(
     match req.action {
         AtAction::ManualAt(cmd) => {
             let cmd = normalize_at_command(&cmd);
-            println!("👨‍💻 用户手动执行 AT: {}", cmd);
-            let backend = backend.clone();
-            let resp_tx = req.resp_tx;
-            tokio::spawn(async move {
-                let response = backend.exec_raw_at(&cmd).await;
-                let _ = resp_tx.send(serde_json::json!({ "type": "at_res", "data": response }));
-            });
+            println!("👨‍💻 [Actor] 顺序执行手动 AT: {}", cmd);
+            let response = backend.exec_raw_at(&cmd).await;
+            let _ = req.resp_tx.send(serde_json::json!({ "type": "at_res", "data": response }));
         }
         AtAction::SetInterval(secs) => {
             let new_secs = secs.max(5);
@@ -1114,150 +1151,110 @@ async fn handle_at_request(
             }));
         }
         AtAction::GetSmsList => {
-            println!("📱 actor: get_sms_list (后台异步执行，不阻塞轮询)");
-            let backend_clone = backend.clone();
-            let resp_tx = req.resp_tx;
-            tokio::spawn(async move {
-                let resp = backend_clone.read_sms_list().await;
-                let decoded = decode_cmgl_body(&resp);
-                let _ = resp_tx.send(serde_json::json!({ "type": "sms_list", "data": decoded }));
-            });
+            println!("📱 [Actor] 开始顺序读取短信列表...");
+            let resp = backend.read_sms_list().await;
+            let decoded = decode_cmgl_body(&resp);
+            let _ = req.resp_tx.send(serde_json::json!({ "type": "sms_list", "data": decoded }));
         }
         AtAction::SetApn(apn, user, pass, auth_type) => {
-            println!("🌐 actor: set_apn apn={} user={} auth={}", apn, user, auth_type);
-            let backend = backend.clone();
-            let resp_tx = req.resp_tx;
-            tokio::spawn(async move {
-                backend.configure_apn(&apn, &user, &pass, auth_type).await;
-                let _ = resp_tx.send(serde_json::json!({
-                    "type": "network_status",
-                    "data": { "status": "APN settings applied", "apn": apn }
-                }));
-            });
+            println!("🌐 [Actor] 正在配置 APN: {}...", apn);
+            backend.configure_apn(&apn, &user, &pass, auth_type).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "network_status",
+                "data": { "status": "APN settings applied", "apn": apn }
+            }));
         }
         AtAction::SetNetworkMode(mode) => {
-            println!("🌐 actor: set_network_mode {}", mode);
-            let backend = backend.clone();
-            let resp_tx = req.resp_tx;
-            tokio::spawn(async move {
-                backend.set_network_mode_pref(&mode).await;
-                let _ = resp_tx.send(serde_json::json!({
-                    "type": "network_status",
-                    "data": { "status": format!("Network mode set to {}", mode) }
-                }));
-            });
+            println!("🌐 [Actor] 正在切换网络模式为: {}...", mode);
+            backend.set_network_mode_pref(&mode).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "network_status",
+                "data": { "status": format!("Network mode set to {}", mode) }
+            }));
         }
         AtAction::NetConnect(connect) => {
-            println!("🌐 actor: net_{}", if connect { "connect" } else { "disconnect" });
-            let backend = backend.clone();
-            let resp_tx = req.resp_tx;
-            tokio::spawn(async move {
-                backend.set_data_session(connect).await;
-                let _ = resp_tx.send(serde_json::json!({
-                    "type": "network_status",
-                    "data": { "status": format!("{} command sent", if connect { "Connect" } else { "Disconnect" }) }
-                }));
-            });
+            println!("🌐 [Actor] 正在执行拨号连接/断开: {}...", if connect { "连接" } else { "断开" });
+            backend.set_data_session(connect).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "network_status",
+                "data": { "status": format!("{} command sent", if connect { "Connect" } else { "Disconnect" }) }
+            }));
         }
         AtAction::NetworkScan => {
-            println!("🔍 actor: network_scan (后台异步执行，不阻塞轮询)");
-            let backend_clone = backend.clone();
-            let resp_tx = req.resp_tx;
-            tokio::spawn(async move {
-                let networks = backend_clone.scan_available_networks().await;
-                let _ = resp_tx.send(serde_json::json!({
-                    "type": "scan_result",
-                    "data": { "status": "Scan complete.", "networks": networks }
-                }));
-            });
+            println!("🔍 [Actor] 开始扫描可用网络 (可能需要较长时间)...");
+            let networks = backend.scan_available_networks().await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "scan_result",
+                "data": { "status": "Scan complete.", "networks": networks }
+            }));
         }
         AtAction::SendSms(recipient, message) => {
-            println!("📱 actor: send_sms to={}", recipient);
-            let backend = backend.clone();
-            let resp_tx = req.resp_tx;
-            tokio::spawn(async move {
-                let success = backend.send_sms_msg(&recipient, &message).await;
-                let _ = resp_tx.send(serde_json::json!({
-                    "type": "sms_sent",
-                    "data": { "status": if success { "SMS sent successfully" } else { "SMS failed" }, "recipient": recipient }
-                }));
-            });
+            println!("📱 [Actor] 正在发送短信至 {}...", recipient);
+            let success = backend.send_sms_msg(&recipient, &message).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "sms_sent",
+                "data": { "status": if success { "SMS sent successfully" } else { "SMS failed" }, "recipient": recipient }
+            }));
         }
         AtAction::GetDeviceInfo => {
-            println!("📱 actor: get_device_info via AT commands");
-            let backend = backend.clone();
-            let resp_tx = req.resp_tx;
-            tokio::spawn(async move {
-                let info = backend.read_device_info().await;
-                let _ = resp_tx.send(serde_json::json!({
-                    "type": "device_info",
-                    "data": {
-                        "manufacturer": info.manufacturer,
-                        "model": info.model,
-                        "firmware_version": info.firmware,
-                        "imei": info.imei,
-                        "serial": info.serial,
-                        "hw_version": info.hw_version,
-                        "module_type": info.module_type,
-                        "sim_status": info.sim_status,
-                        "imsi": info.imsi,
-                        "iccid": info.iccid,
-                        "phone": info.phone,
-                        "net_status": info.net_status,
-                        "signal": info.signal_quality,
-                        "temperature": info.temperature,
-                        "bands": info.bands,
-                        "max_rate": "--",
-                        "volte": "--",
-                        "gnss": "--"
-                    }
-                }));
-            });
+            println!("📱 [Actor] 正在顺序获取设备静态信息...");
+            let info = backend.read_device_info().await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "device_info",
+                "data": {
+                    "manufacturer": info.manufacturer,
+                    "model": info.model,
+                    "firmware_version": info.firmware,
+                    "imei": info.imei,
+                    "serial": info.serial,
+                    "hw_version": info.hw_version,
+                    "module_type": info.module_type,
+                    "sim_status": info.sim_status,
+                    "imsi": info.imsi,
+                    "iccid": info.iccid,
+                    "phone": info.phone,
+                    "net_status": info.net_status,
+                    "signal": info.signal_quality,
+                    "temperature": info.temperature,
+                    "bands": info.bands,
+                    "max_rate": "--",
+                    "volte": "--",
+                    "gnss": "--"
+                }
+            }));
         }
         AtAction::Reboot => {
-            println!("🔄 actor: rebooting module...");
-            let backend = backend.clone();
-            let resp_tx = req.resp_tx;
-            tokio::spawn(async move {
-                backend.send_reboot().await;
-                let _ = resp_tx.send(serde_json::json!({
-                    "type": "settings_log",
-                    "data": { "msg": "Reboot command sent to module." }
-                }));
-            });
+            println!("🔄 [Actor] 正在向模组发送重启指令...");
+            backend.send_reboot().await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "settings_log",
+                "data": { "msg": "Reboot command sent to module." }
+            }));
         }
         AtAction::FactoryReset => {
-            println!("⚠️ actor: factory reset module...");
-            let backend = backend.clone();
-            let resp_tx = req.resp_tx;
-            tokio::spawn(async move {
-                backend.send_factory_reset().await;
-                let _ = resp_tx.send(serde_json::json!({
-                    "type": "settings_log",
-                    "data": { "msg": "Factory reset command sent to module." }
-                }));
-            });
+            println!("⚠️ [Actor] 正在向模组发送恢复出厂设置指令...");
+            backend.send_factory_reset().await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "settings_log",
+                "data": { "msg": "Factory reset command sent to module." }
+            }));
         }
         AtAction::FlightMode(on) => {
-            println!("✈️ actor: setting flight mode to {}", if on { "ON" } else { "OFF" });
-            let backend = backend.clone();
-            let resp_tx = req.resp_tx;
-            tokio::spawn(async move {
-                backend.set_airplane_mode(on).await;
-                let _ = resp_tx.send(serde_json::json!({
-                    "type": "settings_log",
-                    "data": { "msg": format!("Flight mode turned {}", if on { "ON" } else { "OFF" }) }
-                }));
-            });
+            println!("✈️ [Actor] 正在将飞行模式设置为: {}", if on { "ON" } else { "OFF" });
+            backend.set_airplane_mode(on).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "settings_log",
+                "data": { "msg": format!("Flight mode turned {}", if on { "ON" } else { "OFF" }) }
+            }));
         }
     }
 }
 
-/// 统一硬件任务：定时轮询 + 用户 AT 指令。非阻塞双轨设计 + 离线检测 + 动态空闲降频
+/// 统一硬件任务：定时轮询 + 用户 AT 指令。严格串行 Actor + 离线检测 + 动态空闲降频
 ///
 /// 核心设计：
-/// 1. 轮询 busy-bypass：try_lock() 探活串口，忙碌时直接广播缓存不阻塞 Actor
-/// 2. 消息分发非阻塞化：所有硬件操作通过 tokio::spawn 派发，Actor 永不卡死
+/// 1. 严格串行 Actor：移除所有 tokio::spawn，所有硬件操作按消费顺序依次 .await
+/// 2. 轮询 busy-bypass：try_lock() 探活串口，忙碌时直接广播缓存不阻塞 Actor
 /// 3. 高优先级通道优先消费，确保用户交互指令不会被轮询阻塞
 async fn hardware_task(
     mut actor_rx_high: mpsc::Receiver<AtRequest>,
@@ -1451,10 +1448,39 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
 
     tokio::select! {
         _ = async {
+            // 保存当前连接上一次发送的完整数据副本，用于差分对比
+            let mut last_sent_telemetry: Option<GlobalTelemetry> = None;
+
             loop {
                 tokio::select! {
-                    Ok(msg) = broadcast_rx.recv() => {
-                        if ws_sender.send(Message::Text(msg.into())).await.is_err() {
+                    Ok(new_telemetry_arc) = broadcast_rx.recv() => {
+                        let msg_to_send = match last_sent_telemetry {
+                            None => {
+                                // 首次连接：记录并发送全量数据
+                                last_sent_telemetry = Some((*new_telemetry_arc).clone());
+                                serde_json::json!({
+                                    "update_type": "full",
+                                    "data": *new_telemetry_arc
+                                }).to_string()
+                            }
+                            Some(ref old) => {
+                                // 后续更新：计算差异并生成增量消息
+                                let diff = generate_telemetry_diff(old, &new_telemetry_arc);
+                                last_sent_telemetry = Some((*new_telemetry_arc).clone());
+
+                                if diff.as_object().map_or(false, |m| !m.is_empty()) {
+                                    serde_json::json!({
+                                        "update_type": "delta",
+                                        "data": diff
+                                    }).to_string()
+                                } else {
+                                    // 数据无变化，跳过网络发送
+                                    continue;
+                                }
+                            }
+                        };
+
+                        if ws_sender.send(Message::Text(msg_to_send.into())).await.is_err() {
                             break;
                         }
                     }

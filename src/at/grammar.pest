@@ -69,10 +69,23 @@ cgpaddr_ip  = { quoted_value }
 qeng_servingcell = { "+QENG: \"servingcell\"" ~ COMMA ~ qeng_fields }
 qeng_fields = { generic_value ~ (COMMA ~ generic_value)* }
 
-// ─── QCAINFO ───
-// +QCAINFO: "PCC",<earfcn>,<bw>,<band>,<pci>[,<scc_idx>,<pci>,<rsrp>,<rsrq>,<sinr>]
-qcainfo_resp = { "+QCAINFO:" ~ COMMA? ~ qcainfo_fields }
-qcainfo_fields = { generic_value ~ (COMMA ~ generic_value)* }
+// ─── QCAINFO (结构化) ───
+// +QCAINFO: "PCC",<earfcn>,<bw>,<band>,<pci>
+// +QCAINFO: "SCC",<earfcn>,<bw>,<band>,<pci>,<scc_idx>,<scc_pci>,<rsrp>,<rsrq>,<sinr>
+qcainfo_resp = { "+QCAINFO:" ~ COMMA? ~ (qcainfo_pcc | qcainfo_scc) }
+
+qcainfo_pcc = { "\"PCC\"" ~ COMMA ~ earfcn ~ COMMA ~ bandwidth ~ COMMA ~ band ~ COMMA ~ pci }
+qcainfo_scc = { "\"SCC\"" ~ COMMA ~ earfcn ~ COMMA ~ bandwidth ~ COMMA ~ band ~ COMMA ~ pci ~ COMMA ~ scc_idx ~ COMMA ~ scc_pci ~ COMMA ~ scc_rsrp ~ COMMA ~ scc_rsrq ~ (COMMA ~ scc_sinr)? }
+
+earfcn    = { digits }
+bandwidth = { digits }
+band      = { quoted_value }
+pci       = { digits }
+scc_idx   = { digits }
+scc_pci   = { digits }
+scc_rsrp  = { raw_value }
+scc_rsrq  = { raw_value }
+scc_sinr  = { raw_value }
 
 // ─── CREG (network registration status) ───
 // +CREG: <n>,<stat>
@@ -118,3 +131,19 @@ at_data_line = @{ (!("OK" | "ERROR" | "+CME ERROR:") ~ (!CRLF ~ ANY)*) }
 
 at_raw_response = { SOI ~ at_echo_line ~ CRLF ~ at_raw_body ~ EOI }
 at_raw_body = { (at_data_line ~ (CRLF ~ at_data_line)*)? ~ CRLF? ~ status_line? ~ CRLF? }
+
+// ─── SMS 多行块定义 ───
+// +CMGL: <index>,<stat>,<sender>,<alpha>,<timestamp>\r\n
+// <body>\r\n
+sms_all_response = { SOI ~ (sms_block ~ CRLF)* ~ "OK" ~ CRLF? ~ EOI }
+sms_block        = { sms_header_line ~ CRLF ~ sms_body_line }
+
+sms_header_line  = { "+CMGL:" ~ sms_index ~ COMMA ~ sms_status ~ COMMA ~ sms_sender ~ COMMA ~ sms_alpha ~ COMMA ~ sms_timestamp }
+sms_index        = { digits }
+sms_status       = { quoted_value }
+sms_sender       = { quoted_value }
+sms_alpha        = { quoted_value }
+sms_timestamp    = { quoted_value }
+
+// 吞噬所有字符直到遇见下一个 +CMGL 起始行或 OK/ERROR 结束标记
+sms_body_line    = @{ (!(CRLF ~ "+CMGL:" | CRLF ~ "OK" | CRLF ~ "ERROR") ~ ANY)* }

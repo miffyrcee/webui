@@ -105,6 +105,54 @@ pub enum ParsedLine {
     Other(String),
 }
 
+/// 使用结构化 AST 匹配构建 QcainfoEntry，彻底弃用扁平 extract_values 的位置索引
+fn build_qcainfo_entry(pair: pest::iterators::Pair<'_, Rule>) -> QcainfoEntry {
+    // 如果收到的是 qcainfo_resp，查找内部实际的 pcc/scc 子规则
+    if pair.as_rule() == Rule::qcainfo_resp {
+        for child in pair.into_inner() {
+            if child.as_rule() == Rule::qcainfo_pcc || child.as_rule() == Rule::qcainfo_scc {
+                return build_qcainfo_entry(child);
+            }
+        }
+        return QcainfoEntry::default();
+    }
+
+    let mut entry = QcainfoEntry::default();
+    match pair.as_rule() {
+        Rule::qcainfo_pcc => {
+            entry.component = "PCC".to_string();
+            for field in pair.into_inner() {
+                match field.as_rule() {
+                    Rule::earfcn => entry.earfcn = field.as_str().to_string(),
+                    Rule::bandwidth => entry.bandwidth = field.as_str().to_string(),
+                    Rule::band => entry.band = field.as_str().trim_matches('"').to_string(),
+                    Rule::pci => entry.pci = field.as_str().to_string(),
+                    _ => {}
+                }
+            }
+        }
+        Rule::qcainfo_scc => {
+            entry.component = "SCC".to_string();
+            for field in pair.into_inner() {
+                match field.as_rule() {
+                    Rule::earfcn => entry.earfcn = field.as_str().to_string(),
+                    Rule::bandwidth => entry.bandwidth = field.as_str().to_string(),
+                    Rule::band => entry.band = field.as_str().trim_matches('"').to_string(),
+                    Rule::pci => {} // SCC 的首个 pci 不覆盖 entry.pci
+                    Rule::scc_idx => entry.scc_idx = Some(field.as_str().to_string()),
+                    Rule::scc_pci => entry.pci = field.as_str().to_string(),
+                    Rule::scc_rsrp => entry.rsrp = Some(field.as_str().to_string()),
+                    Rule::scc_rsrq => entry.rsrq = Some(field.as_str().to_string()),
+                    Rule::scc_sinr => entry.sinr = Some(field.as_str().to_string()),
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+    entry
+}
+
 /// Parse a single line of AT response using pest-based grammar
 fn parse_single_line(line: &str) -> Option<ParsedLine> {
     let trimmed = line.trim();
@@ -115,6 +163,7 @@ fn parse_single_line(line: &str) -> Option<ParsedLine> {
     match AtParser::parse(Rule::at_response_line, trimmed) {
         Ok(pairs) => {
             for pair in pairs {
+                // 通过子节点提取匹配各 AT 响应行
                 for inner in pair.into_inner() {
                     return Some(match inner.as_rule() {
                         Rule::at_ok => ParsedLine::Ok,
@@ -209,21 +258,8 @@ fn parse_single_line(line: &str) -> Option<ParsedLine> {
                         }
 
                         Rule::qcainfo_resp => {
-                            let values = extract_values(inner);
-                            let mut entry = QcainfoEntry::default();
-                            if let Some(v) = values.get(0) { entry.component = v.clone(); }
-                            if let Some(v) = values.get(1) { entry.earfcn = v.clone(); }
-                            if let Some(v) = values.get(2) { entry.bandwidth = v.clone(); }
-                            if let Some(v) = values.get(3) { entry.band = v.clone(); }
-                            if values.len() >= 5 { entry.pci = values[4].clone(); }
-                            if values.len() >= 6 { entry.scc_idx = Some(values[5].clone()); }
-                            if values.len() >= 7 { entry.pci = values[6].clone(); }
-                            if values.len() >= 8 { entry.rsrp = Some(values[7].clone()); }
-                            if values.len() >= 9 { entry.rsrq = Some(values[8].clone()); }
-                            if values.len() >= 10 { entry.sinr = Some(values[9].clone()); }
-                            ParsedLine::Qcainfo(entry)
+                            ParsedLine::Qcainfo(build_qcainfo_entry(inner))
                         }
-
                         Rule::cgmr_line => ParsedLine::Other(trimmed.to_string()),
                         _ => ParsedLine::Other(trimmed.to_string()),
                     });
@@ -638,6 +674,84 @@ fn parse_nr_bitmask(hex: &str) -> Vec<String> {
     bands
 }
 
+/// 解析多行 SMS 列表响应 (+CMGL)，返回结构化 SmsMessage 列表。
+/// 自动剥离 AT 回显行和尾巴 OK，使用 pest 多行匹配将 header + body 关联为完整 SMS 实体。
+pub fn parse_multi_line_sms_list(raw_resp: &str) -> Vec<SmsMessage> {
+    let mut messages = Vec::new();
+
+    // 剥离 AT 回显行，构建干净的 SMS 数据块
+    let clean_body: String = raw_resp
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.starts_with("AT+") && !t.starts_with("AT^")
+        })
+        .collect::<Vec<_>>()
+        .join("\r\n");
+
+    if let Ok(mut pairs) = AtParser::parse(Rule::sms_all_response, &clean_body) {
+        if let Some(all_resp) = pairs.next() {
+            for block in all_resp.into_inner() {
+                if block.as_rule() != Rule::sms_block {
+                    continue;
+                }
+                let mut index = 0u32;
+                let mut status = String::new();
+                let mut sender = String::new();
+                let mut timestamp = String::new();
+                let mut body = String::new();
+
+                for inner in block.into_inner() {
+                    match inner.as_rule() {
+                        Rule::sms_header_line => {
+                            for field in inner.into_inner() {
+                                match field.as_rule() {
+                                    Rule::sms_index => {
+                                        index = field.as_str().parse().unwrap_or(0);
+                                    }
+                                    Rule::sms_status => {
+                                        status =
+                                            field.as_str().trim_matches('"').to_string();
+                                    }
+                                    Rule::sms_sender => {
+                                        sender =
+                                            field.as_str().trim_matches('"').to_string();
+                                    }
+                                    Rule::sms_timestamp => {
+                                        timestamp =
+                                            field.as_str().trim_matches('"').to_string();
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        Rule::sms_body_line => {
+                            body = inner.as_str().trim().to_string();
+                            // UCS2 解码尝试
+                            let decoded =
+                                crate::at::utils::decode_hex_ucs2(&body);
+                            if !decoded.is_empty() {
+                                body = decoded;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                messages.push(SmsMessage {
+                    index,
+                    status,
+                    sender,
+                    timestamp,
+                    body,
+                });
+            }
+        }
+    }
+
+    messages
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -849,7 +963,7 @@ OK\r\n";
         assert_eq!(telemetry.bands, "NR5G BAND 41, NR5G BAND 28");
         assert_eq!(telemetry.bandwidth, "NR 15 MHz (12+3)");
         assert_eq!(telemetry.earfcn, "504990, 156490");
-        // SCC pci 因字段偏移被解析为 rsrp 字段的值 "0"
+        // SCC pci 通过结构化 AST 正确匹配 scc_pci 字段，无字段偏移问题
         assert_eq!(telemetry.pci, "751, 0");
     }
 

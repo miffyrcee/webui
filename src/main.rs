@@ -344,11 +344,11 @@ impl HardwareBackend for RealBackend {
         {
             Ok(resp) => {
                 let networks = parse_cops_scan(&resp);
-                push_log("INFO", "Scan", &format!("🔍 网络扫描完成，发现 {} 个网络", networks.len()));
+                push_log("INFO", "Scan", &format!("网络扫描完成，发现 {} 个网络", networks.len()));
                 networks
             }
             Err(e) => {
-                push_log("ERROR", "Scan", &format!("⚠️ 网络扫描失败: {}", e));
+                push_log("ERROR", "Scan", &format!("网络扫描失败: {}", e));
                 vec![]
             }
         }
@@ -843,7 +843,7 @@ async fn send_at_command_inner_with_timeout(
 
     if raw.contains("ERROR") || raw.contains("+CME ERROR:") {
         let elapsed = start.elapsed();
-        push_log("WARN", "AT", &format!("⚠️ [AT] {} 返回 ERROR ({}ms)", cmd, elapsed.as_millis()));
+        push_log("WARN", "AT", &format!("[AT] {} 返回 ERROR ({}ms)", cmd, elapsed.as_millis()));
         return Err(format!("AT命令返回错误: {}", raw.trim()));
     }
 
@@ -855,7 +855,7 @@ async fn send_at_command_inner_with_timeout(
             !t.is_empty() && !t.starts_with("AT+")
         })
         .unwrap_or(&raw);
-    push_log("INFO", "AT", &format!("✅ {} 成功 ({}ms): {}", cmd, elapsed.as_millis(), preview.trim()));
+    push_log("INFO", "AT", &format!("{} 成功 ({}ms): {}", cmd, elapsed.as_millis(), preview.trim()));
     Ok(raw)
 }
 
@@ -1165,7 +1165,7 @@ async fn handle_at_request(
             }));
         }
         AtAction::FactoryReset => {
-            push_log("WARN", "System", "⚠️ 模组恢复出厂设置指令已下发");
+            push_log("WARN", "System", "模组恢复出厂设置指令已下发");
             backend.send_factory_reset().await;
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "settings_log",
@@ -1173,7 +1173,7 @@ async fn handle_at_request(
             }));
         }
         AtAction::FlightMode(on) => {
-            push_log("INFO", "System", &format!("✈️ 飞行模式状态改变: {}", if on { "开启" } else { "关闭" }));
+            push_log("INFO", "System", &format!("飞行模式状态改变: {}", if on { "开启" } else { "关闭" }));
             backend.set_airplane_mode(on).await;
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "settings_log",
@@ -1244,7 +1244,7 @@ async fn hardware_task(
                         let mut global = state.global.write().await;
 
                         if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                            push_log("ERROR", "Poll", &format!("⚠️ 模组连续 {} 次无响应，标记为离线", MAX_CONSECUTIVE_FAILURES));
+                            push_log("ERROR", "Poll", &format!("模组连续 {} 次无响应，标记为离线", MAX_CONSECUTIVE_FAILURES));
                             let fw = global.firmware_version.clone();
                             let sim = global.active_sim.clone();
                             let prov = global.network_provider.clone();
@@ -1268,10 +1268,10 @@ async fn hardware_task(
                         broadcast_state(&state, &global);
                     }
 
-                    push_log("INFO", "Poll", &format!("✅ 轮询完成 (耗时 {}ms)", start_poll.elapsed().as_millis()));
+                    push_log("INFO", "Poll", &format!("轮询完成 (耗时 {}ms)", start_poll.elapsed().as_millis()));
 
                 } else if active {
-                    push_log("WARN", "Poll", "⚠️ 串口忙或正在执行慢命令，跳过当次采集，复用缓存");
+                    push_log("WARN", "Poll", "串口忙或正在执行慢命令，跳过当次采集，复用缓存");
                     let uptime_sec = System::uptime();
                     let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
@@ -1335,7 +1335,7 @@ async fn main() {
         .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    push_log("INFO", "System", "⚡ RM520N WebUI 后端服务已在 http://0.0.0.0:3000 监听");
+    push_log("INFO", "System", "RM520N WebUI 后端服务已在 http://0.0.0.0:3000 监听");
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -1486,7 +1486,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             AtAction::FlightMode(on)
                         }
                         unknown_action => {
-                            push_log("WARN", "WS", &format!("⚠️ 未知 WebSocket 动作: {:?}", unknown_action));
+                            push_log("WARN", "WS", &format!("未知 WebSocket 动作: {:?}", unknown_action));
                             continue;
                         }
                     };
@@ -1499,11 +1499,11 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                         }
                     }
                 } else {
-                    push_log("WARN", "WS", &format!("⚠️ WS 收到无法解析的消息: {:?}", text));
+                    push_log("WARN", "WS", &format!("WS 收到无法解析的消息: {:?}", text));
                 }
             }
         } => {
-            push_log("INFO", "WS", "💬 浏览器主动断开 WebSocket 连接（接收流正常结束）");
+            push_log("INFO", "WS", "浏览器主动断开 WebSocket 连接（接收流正常结束）");
         }
     };
 

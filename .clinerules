@@ -28,7 +28,7 @@
 ## Coding Conventions
 - 使用 `edition = "2024"` Rust edition
 - 错误处理使用 `eprintln!` 记录，不 panic（main 中绑定的 unwrap 除外）
-- 所有 println! 使用 emoji 前缀分类（🔌📡✅⚠️❌🔄）
+- 所有 println!/push_log 日志使用级别前缀分类（ERROR/WARN/INFO），不使用 emoji
 - 串口读写使用 tokio async，注意 SerialStream 实现了 AsyncRead+AsyncWrite
 
 ## Frontend Integration

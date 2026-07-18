@@ -277,7 +277,7 @@ fn parse_single_line(line: &str) -> Option<ParsedLine> {
 /// Parse +QENG "servingcell" response string and populate TelemetryData
 pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
     if qeng_res.is_empty() {
-        println!("⚠️ 未找到 +QENG 响应");
+        println!("未找到 +QENG 响应");
         return;
     }
 
@@ -295,7 +295,7 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
         .collect();
 
     if serving_cells.is_empty() {
-        println!("⚠️ 未找到 +QENG servingcell 数据");
+        println!("未找到 +QENG servingcell 数据");
         return;
     }
 

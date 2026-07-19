@@ -55,10 +55,10 @@
 }
 
 /* ============================================================================
-   4. 基础层覆盖（核心重构，注入 OpenWrt 固件之魂）
+   4. 基础层覆盖（核心重构，对齐 Jerrykuku 视觉规范）
    ============================================================================ */
 
-/* 4.1 全局字体与背景（强制覆盖为固件原生系统 UI 字体） */
+/* 4.1 全局字体与背景（强制覆盖为标准的 Argon 界面字体） */
 html,
 body,
 button,
@@ -69,14 +69,15 @@ textarea {
 }
 
 body {
-    background-color: #f8f9fe !important;
+    background-color: #f4f5f7 !important;
+    /* 对齐标准的轻量灰色背景 */
 }
 
 .dark body {
     background-color: #080a0f !important;
 }
 
-/* 4.2 彻底重塑圆角（将全站圆角强制缩减为标准的 4px） */
+/* 4.2 彻底重塑圆角（全站统一缩减为 LuCI 经典的 4px 紧凑圆角） */
 .rounded-2xl,
 .rounded-xl,
 .rounded-lg,
@@ -84,8 +85,8 @@ body {
     border-radius: 4px !important;
 }
 
-/* 4.3 将网格面板通过 CSS 洗练为标准的系统配置行（Key - Value）
-   仅作用于 grid 指标展示区域，保留普通文本及终端面板的排版 */
+/* 4.3 核心改变：重塑信息面板为完美的左对齐双列系统表格行
+   限制在 .grid 容器内，使得左右两侧的值在垂直方向上实现完美的格栅化对齐 */
 .grid>div.p-3.bg-slate-50,
 .grid>div.p-3.bg-slate-50\/40,
 .grid>div.p-3.bg-slate-50\/30,
@@ -94,55 +95,81 @@ body {
 .dark .grid>div.p-3.bg-slate-50\/30 {
     background-color: transparent !important;
     border: none !important;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.05) !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.04) !important;
     border-radius: 0px !important;
-    padding: 10px 4px !important;
+    padding: 11px 12px !important;
+    /* 舒适的上下行间距 */
     display: flex !important;
     flex-direction: row !important;
-    justify-content: space-between !important;
+    justify-content: flex-start !important;
+    /* 摒弃两端分散，改用左对齐 */
     align-items: center !important;
+    transition: background-color 0.15s ease !important;
 }
 
 .dark .grid>div.p-3.bg-slate-50,
 .dark .grid>div.p-3.bg-slate-50\/40,
 .dark .grid>div.p-3.bg-slate-50\/30 {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
 }
 
-/* 左侧键名格式（常规字重，去大写） */
+/* 鼠标悬停行高亮（LuCI 经典交互） */
+.grid>div.p-3.bg-slate-50:hover,
+.grid>div.p-3.bg-slate-50\/40:hover,
+.grid>div.p-3.bg-slate-50\/30:hover {
+    background-color: rgba(94, 114, 228, 0.03) !important;
+}
+
+.dark .grid>div.p-3.bg-slate-50:hover,
+.dark .grid>div.p-3.bg-slate-50\/40:hover,
+.dark .grid>div.p-3.bg-slate-50\/30:hover {
+    background-color: rgba(130, 94, 228, 0.04) !important;
+}
+
+/* 左侧键名格式（固定比例宽度，起跑线严格统一） */
 .grid>div.p-3.bg-slate-50>span:first-child,
 .grid>div.p-3.bg-slate-50\/40>span:first-child,
 .grid>div.p-3.bg-slate-50\/30>span:first-child {
+    width: 40% !important;
+    /* 占用格内 40% 的黄金比例 */
+    min-width: 120px !important;
+    max-width: 220px !important;
+    flex-shrink: 0 !important;
     font-size: 13px !important;
     font-weight: 500 !important;
-    color: #64748b !important;
+    color: #4b5563 !important;
+    /* 柔和中性的键名灰 */
     text-transform: none !important;
     letter-spacing: normal !important;
+    text-align: left !important;
 }
 
 .dark .grid>div.p-3.bg-slate-50>span:first-child,
 .dark .grid>div.p-3.bg-slate-50\/40>span:first-child,
 .dark .grid>div.p-3.bg-slate-50\/30>span:first-child {
-    color: #94a3b8 !important;
+    color: #9ca3af !important;
 }
 
-/* 右侧键值格式 */
+/* 右侧键值格式（规避过粗字体，展现精细美感） */
 .grid>div.p-3.bg-slate-50>span:last-child,
 .grid>div.p-3.bg-slate-50\/40>span:last-child,
 .grid>div.p-3.bg-slate-50\/30>span:last-child {
+    flex-grow: 1 !important;
     font-size: 13px !important;
-    font-weight: 600 !important;
-    color: #1e293b !important;
+    font-weight: 500 !important;
+    /* 摒弃重粗体，采用适中字重 */
+    color: #111827 !important;
     margin-top: 0px !important;
+    text-align: left !important;
 }
 
 .dark .grid>div.p-3.bg-slate-50>span:last-child,
 .dark .grid>div.p-3.bg-slate-50\/40>span:last-child,
 .dark .grid>div.p-3.bg-slate-50\/30>span:last-child {
-    color: #f1f5f9 !important;
+    color: #e5e7eb !important;
 }
 
-/* 4.4 去除磨砂透明度，采用 solid 固件平铺色 */
+/* 4.4 去除磨砂玻璃滤镜，采用扁平清透的系统卡片背景色 */
 .bg-white,
 .bg-white\/80 {
     background-color: #ffffff !important;
@@ -162,31 +189,34 @@ body {
     -webkit-backdrop-filter: none !important;
 }
 
-/* 4.5 卡片头部栏修饰 */
+/* 4.5 卡片头部栏及标题字体颜色重构（高亮经典的 5e72e4 主题色） */
 .p-4.border-b {
     background-color: #fafbfc !important;
-    border-bottom: 1px solid #e2e8f0 !important;
-    padding: 12px 16px !important;
+    border-bottom: 1px solid #f1f3f9 !important;
+    padding: 14px 20px !important;
 }
 
 .dark .p-4.border-b {
-    background-color: #1a1f2c !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+    background-color: #171d2a !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
 }
 
+.p-4.border-b h2,
 h2.text-xs.font-bold {
     font-size: 14px !important;
     font-weight: 600 !important;
-    color: #1e293b !important;
+    color: #5e72e4 !important;
+    /* 经典官方蓝紫色 */
     text-transform: none !important;
-    letter-spacing: normal !important;
+    letter-spacing: 0.5px !important;
 }
 
+.dark .p-4.border-b h2,
 .dark h2.text-xs.font-bold {
-    color: #f1f5f9 !important;
+    color: #825ee4 !important;
 }
 
-/* 4.6 侧边栏与导航菜单深度重构 */
+/* 4.6 左侧栏样式优化 */
 aside#sidebar {
     background-color: #ffffff !important;
     border-right: 1px solid #e2e8f0 !important;
@@ -199,9 +229,9 @@ aside#sidebar {
 
 .tab-btn {
     border-radius: 4px !important;
-    margin: 2px 8px !important;
-    padding: 10px 16px !important;
-    font-size: 14px !important;
+    margin: 4px 12px !important;
+    padding: 11px 16px !important;
+    font-size: 13.5px !important;
     font-weight: 500 !important;
     color: #475569 !important;
     display: flex !important;
@@ -225,7 +255,7 @@ aside#sidebar {
     color: #825ee4 !important;
 }
 
-/* 经典 Argon 侧边栏激活色（蓝紫微亮渐变） */
+/* 侧边栏活动项目高亮渐变色与阴影 */
 .tab-btn[aria-selected="true"] {
     color: #ffffff !important;
     background: linear-gradient(135deg, #5e72e4 0%, #825ee4 100%) !important;
@@ -245,7 +275,7 @@ header.bg-indigo-600\/90 {
     border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
 }
 
-/* 4.8 经典 Argon 指示角标与控制组件 */
+/* 4.8 经典指示角标与控制组件 */
 span.bg-white\/25 {
     background-color: rgba(255, 255, 255, 0.18) !important;
     border: 1px solid rgba(255, 255, 255, 0.35) !important;
@@ -342,23 +372,23 @@ button.dark\:bg-slate-800\/80 {
     color: #cbd5e0 !important;
 }
 
-/* 4.12 信号轨道美化（限定 div 避免与 4.11 灰色按钮冲突） */
+/* 4.12 信号进度条轨道美化 */
 div.bg-slate-100,
 div.dark\:bg-slate-800\/80 {
-    background-color: #e2e8f0 !important;
-    height: 5px !important;
-    border-radius: 2px !important;
+    background-color: #e9ecef !important;
+    height: 6px !important;
+    border-radius: 3px !important;
 }
 
 .dark div.bg-slate-100,
 .dark div.dark\:bg-slate-800\/80 {
-    background-color: #334155 !important;
+    background-color: #2c323f !important;
 }
 
 #rsrq_bar,
 #rsrp_bar,
 #sinr_bar {
-    border-radius: 2px !important;
+    border-radius: 3px !important;
 }
 
 /* 4.13 折叠底盘抽屉 */
@@ -376,7 +406,7 @@ details#dev_specs_details summary {
     border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
 }
 
-/* 4.14 表格全局对齐 */
+/* 4.14 扫频表格全局对齐 */
 table {
     border-collapse: collapse !important;
     width: 100% !important;
@@ -440,16 +470,16 @@ tr:hover td {
 #console_output .text-indigo-600,
 #console_output .dark\:text-indigo-400 {
     color: #34d399 !important;
-    /* 终端输入回显的高亮绿 */
 }
 
-/* 4.16 经典 4 卡片指标浮空微调 */
+/* 4.16 顶层4张基础指标卡片悬空及内衬优化 */
 div.min-h-\[110px\] {
     background-color: #ffffff !important;
     border: 1px solid #e2e8f0 !important;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.04), 0 2px 4px -1px rgba(0, 0, 0, 0.02) !important;
     border-radius: 4px !important;
-    transition: all 0.2s ease-in-out !important;
+    padding: 18px 22px !important;
+    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out !important;
 }
 
 .dark div.min-h-\[110px\] {
@@ -465,6 +495,17 @@ div.min-h-\[110px\]:hover {
 
 .dark div.min-h-\[110px\]:hover {
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3) !important;
+}
+
+div.min-h-\[110px\] span.text-xs {
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.5px;
+    color: #8898aa !important;
+}
+
+.dark div.min-h-\[110px\] span.text-xs {
+    color: #90a0b5 !important;
 }
 
 /* 4.17 复制气泡 */

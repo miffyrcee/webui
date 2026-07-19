@@ -6,6 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RM520N 5G WebUI</title>
     <link rel="stylesheet" href="/style.css">
+    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#0c0f16" media="(prefers-color-scheme: dark)">
 </head>
 
 <body class="bg-slate-50 dark:bg-[#0c0f16] text-slate-800 dark:text-slate-200 font-sans min-h-full p-4 md:p-8 transition-colors duration-300">
@@ -29,11 +31,11 @@
                 <!-- 主题切换按钮 -->
                 <button id="theme_toggle" class="p-2 rounded-lg bg-slate-200/80 dark:bg-slate-800/80 hover:bg-slate-300 dark:hover:bg-slate-700 transition-all active:scale-95 text-slate-600 dark:text-slate-400" title="切换白天/夜晚模式">
                     <!-- 太阳图标 (白天可见) -->
-                    <svg class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <svg aria-hidden="true" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m12.728 12.728l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
                     </svg>
                     <!-- 月亮图标 (夜晚可见) -->
-                    <svg class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <svg aria-hidden="true" class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
                     </svg>
                 </button>
@@ -41,26 +43,26 @@
         </header>
 
         <!-- 导航菜单 -->
-        <div class="flex space-x-1 bg-slate-200/50 dark:bg-[#151a24]/60 rounded-lg p-1 border border-slate-200 dark:border-slate-800/60 overflow-x-auto scrollbar-none w-full">
-            <button id="tab_dashboard" onclick="switchTab('dashboard')"
+        <div role="tablist" class="flex space-x-1 bg-slate-200/50 dark:bg-[#151a24]/60 rounded-lg p-1 border border-slate-200 dark:border-slate-800/60 overflow-x-auto scrollbar-none w-full">
+            <button id="tab_dashboard" role="tab" aria-selected="true" onclick="switchTab('dashboard')"
                 class="tab-btn px-4 py-2 text-xs sm:text-sm rounded-md font-medium transition-all bg-indigo-600 text-white shadow-sm whitespace-nowrap">仪表盘 Dashboard</button>
-            <button id="tab_network" onclick="switchTab('network')"
+            <button id="tab_network" role="tab" aria-selected="false" onclick="switchTab('network')"
                 class="tab-btn px-4 py-2 text-xs sm:text-sm rounded-md font-medium transition-all text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-300/60 dark:hover:bg-[#1f2735] whitespace-nowrap">连接配置 Control</button>
-            <button id="tab_locks" onclick="switchTab('locks')"
+            <button id="tab_locks" role="tab" aria-selected="false" onclick="switchTab('locks')"
                 class="tab-btn px-4 py-2 text-xs sm:text-sm rounded-md font-medium transition-all text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-300/60 dark:hover:bg-[#1f2735] whitespace-nowrap">高级锁频与诊断 Locks &amp; Tools</button>
-            <button id="tab_sms" onclick="switchTab('sms')"
+            <button id="tab_sms" role="tab" aria-selected="false" onclick="switchTab('sms')"
                 class="tab-btn px-4 py-2 text-xs sm:text-sm rounded-md font-medium transition-all text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-300/60 dark:hover:bg-[#1f2735] whitespace-nowrap">短信中心 SMS</button>
         </div>
 
         <!-- 1. Dashboard 面板 -->
-        <div id="panel_dashboard" class="space-y-6">
+        <div id="panel_dashboard" role="tabpanel" class="space-y-6">
 
             <!-- 顶部核心指标卡片 -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
                     <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
                         <span class="text-xs font-semibold tracking-wider uppercase">工作温度 Temp</span>
-                        <svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2V5a3 3 0 116 0v14zm0 0h6m-6-4h6m-6-4h4m-4-4h4"></path></svg>
+                        <svg aria-hidden="true" class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2V5a3 3 0 116 0v14zm0 0h6m-6-4h6m-6-4h4m-4-4h4"></path></svg>
                     </div>
                     <div class="mt-2"><span id="temp" class="text-xl font-bold tracking-tight text-amber-500">-- °C</span></div>
                 </div>
@@ -68,7 +70,7 @@
                 <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
                     <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
                         <span class="text-xs font-semibold tracking-wider uppercase">SIM 卡状态 SIM</span>
-                        <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2" stroke-linejoin="round"></rect><path d="M12 9h4m-4 4h4m-4 4h4M8 7v10" stroke-linecap="round"></path></svg>
+                        <svg aria-hidden="true" class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2" stroke-linejoin="round"></rect><path d="M12 9h4m-4 4h4m-4 4h4M8 7v10" stroke-linecap="round"></path></svg>
                     </div>
                     <div class="mt-2"><span id="sim_status" class="text-xl font-bold tracking-tight text-indigo-600 dark:text-indigo-400">--</span></div>
                 </div>
@@ -76,7 +78,7 @@
                 <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
                     <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
                         <span class="text-xs font-semibold tracking-wider uppercase">信号质量 Signal</span>
-                        <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 10h.01M15 13h.01M12 16h.01M9 19h.01M21 6h.01"></path><path stroke-linecap="round" d="M12 18v2m3-5v5m3-8v8M9 20v-1"></path></svg>
+                        <svg aria-hidden="true" class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 10h.01M15 13h.01M12 16h.01M9 19h.01M21 6h.01"></path><path stroke-linecap="round" d="M12 18v2m3-5v5m3-8v8M9 20v-1"></path></svg>
                     </div>
                     <div class="mt-2"><span id="signal_pct" class="text-xl font-bold tracking-tight text-blue-600 dark:text-blue-400">--%</span></div>
                 </div>
@@ -84,7 +86,7 @@
                 <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
                     <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
                         <span class="text-xs font-semibold tracking-wider uppercase">因特网连接 Link</span>
-                        <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path></svg>
+                        <svg aria-hidden="true" class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path></svg>
                     </div>
                     <div class="mt-2"><span id="conn_status" class="text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">--</span></div>
                 </div>
@@ -202,7 +204,7 @@
                                     <span class="text-slate-500 dark:text-slate-400 text-xs font-semibold">RSRQ (信噪比质量) <span class="text-[9px] text-slate-400 ml-1">5G</span></span>
                                     <span id="rsrq_val" class="text-slate-800 dark:text-slate-200 text-xs font-bold font-mono">-- / --%</span>
                                 </div>
-                                <div class="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
+                                <div class="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
                                     <div id="rsrq_bar" class="bg-indigo-600 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
                                 </div>
                             </div>
@@ -212,7 +214,7 @@
                                     <span class="text-slate-500 dark:text-slate-400 text-xs font-semibold">RSRP (参考信号接收功率) <span class="text-[9px] text-slate-400 ml-1">5G</span></span>
                                     <span id="rsrp_val" class="text-slate-800 dark:text-slate-200 text-xs font-bold font-mono">-- / --%</span>
                                 </div>
-                                <div class="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
+                                <div class="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
                                     <div id="rsrp_bar" class="bg-indigo-600 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
                                 </div>
                             </div>
@@ -222,7 +224,7 @@
                                     <span class="text-slate-500 dark:text-slate-400 text-xs font-semibold">SINR (信号与干扰加噪声比) <span class="text-[9px] text-slate-400 ml-1">5G</span></span>
                                     <span id="sinr_val" class="text-slate-800 dark:text-slate-200 text-xs font-bold font-mono">-- / --%</span>
                                 </div>
-                                <div class="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
+                                <div class="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
                                     <div id="sinr_bar" class="bg-indigo-600 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
                                 </div>
                             </div>
@@ -239,10 +241,10 @@
             <details id="dev_specs_details" class="group bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl shadow-sm overflow-hidden transition-all duration-300">
                 <summary class="flex justify-between items-center p-4 cursor-pointer select-none hover:bg-slate-50 dark:hover:bg-slate-900/20 transition-colors">
                     <div class="flex items-center space-x-2">
-                        <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        <svg aria-hidden="true" class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                         <h2 class="text-xs font-bold tracking-wider text-slate-500 dark:text-slate-400 uppercase">硬件底层资产规格 &amp; 空口能力 (点击展开)</h2>
                     </div>
-                    <svg class="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                    <svg aria-hidden="true" class="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
                 </summary>
 
                 <div class="p-4 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/30 dark:bg-[#161d2b]/10 text-xs text-slate-700 dark:text-slate-300">
@@ -298,7 +300,7 @@
                         </div>
                         <div class="flex flex-col gap-1">
                             <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">拨号鉴权密码 (可留空)</label>
-                            <input id="net_pass_input" type="password" placeholder="（可选）"
+                            <input id="net_pass_input" type="password" placeholder="（可选）" autocomplete="off"
                                 class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
                         </div>
                         <div class="flex flex-col gap-1">
@@ -613,7 +615,7 @@
                         <div class="p-4 space-y-3">
                             <div class="flex flex-col gap-1">
                                 <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">发件目标号码 (Recipient)</label>
-                                <input id="sms_recipient" type="text" placeholder="+8613800138000"
+                                <input id="sms_recipient" type="tel" placeholder="+8613800138000"
                                     class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
                             </div>
                             <div class="flex flex-col gap-1">
@@ -676,10 +678,12 @@
                 if (t === tab) {
                     btn.classList.remove('text-slate-500', 'dark:text-slate-400', 'hover:text-slate-900', 'dark:hover:text-white', 'hover:bg-slate-300/60', 'dark:hover:bg-[#1f2735]');
                     btn.classList.add('bg-indigo-600', 'text-white', 'shadow-sm');
+                    btn.setAttribute('aria-selected', 'true');
                     panel.classList.remove('hidden');
                 } else {
                     btn.classList.remove('bg-indigo-600', 'text-white', 'shadow-sm');
                     btn.classList.add('text-slate-500', 'dark:text-slate-400', 'hover:text-slate-900', 'dark:hover:text-white', 'hover:bg-slate-300/60', 'dark:hover:bg-[#1f2735]');
+                    btn.setAttribute('aria-selected', 'false');
                     panel.classList.add('hidden');
                 }
             });
@@ -933,16 +937,18 @@
                     tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-400">未扫描到活动基站。</td></tr>';
                     if (status) status.innerText = '扫频搜网完成。未侦测到公开信号点。';
                 } else {
-                    tbody.innerHTML = data.networks.map((net, i) =>
-                        `<tr class="border-b border-slate-100 dark:border-slate-800/20 hover:bg-slate-100/60 dark:hover:bg-slate-800/30 transition-colors">
+                    tbody.innerHTML = data.networks.map((net, i) => {
+                        const tech = net.technology || '--';
+                        const status = net.status || '--';
+                        return `<tr class="border-b border-slate-100 dark:border-slate-800/20 hover:bg-slate-100/60 dark:hover:bg-slate-800/30 transition-colors">
                             <td class="p-3 text-slate-400">${i + 1}</td>
-                            <td class="p-3 text-slate-800 dark:text-slate-200 font-semibold">${net.operator || '--'}</td>
-                            <td class="p-3 text-slate-800 dark:text-slate-200">${net.mccmnc || '--'}</td>
-                            <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] ${net.technology === 'NR5G' ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-bold border border-indigo-100 dark:border-indigo-900/30' : 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 font-bold border border-blue-100 dark:border-blue-900/30'}">${net.technology || '--'}</span></td>
-                            <td class="p-3"><span class="${net.status === 'Available' ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-slate-400'}">${net.status || '--'}</span></td>
-                            <td class="p-3 text-slate-800 dark:text-slate-200">${net.band || '--'}</td>
-                        </tr>`
-                    ).join('');
+                            <td class="p-3 text-slate-800 dark:text-slate-200 font-semibold">${escapeHtml(net.operator || '--')}</td>
+                            <td class="p-3 text-slate-800 dark:text-slate-200">${escapeHtml(net.mccmnc || '--')}</td>
+                            <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] ${tech === 'NR5G' ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-bold border border-indigo-100 dark:border-indigo-900/30' : 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 font-bold border border-blue-100 dark:border-blue-900/30'}">${escapeHtml(tech)}</span></td>
+                            <td class="p-3"><span class="${status === 'Available' ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-slate-400'}">${escapeHtml(status)}</span></td>
+                            <td class="p-3 text-slate-800 dark:text-slate-200">${escapeHtml(net.band || '--')}</td>
+                        </tr>`;
+                    }).join('');
                     if (status) status.innerText = `基站扫频搜网完成。成功发现并匹配 ${data.networks.length} 个公开基站频点。`;
                 }
             }
@@ -963,10 +969,10 @@
                     listEl.innerHTML = data.messages.map((msg, i) =>
                         `<div class="sms-item p-3 hover:bg-slate-100/80 dark:hover:bg-slate-900/40 transition-colors cursor-pointer" data-index="${i}">
                             <div class="flex justify-between items-center mb-1">
-                                <span class="text-slate-800 dark:text-slate-200 text-xs font-semibold">${msg.sender || 'Unknown'}</span>
-                                <span class="text-slate-400 text-[10px]">${msg.timestamp || ''}</span>
+                                <span class="text-slate-800 dark:text-slate-200 text-xs font-semibold">${escapeHtml(msg.sender || 'Unknown')}</span>
+                                <span class="text-slate-400 text-[10px]">${escapeHtml(msg.timestamp || '')}</span>
                             </div>
-                            <div class="text-slate-500 dark:text-slate-400 text-xs truncate">${msg.text || ''}</div>
+                            <div class="text-slate-500 dark:text-slate-400 text-xs truncate">${escapeHtml(msg.text || '')}</div>
                         </div>`
                     ).join('');
                 }

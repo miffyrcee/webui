@@ -889,8 +889,8 @@ OK\r\n";
         assert_eq!(telemetry.bands, Some("NR5G BAND 41, NR5G BAND 28".to_string()));
         assert_eq!(telemetry.bandwidth, Some("NR 120 MHz (100+20)".to_string()));
         assert_eq!(telemetry.earfcn, Some("504990, 156490".to_string()));
-        // SCC pci 通过结构化 AST 正确匹配 scc_pci 字段，无字段偏移问题
-        assert_eq!(telemetry.pci, Some("751, 0".to_string()));
+        // SCC pci 通过 grammar 修复正确解析为 250
+        assert_eq!(telemetry.pci, Some("751, 250".to_string()));
     }
 
     #[test]
@@ -1010,7 +1010,7 @@ OK\r\n";
         assert_eq!(telemetry.bands, Some("NR5G BAND 41, NR5G BAND 28".to_string()));
         assert_eq!(telemetry.bandwidth, Some("NR 120 MHz (100+20)".to_string()));
         assert_eq!(telemetry.earfcn, Some("504990, 156490".to_string()));
-        assert_eq!(telemetry.pci, Some("751, 0".to_string())); // SCC pci 因字段偏移为 "0"
+        assert_eq!(telemetry.pci, Some("751, 250".to_string())); // SCC pci 正确解析为 250
 
         // 第 4 步：QTEMP → 温度
         assert_eq!(parse_qtemp_temperature(qtemp_raw), Some("42 °C".to_string()));

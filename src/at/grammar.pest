@@ -71,11 +71,11 @@ qeng_fields = { generic_value ~ (COMMA ~ generic_value)* }
 
 // ─── QCAINFO (结构化) ───
 // +QCAINFO: "PCC",<earfcn>,<bw>,<band>,<pci>
-// +QCAINFO: "SCC",<earfcn>,<bw>,<band>,<pci>,<scc_idx>,<scc_pci>,<rsrp>,<rsrq>,<sinr>
+// +QCAINFO: "SCC",<earfcn>,<bw>,<band>,<scc_idx>,<scc_pci>,<rsrp>,<rsrq>,<sinr>
 qcainfo_resp = { "+QCAINFO:" ~ COMMA? ~ (qcainfo_pcc | qcainfo_scc) }
 
 qcainfo_pcc = { "\"PCC\"" ~ COMMA ~ earfcn ~ COMMA ~ bandwidth ~ COMMA ~ band ~ COMMA ~ pci }
-qcainfo_scc = { "\"SCC\"" ~ COMMA ~ earfcn ~ COMMA ~ bandwidth ~ COMMA ~ band ~ COMMA ~ pci ~ COMMA ~ scc_idx ~ COMMA ~ scc_pci ~ COMMA ~ scc_rsrp ~ COMMA ~ scc_rsrq ~ (COMMA ~ scc_sinr)? }
+qcainfo_scc = { "\"SCC\"" ~ COMMA ~ earfcn ~ COMMA ~ bandwidth ~ COMMA ~ band ~ COMMA ~ scc_idx ~ COMMA ~ scc_pci ~ COMMA ~ scc_rsrp ~ COMMA ~ scc_rsrq ~ (COMMA ~ scc_sinr)? }
 
 // 支持带有负号、连字符或完全为空的鲁棒数字定义（用于异常数据容错）
 flexible_digit = @{ "-"? ~ ASCII_DIGIT* }

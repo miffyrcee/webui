@@ -985,6 +985,16 @@
 
         let telemetryCache = {};
 
+        // 将后端返回的 UTC 时间字符串（格式如 YYYY/MM/DD HH:MM:SS）自适应转换为浏览器本地时区时间
+        function convertUtcToLocal(utcStr) {
+            if (!utcStr || utcStr === '--') return '--';
+            const isoStr = utcStr.trim().replace(/\//g, '-').replace(' ', 'T') + 'Z';
+            const date = new Date(isoStr);
+            if (isNaN(date.getTime())) return utcStr;
+            const pad = (n) => n.toString().padStart(2, '0');
+            return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+        }
+
         function updateUI() {
             const p = telemetryCache;
 
@@ -1015,7 +1025,7 @@
             updateText("settings_port", p.serial_port);
 
             if (p.updated && p.updated.trim() !== "") {
-                updateText("last_updated", p.updated);
+                updateText("last_updated", convertUtcToLocal(p.updated));
             } else {
                 const now = new Date();
                 const pad = (n) => n.toString().padStart(2, '0');

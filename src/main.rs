@@ -1491,19 +1491,29 @@ async fn main() {
 
     let backend: Arc<dyn HardwareBackend> = Arc::new(RealBackend { serial_path: serial_path.clone() });
 
-    let (firmware_version, active_sim, network_provider, apn) = backend.read_static_info().await;
-    {
-        let mut guard = app_state.global.write().await;
-        guard.firmware_version = Some(firmware_version);
-        guard.active_sim = Some(active_sim);
-        guard.network_provider = Some(network_provider);
-        guard.apn = Some(apn);
-    }
-
+    // 1. 启动硬件后台轮询与指令消费任务
     tokio::spawn({
         let backend = backend.clone();
         let state = app_state.clone();
         async move { hardware_task(command_rx, backend, state).await }
+    });
+
+    // 2. 将静态信息初始化放入后台异步任务，避免因串口等待阻塞 Axum 服务启动
+    tokio::spawn({
+        let backend = backend.clone();
+        let app_state = app_state.clone();
+        async move {
+            let (firmware_version, active_sim, network_provider, apn) = backend.read_static_info().await;
+            {
+                let mut guard = app_state.global.write().await;
+                guard.firmware_version = Some(firmware_version);
+                guard.active_sim = Some(active_sim);
+                guard.network_provider = Some(network_provider);
+                guard.apn = Some(apn);
+                // 获取完成后在锁内广播，避免额外读锁且防止 TOCTOU 竞态
+                broadcast_state(&app_state, &guard);
+            }
+        }
     });
 
     let app = Router::new()

@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RM520N 5G WebUI</title>
     <link rel="stylesheet" href="/style.css">
-    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)">
-    <meta name="theme-color" content="#0c0f16" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#f8f9fe" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#080a0f" media="(prefers-color-scheme: dark)">
 </head>
 
 <body class="bg-slate-150/40 dark:bg-[#0c0f16] text-slate-800 dark:text-slate-200 font-sans min-h-screen flex overflow-hidden transition-colors duration-300">
@@ -24,30 +24,30 @@
                 <div id="ws_status_dot" class="w-2.5 h-2.5 bg-red-500 rounded-full transition-all duration-500 shadow-lg shadow-red-500/50"></div>
             </div>
 
-            <!-- 垂直导航菜单区 (右侧采用单侧圆角，边缘贴合更显高级) -->
+            <!-- 垂直导航菜单区 -->
             <nav role="tablist" class="py-4 pr-4 space-y-1">
                 <button id="tab_dashboard" role="tab" aria-selected="true" onclick="switchTab('dashboard')"
-                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium">
+                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium cursor-pointer">
                     <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4zM14 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2v-4z"/></svg>
                     <span>仪表盘 Dashboard</span>
                 </button>
                 <button id="tab_network" role="tab" aria-selected="false" onclick="switchTab('network')"
-                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium">
+                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium cursor-pointer">
                     <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                     <span>连接配置 Control</span>
                 </button>
                 <button id="tab_locks" role="tab" aria-selected="false" onclick="switchTab('locks')"
-                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium">
+                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium cursor-pointer">
                     <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
                     <span>高级锁频与诊断 Locks</span>
                 </button>
                 <button id="tab_sms" role="tab" aria-selected="false" onclick="switchTab('sms')"
-                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium">
+                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium cursor-pointer">
                     <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
                     <span>短信中心 SMS</span>
                 </button>
                 <button id="tab_logs" role="tab" aria-selected="false" onclick="switchTab('logs')"
-                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium">
+                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium cursor-pointer">
                     <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                     <span>系统日志 Logs</span>
                 </button>
@@ -63,7 +63,7 @@
     </aside>
 
     <!-- 移动端侧边栏遮罩背景 -->
-    <div id="sidebar_overlay" class="fixed inset-0 bg-black/40 z-20 hidden md:hidden transition-opacity duration-300"></div>
+    <div id="sidebar_overlay" class="fixed inset-0 bg-black/40 z-20 hidden md:hidden transition-opacity duration-300 animate-fade"></div>
 
     <!-- ========================== 2. 右侧主体内容容器 ========================== -->
     <div id="main_container" class="flex-1 h-screen flex flex-col overflow-hidden transition-all duration-300">
@@ -136,7 +136,7 @@
                 <!-- 核心双栏指标面板 -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-                    <!-- 左栏: 网络信息（磨砂磁贴） -->
+                    <!-- 左栏: 网络信息 -->
                     <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col justify-between shadow-sm overflow-hidden">
                         <div>
                             <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
@@ -197,12 +197,12 @@
                             <span class="text-xs text-slate-400 dark:text-slate-500">实时轮询频率</span>
                             <div class="flex space-x-2">
                                 <select id="refreshRateSelect"
-                                    class="bg-white dark:bg-[#111622] border border-slate-200 dark:border-slate-800 text-xs rounded-lg px-2 py-1 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500">
+                                    class="bg-white dark:bg-[#111622] border border-slate-200 dark:border-slate-800 text-xs rounded px-2 py-1 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer">
                                     <option value="3">3 秒一次</option>
                                     <option value="5" selected>5 秒一次</option>
                                     <option value="10">10 秒一次</option>
                                 </select>
-                                <button id="setRefreshBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1 text-xs rounded-lg transition-all active:scale-95 shadow-sm">更新</button>
+                                <button id="setRefreshBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">更新</button>
                             </div>
                         </div>
                     </div>
@@ -311,7 +311,7 @@
                             <span id="dev_bands" class="text-slate-700 dark:text-slate-300 break-words leading-relaxed text-xs font-semibold mt-1">--</span>
                         </div>
                         <div class="flex justify-end pt-3 px-2">
-                            <button id="dev_refresh_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm">手动拉取规格信息</button>
+                            <button id="dev_refresh_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">手动拉取规格信息</button>
                         </div>
                     </div>
                 </details>
@@ -330,29 +330,29 @@
                             <div class="flex flex-col gap-1">
                                 <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">APN 接入点 (例如: ims 或 3gnet)</label>
                                 <input id="net_apn_input" type="text" placeholder="e.g. ims"
-                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
                             </div>
                             <div class="flex flex-col gap-1">
                                 <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">拨号鉴权用户名 (可留空)</label>
                                 <input id="net_user_input" type="text" placeholder="（可选）"
-                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
                             </div>
                             <div class="flex flex-col gap-1">
                                 <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">拨号鉴权密码 (可留空)</label>
                                 <input id="net_pass_input" type="password" placeholder="（可选）" autocomplete="off"
-                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
                             </div>
                             <div class="flex flex-col gap-1">
                                 <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">安全鉴定类型</label>
                                 <select id="net_auth_select"
-                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer">
                                     <option value="0">NONE (默认)</option>
                                     <option value="1">PAP</option>
                                     <option value="2">CHAP</option>
                                     <option value="3">PAP or CHAP</option>
                                 </select>
                             </div>
-                            <button id="net_apply_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm mt-2">应用 APN 保存</button>
+                            <button id="net_apply_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded transition-all active:scale-95 shadow-sm mt-2 cursor-pointer">应用 APN 保存</button>
                         </div>
                     </div>
 
@@ -364,21 +364,21 @@
                             </div>
                             <div class="p-4 space-y-3">
                                 <select id="net_mode_select"
-                                    class="w-full bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                                    class="w-full bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer">
                                     <option value="auto">全自动搜网模式 (AUTO)</option>
                                     <option value="nr5g">纯 5G 锁定模式 (NR5G Only)</option>
                                     <option value="lte">纯 4G 锁定模式 (LTE Only)</option>
                                     <option value="nr5g_lte">5G NR + LTE 协同工作模式</option>
                                     <option value="wcdma">3G WCDMA 留底搜网模式</option>
                                 </select>
-                                <button id="net_mode_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm">更新选网偏好</button>
+                                <button id="net_mode_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">更新选网偏好</button>
 
                                 <div class="border-t border-slate-100 dark:border-slate-800/40 pt-3 mt-1">
                                     <h3 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase mb-2">5G 组网类型重分配</h3>
                                     <div class="flex flex-wrap gap-2">
-                                        <button id="net_disable_sa_btn" class="flex-1 min-w-[90px] bg-amber-600 hover:bg-amber-700 text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm">禁用 SA (NSA)</button>
-                                        <button id="net_disable_nsa_btn" class="flex-1 min-w-[90px] bg-amber-600 hover:bg-amber-700 text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm">禁用 NSA (SA)</button>
-                                        <button id="net_enable_all_5g_btn" class="flex-1 min-w-[90px] bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm">全开启 (双模)</button>
+                                        <button id="net_disable_sa_btn" class="flex-1 min-w-[90px] bg-amber-600 hover:bg-amber-700 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">禁用 SA (NSA)</button>
+                                        <button id="net_disable_nsa_btn" class="flex-1 min-w-[90px] bg-amber-600 hover:bg-amber-700 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">禁用 NSA (SA)</button>
+                                        <button id="net_enable_all_5g_btn" class="flex-1 min-w-[90px] bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">全开启 (双模)</button>
                                     </div>
                                 </div>
                             </div>
@@ -393,7 +393,7 @@
                                 <div class="flex flex-col gap-1">
                                     <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">网卡驱动通讯协议选择 (默认为 MBIM)</label>
                                     <select id="usbnet_mode_select"
-                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer">
                                         <option value="0">ECM (虚拟以太网)</option>
                                         <option value="1">NCM (网络控制芯片模式)</option>
                                         <option value="2" selected>MBIM (微软移动宽带协议)</option>
@@ -401,19 +401,19 @@
                                         <option value="5">QMI (高通QMI底层内核驱动)</option>
                                     </select>
                                 </div>
-                                <button id="usbnet_apply_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm">应用网卡模式修改</button>
+                                <button id="usbnet_apply_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">应用网卡模式修改</button>
 
                                 <div class="border-t border-slate-100 dark:border-slate-800/40 pt-3 mt-1">
                                     <h3 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase mb-2">SIM 双卡槽实体物理切换</h3>
                                     <div class="flex space-x-2">
-                                        <button id="sim_slot_1_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">卡槽 1</button>
-                                        <button id="sim_slot_2_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">卡槽 2</button>
+                                        <button id="sim_slot_1_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">卡槽 1</button>
+                                        <button id="sim_slot_2_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">卡槽 2</button>
                                     </div>
                                 </div>
 
                                 <div class="border-t border-slate-100 dark:border-slate-800/40 pt-3 flex space-x-2">
-                                    <button id="net_connect_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">命令拨号连接</button>
-                                    <button id="net_disconnect_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">断开拨号连接</button>
+                                    <button id="net_connect_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">命令拨号连接</button>
+                                    <button id="net_disconnect_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">断开拨号连接</button>
                                 </div>
                                 <div id="usbnet_sim_status" class="text-xs text-slate-400 dark:text-slate-500 mt-1">交互反馈：等待操作。</div>
                             </div>
@@ -448,46 +448,46 @@
                                 
                                 <!-- 5G Grid -->
                                 <div id="nr5g_bands_grid" class="grid grid-cols-4 sm:grid-cols-6 gap-2 pt-1">
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="1">n1</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="3">n3</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="5">n5</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="7">n7</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="8">n8</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="20">n20</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="28">n28</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="38">n38</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="41">n41</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="71">n71</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="77">n77</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="78">n78</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="79">n79</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="1">n1</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="3">n3</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="5">n5</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="7">n7</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="8">n8</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="20">n20</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="28">n28</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="38">n38</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="41">n41</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="71">n71</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="77">n77</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="78">n78</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="79">n79</button>
                                 </div>
 
                                 <!-- 4G Grid -->
                                 <div id="lte_bands_grid" class="grid grid-cols-4 sm:grid-cols-6 gap-2 pt-1 hidden">
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="1">B1</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="3">B3</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="5">B5</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="7">B7</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="8">B8</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="20">B20</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="28">B28</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="34">B34</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="38">B38</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="39">B39</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="40">B40</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="41">B41</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="1">B1</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="3">B3</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="5">B5</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="7">B7</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="8">B8</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="20">B20</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="28">B28</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="34">B34</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="38">B38</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="39">B39</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="40">B40</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="41">B41</button>
                                 </div>
                             </div>
 
-                            <div class="p-3 bg-slate-50/50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex items-center justify-between text-xs sm:text-sm">
+                            <div class="p-3 bg-slate-50/50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800/40 rounded flex items-center justify-between text-xs sm:text-sm">
                                 <span class="text-slate-400 dark:text-slate-500 font-medium">当前选定编译预览</span>
                                 <span id="band_lock_preview" class="font-bold text-slate-800 dark:text-slate-200 select-all font-mono">all (默认出厂全频段)</span>
                             </div>
 
                             <div class="flex space-x-2">
-                                <button id="band_lock_apply_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm">应用频段强制锁定</button>
-                                <button id="band_lock_reset_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm">恢复所有出厂频段</button>
+                                <button id="band_lock_apply_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">应用频段强制锁定</button>
+                                <button id="band_lock_reset_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">恢复所有出厂频段</button>
                             </div>
                             <div id="band_lock_status" class="text-xs font-mono text-slate-400 dark:text-slate-500 pt-1">锁定反馈：就绪</div>
                         </div>
@@ -513,22 +513,22 @@
                                 <div class="flex flex-col gap-1">
                                     <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">目标 PCI</label>
                                     <input id="cell_pci_input" type="number" placeholder="PCI"
-                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
                                 </div>
                                 <div class="flex flex-col gap-1">
                                     <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">绝对频点号 EARFCN</label>
                                     <input id="cell_earfcn_input" type="number" placeholder="EARFCN"
-                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
                                 </div>
                             </div>
                             <div class="flex flex-col gap-1">
                                 <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">制式 Band 物理频段 (5G锁定必填)</label>
                                 <input id="cell_band_input" type="number" placeholder="41"
-                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
+                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
                             </div>
                             <div class="flex space-x-2">
-                                <button id="cell_lock_apply_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">应用小区强制绑定</button>
-                                <button id="cell_lock_unlock_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">解除物理小区锁</button>
+                                <button id="cell_lock_apply_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">应用小区强制绑定</button>
+                                <button id="cell_lock_unlock_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">解除物理小区锁</button>
                             </div>
                             <div id="cell_lock_status" class="text-xs text-slate-400 dark:text-slate-500 pt-1">小区反馈：就绪</div>
                         </div>
@@ -539,7 +539,7 @@
                 <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                     <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/10">
                         <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">空中基站深度扫频扫描</h2>
-                        <button id="scan_start_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm">
+                        <button id="scan_start_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">
                             <span id="scan_btn_text">触发扫频 (15s+)</span>
                         </button>
                     </div>
@@ -575,10 +575,10 @@
                         </div>
                         <div class="p-4 space-y-3">
                             <div class="flex flex-wrap gap-2">
-                                <button id="diag_neighbour_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95">邻区侦测</button>
-                                <button id="diag_qlts_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95">时区校准</button>
-                                <button id="diag_mbn_list_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95">MBN 分配</button>
-                                <button id="diag_autosel_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95">AutoSel MBN</button>
+                                <button id="diag_neighbour_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">邻区侦测</button>
+                                <button id="diag_qlts_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">时区校准</button>
+                                <button id="diag_mbn_list_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">MBN 分配</button>
+                                <button id="diag_autosel_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">AutoSel MBN</button>
                             </div>
                             <pre id="diag_output" class="p-3 bg-slate-50 dark:bg-slate-900/30 rounded-lg border border-slate-200/50 dark:border-slate-850/40 text-xs font-mono text-indigo-600 dark:text-indigo-400 max-h-[250px] overflow-y-auto whitespace-pre-wrap">点击按钮查询并触发高级诊断交互。</pre>
                         </div>
@@ -591,12 +591,12 @@
                         </div>
                         <div class="p-4 space-y-3">
                             <div class="flex space-x-2">
-                                <button id="settings_reboot_btn" class="flex-1 bg-yellow-600 hover:bg-yellow-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">全热重启模组 (Reboot)</button>
-                                <button id="settings_reset_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">恢复出厂配置 (Reset)</button>
+                                <button id="settings_reboot_btn" class="flex-1 bg-yellow-600 hover:bg-yellow-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">全热重启模组 (Reboot)</button>
+                                <button id="settings_reset_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">恢复出厂配置 (Reset)</button>
                             </div>
                             <div class="flex space-x-2">
-                                <button id="settings_flight_on_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">启动飞行模式</button>
-                                <button id="settings_flight_off_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">退出飞行模式</button>
+                                <button id="settings_flight_on_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">启动飞行模式</button>
+                                <button id="settings_flight_off_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">退出飞行模式</button>
                             </div>
                             <div class="grid grid-cols-2 gap-2 text-xs text-slate-400 dark:text-slate-500 mt-1">
                                 <div>后端通讯端口: <span id="settings_port" class="text-indigo-600 dark:text-indigo-400 font-medium">--</span></div>
@@ -618,19 +618,19 @@
                     </div>
                     <div class="p-4 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-[#161d2b]/20 flex space-x-2">
                         <input id="console_input" type="text" placeholder="AT+CGMI"
-                            class="flex-1 bg-white dark:bg-[#111622] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
+                            class="flex-1 bg-white dark:bg-[#111622] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
                             autocomplete="off" spellcheck="false">
-                        <button id="console_send_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-5 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">命令发送</button>
+                        <button id="console_send_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-5 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">命令发送</button>
                     </div>
                     <div id="console_quick_btns" class="px-4 pb-4 pt-2 flex flex-wrap gap-2 text-xs">
                         <span class="text-slate-400 dark:text-slate-500 self-center mr-1">快捷指令板:</span>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+CGMI</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+CGSN</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+CSQ</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+COPS?</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+CGPADDR</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+QENG</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+CGDCONT?</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+CGMI</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+CGSN</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+CSQ</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+COPS?</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+CGPADDR</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+QENG</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+CGDCONT?</button>
                     </div>
                 </div>
             </div>
@@ -642,7 +642,7 @@
                     <div class="lg:col-span-1 bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden max-h-[600px]">
                         <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/10">
                             <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">短信收件箱 (Inbox)</h2>
-                            <button id="sms_refresh_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1 text-xs rounded-lg transition-all active:scale-95 shadow-sm">读取列表</button>
+                            <button id="sms_refresh_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">读取列表</button>
                         </div>
                         <div id="sms_list" class="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/30">
                             <div class="p-4 text-center text-xs text-slate-400">目前卡内无短信。</div>
@@ -655,19 +655,19 @@
                         <div id="sms_reader_card" class="hidden bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden transition-all duration-300">
                             <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/10">
                                 <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">短信阅读器 (SMS Reader)</h2>
-                                <button id="sms_reader_close" class="text-xs text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white border border-slate-200 dark:border-slate-700 rounded px-2 py-0.5 hover:bg-slate-100 dark:hover:bg-white/10">关闭阅读</button>
+                                <button id="sms_reader_close" class="text-xs text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white border border-slate-200 dark:border-slate-700 rounded px-2 py-0.5 hover:bg-slate-100 dark:hover:bg-white/10 cursor-pointer">关闭阅读</button>
                             </div>
                             <div class="p-4 space-y-3">
                                 <div class="flex justify-between items-center text-xs text-slate-400 dark:text-slate-500">
                                     <span>发件人：<strong id="sms_reader_sender" class="text-slate-800 dark:text-slate-200 select-text font-semibold">--</strong></span>
                                     <span id="sms_reader_time" class="font-medium">--</span>
                                 </div>
-                                <div id="sms_reader_body" class="p-3 bg-slate-50 dark:bg-slate-900/40 rounded-lg border border-slate-200/60 dark:border-slate-800/40 text-xs sm:text-sm select-text break-words leading-relaxed whitespace-pre-wrap text-slate-700 dark:text-slate-300">
+                                <div id="sms_reader_body" class="p-3 bg-slate-50 dark:bg-slate-900/40 rounded border border-slate-200/60 dark:border-slate-800/40 text-xs sm:text-sm select-text break-words leading-relaxed whitespace-pre-wrap text-slate-700 dark:text-slate-300">
                                     --
                                 </div>
                                 <div class="flex space-x-2 pt-1 justify-end">
-                                    <button id="sms_reader_reply" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm">快捷回复</button>
-                                    <button id="sms_reader_copy" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-4 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm">无损复制文本</button>
+                                    <button id="sms_reader_reply" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">快捷回复</button>
+                                    <button id="sms_reader_copy" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-4 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">无损复制文本</button>
                                 </div>
                             </div>
                         </div>
@@ -681,17 +681,17 @@
                                 <div class="flex flex-col gap-1">
                                     <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">发件目标号码 (Recipient)</label>
                                     <input id="sms_recipient" type="tel" placeholder="+8613800138000"
-                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
                                 </div>
                                 <div class="flex flex-col gap-1">
                                     <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">发信正文 (支持多载波，最大 160 字符)</label>
                                     <textarea id="sms_message" rows="4" maxlength="160" placeholder="键入需要发送的正文..."
-                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
                                     <div class="flex justify-between items-center text-xs text-slate-400 dark:text-slate-500">
                                         <span>输入计数器: <span id="sms_char_count">0</span> / 160 字符</span>
                                     </div>
                                 </div>
-                                <button id="sms_send_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm">立刻发信</button>
+                                <button id="sms_send_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">立刻发信</button>
                             </div>
                             <div id="sms_send_status" class="px-4 pb-4 text-xs text-slate-400 dark:text-slate-500"></div>
                         </div>
@@ -709,7 +709,7 @@
                             </svg>
                             <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">系统内存环形日志控制台</h2>
                         </div>
-                        <button id="log_refresh_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 shadow-sm">手动刷新日志</button>
+                        <button id="log_refresh_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 text-xs font-semibold rounded transition-all active:scale-95 shadow-sm cursor-pointer">手动刷新日志</button>
                     </div>
                     <div id="settings_log" class="flex-1 p-5 font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-slate-50 dark:bg-[#0c0f16]/60 overflow-y-auto max-h-[500px] space-y-1">
                         <div class="text-slate-400 dark:text-slate-500">加载中... 请在进入该诊断面板时手动刷新。</div>
@@ -721,11 +721,11 @@
     </div>
 
     <!-- 复制气泡 -->
-    <div id="copy_toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900/95 dark:bg-indigo-600 text-white text-xs sm:text-sm px-4 py-2 rounded-lg shadow-xl transition-all duration-300 opacity-0 translate-y-4 z-50 cursor-pointer select-none">
+    <div id="copy_toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900/95 dark:bg-indigo-600 text-white text-xs sm:text-sm px-4 py-2 rounded shadow-xl transition-all duration-300 opacity-0 translate-y-4 z-50 cursor-pointer select-none">
         已无缝复制至剪贴板
     </div>
 
-    <!-- ========================== 3. 原生 JS 逻辑 (完全对齐逻辑) ========================== -->
+    <!-- ========================== 3. 原生 JS 逻辑 (完全保留，对齐功能) ========================== -->
     <script>
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -760,11 +760,9 @@
             }
         }
 
-        // 修改：左右菜单切换同步头部标题与移动端自动折叠
         function switchTab(tab) {
             currentTab = tab;
 
-            // 顶栏面包屑跟随（带守卫条件，避免无效赋值）
             const headerTitle = getDomElement('current_page_title');
             if (headerTitle) {
                 const newTitle = TAB_TITLES[tab] || 'ARGON CONTROL';
@@ -786,7 +784,6 @@
                 }
             });
 
-            // 移动端菜单切换完毕后，自动缩回侧边栏
             closeMobileSidebar();
 
             if (tab === 'logs' && socket && socket.readyState === WebSocket.OPEN) {
@@ -794,7 +791,6 @@
             }
         }
 
-        // 移动端侧边栏滑出交互
         function initMobileSidebar() {
             const toggle = getDomElement('sidebar_toggle');
             const sidebar = getDomElement('sidebar');
@@ -1019,7 +1015,7 @@
             if (data.success) {
                 let html = '<span class="text-indigo-600 dark:text-indigo-400 font-semibold">✓ ' + escapeHtml(data.msg || 'OK') + '</span>';
                 if (data.advise === 'reboot_required') {
-                    html += '<div class="text-amber-500 dark:text-amber-400 mt-1 font-semibold">⚠ 驱动通信重定义，需要热重启模组才能生效。 <button onclick="if(confirm(\'确认复位模组内核？\')){sendWsCommand(\'reboot\');}" class="underline hover:text-white">立即复位重启</button></div>';
+                    html += '<div class="text-amber-500 dark:text-amber-400 mt-1 font-semibold">⚠ 驱动通信重定义，需要热重启模组才能生效。 <button onclick="if(confirm(\'确认复位模组内核？\')){sendWsCommand(\'reboot\');}" class="underline hover:text-white cursor-pointer">立即复位重启</button></div>';
                 }
                 el.innerHTML = html;
             } else {
@@ -1047,11 +1043,11 @@
             if (data.success) {
                 const raw = data.data ? JSON.stringify(data.data, null, 2) : (data.msg || '');
                 el.textContent = raw || '(empty response)';
-                el.className = 'p-3 bg-slate-50 dark:bg-slate-900/30 rounded-lg border border-slate-200/50 dark:border-brandBorder/20 text-xs font-mono text-indigo-600 dark:text-indigo-400 max-h-[250px] overflow-y-auto whitespace-pre-wrap';
+                el.className = 'p-3 bg-slate-50 dark:bg-slate-900/30 rounded border border-slate-200/50 dark:border-brandBorder/20 text-xs font-mono text-indigo-600 dark:text-indigo-400 max-h-[250px] overflow-y-auto whitespace-pre-wrap';
                 el.classList.remove('text-red-400');
             } else {
                 el.textContent = 'ERROR: ' + (data.msg || 'Unknown error');
-                el.className = 'p-3 bg-slate-50 dark:bg-slate-900/30 rounded-lg border border-slate-200/50 dark:border-brandBorder/20 text-xs font-mono text-red-500 max-h-[250px] overflow-y-auto whitespace-pre-wrap';
+                el.className = 'p-3 bg-slate-50 dark:bg-slate-900/30 rounded border border-slate-200/50 dark:border-brandBorder/20 text-xs font-mono text-red-500 max-h-[250px] overflow-y-auto whitespace-pre-wrap';
             }
         }
 
@@ -1510,7 +1506,6 @@
                 });
             }
 
-            // 锁频手选 Pill 交互
             function getActiveBandGrid() {
                 const nr5g = document.querySelector('input[name="band_rat"]:checked')?.value === 'nr5g';
                 const grid = getDomElement(nr5g ? 'nr5g_bands_grid' : 'lte_bands_grid');
@@ -1663,7 +1658,7 @@
                         const output = getDomElement('diag_output');
                         if (output) {
                             output.textContent = '⏳ 底层总线深度查询中...';
-                            output.className = 'p-3 bg-slate-50 dark:bg-black/30 rounded-lg border border-slate-200/50 dark:border-brandBorder/20 text-xs font-mono text-indigo-600 dark:text-indigo-400 max-h-[250px] overflow-y-auto whitespace-pre-wrap';
+                            output.className = 'p-3 bg-slate-50 dark:bg-black/30 rounded border border-slate-200/50 dark:border-brandBorder/20 text-xs font-mono text-indigo-600 dark:text-indigo-400 max-h-[250px] overflow-y-auto whitespace-pre-wrap';
                         }
                         sendWsCommand('get_diagnostics', subCmd);
                     });

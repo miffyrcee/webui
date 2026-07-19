@@ -1260,4 +1260,344 @@
                     const status = getDomElement('scan_status');
                     if (btnText) btnText.innerText = '正在后台扫描中...';
                     if (status) status.innerText = '命令已下发，底层正在扫描全网运营商公开基站频点（宽带将暂时中断，请耐心等待）...';
-                    scanBtn
+                    scanBtn.disabled = true;
+                    sendWsCommand('network_scan');
+                });
+            }
+        }
+
+        function appendSettingsLog(msg) {
+            const log = getDomElement('settings_log');
+            if (log) {
+                log.innerHTML += `<div class="text-slate-400 dark:text-slate-500">${msg}</div>`;
+                log.scrollTop = log.scrollHeight;
+            }
+        }
+
+        function initSettingsPanel() {
+            const logRefreshBtn = getDomElement('log_refresh_btn');
+            if (logRefreshBtn) {
+                logRefreshBtn.addEventListener('click', () => {
+                    sendWsCommand('get_backend_log');
+                });
+            }
+
+            const rebootBtn = getDomElement('settings_reboot_btn');
+            if (rebootBtn) {
+                rebootBtn.addEventListener('click', () => {
+                    if (confirm('确认重启模组？（重启耗时约 20 秒，连接将会暂时断开）')) {
+                        sendWsCommand('reboot');
+                        appendSettingsLog('热重启指令已提交。');
+                    }
+                });
+            }
+
+            const resetBtn = getDomElement('settings_reset_btn');
+            if (resetBtn) {
+                resetBtn.addEventListener('click', () => {
+                    if (confirm('警告！这会将模组配置彻底恢复为出厂配置，是否确认？')) {
+                        sendWsCommand('factory_reset');
+                        appendSettingsLog('物理重置恢复出厂命令已提交。');
+                    }
+                });
+            }
+
+            const flightOn = getDomElement('settings_flight_on_btn');
+            if (flightOn) {
+                flightOn.addEventListener('click', () => {
+                    sendWsCommand('flight_mode', '1');
+                    appendSettingsLog('飞行模式已激活。');
+                });
+            }
+
+            const flightOff = getDomElement('settings_flight_off_btn');
+            if (flightOff) {
+                flightOff.addEventListener('click', () => {
+                    sendWsCommand('flight_mode', '0');
+                    appendSettingsLog('飞行模式已退出，重新搜网。');
+                });
+            }
+
+            const bandLockApply = getDomElement('band_lock_apply_btn');
+            if (bandLockApply) {
+                bandLockApply.addEventListener('click', () => {
+                    const nr5g = document.querySelector('input[name="band_rat"]:checked')?.value === 'nr5g';
+                    const bands = (getDomElement('band_lock_input')?.value || '').trim();
+                    sendWsCommand('set_band_lock', { nr5g, bands });
+                    const status = getDomElement('band_lock_status');
+                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在锁定重载中...</span>';
+                });
+            }
+            const bandLockReset = getDomElement('band_lock_reset_btn');
+            if (bandLockReset) {
+                bandLockReset.addEventListener('click', () => {
+                    const nr5g = document.querySelector('input[name="band_rat"]:checked')?.value === 'nr5g';
+                    sendWsCommand('set_band_lock', { nr5g, bands: 'all' });
+                    const status = getDomElement('band_lock_status');
+                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在重置全频段...</span>';
+                });
+            }
+
+            const cellLockApply = getDomElement('cell_lock_apply_btn');
+            if (cellLockApply) {
+                cellLockApply.addEventListener('click', () => {
+                    const tech = document.querySelector('input[name="cell_tech"]:checked')?.value || 'lte';
+                    const pci = parseInt(getDomElement('cell_pci_input')?.value, 10) || 0;
+                    const earfcn = parseInt(getDomElement('cell_earfcn_input')?.value, 10) || 0;
+                    const bandStr = (getDomElement('cell_band_input')?.value || '').trim();
+                    const band = bandStr ? parseInt(bandStr, 10) : undefined;
+                    if (!pci || !earfcn) {
+                        const status = getDomElement('cell_lock_status');
+                        if (status) status.innerHTML = '<span class="text-red-500 font-semibold">✗ 请填写 PCI 和绝对频点号 EARFCN</span>';
+                        return;
+                    }
+                    const payload = { tech, pci, earfcn, enable: true };
+                    if (band !== undefined) payload.band = band;
+                    sendWsCommand('set_cell_lock', payload);
+                    const status = getDomElement('cell_lock_status');
+                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在绑定物理小区...</span>';
+                });
+            }
+            const cellLockUnlock = getDomElement('cell_lock_unlock_btn');
+            if (cellLockUnlock) {
+                cellLockUnlock.addEventListener('click', () => {
+                    const tech = document.querySelector('input[name="cell_tech"]:checked')?.value || 'lte';
+                    sendWsCommand('set_cell_lock', { tech, enable: false });
+                    const status = getDomElement('cell_lock_status');
+                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 解除绑定复位中...</span>';
+                });
+            }
+
+            const usbnetApply = getDomElement('usbnet_apply_btn');
+            if (usbnetApply) {
+                usbnetApply.addEventListener('click', () => {
+                    const mode = parseInt(getDomElement('usbnet_mode_select')?.value, 10) || 0;
+                    sendWsCommand('set_usbnet', mode);
+                    const status = getDomElement('usbnet_sim_status');
+                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在下发网卡驱动修改命令...</span>';
+                });
+            }
+
+            function setupSimSlotBtn(id, slot) {
+                const btn = getDomElement(id);
+                if (btn) {
+                    btn.addEventListener('click', () => {
+                        if (!confirm('确认切换物理卡槽到 SIM ' + slot + '？（连接将断开约 20 秒）')) return;
+                        sendWsCommand('switch_sim_slot', slot);
+                        const status = getDomElement('usbnet_sim_status');
+                        if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在切换底层物理卡槽...</span>';
+                    });
+                }
+            }
+            setupSimSlotBtn('sim_slot_1_btn', 1);
+            setupSimSlotBtn('sim_slot_2_btn', 2);
+
+            function setupDiagBtn(id, subCmd) {
+                const btn = getDomElement(id);
+                if (btn) {
+                    btn.addEventListener('click', () => {
+                        const output = getDomElement('diag_output');
+                        if (output) {
+                            output.textContent = '⏳ 底层查询中...';
+                            output.className = 'p-3 bg-slate-50 dark:bg-slate-900/30 rounded-lg border border-slate-200/50 dark:border-brandBorder/20 text-xs font-mono text-amber-500 max-h-[250px] overflow-y-auto whitespace-pre-wrap';
+                        }
+                        sendWsCommand('get_diagnostics', subCmd);
+                    });
+                }
+            }
+            setupDiagBtn('diag_neighbour_btn', 'neighbour');
+            setupDiagBtn('diag_qlts_btn', 'qlts');
+            setupDiagBtn('diag_mbn_list_btn', 'mbn_list');
+            setupDiagBtn('diag_autosel_btn', 'mbn_autoclose');
+        }
+
+        function initSmsPanel() {
+            const sendBtn = getDomElement('sms_send_btn');
+            if (sendBtn) {
+                sendBtn.addEventListener('click', () => {
+                    const recipient = getDomElement('sms_recipient')?.value.trim() || '';
+                    const message = getDomElement('sms_message')?.value.trim() || '';
+                    const status = getDomElement('sms_send_status');
+                    if (!recipient || !message) {
+                        if (status) status.innerHTML = '<span class="text-red-500 font-semibold">请同时填写号码与正文。</span>';
+                        return;
+                    }
+                    sendWsCommand('send_sms', { recipient, message });
+                    if (status) status.innerHTML = '<span class="text-indigo-600 dark:text-indigo-400 font-semibold">正在发送短信...</span>';
+                    const msgInput = getDomElement('sms_message');
+                    if (msgInput) msgInput.value = '';
+                    const counter = getDomElement('sms_char_count');
+                    if (counter) counter.innerText = '0';
+                });
+            }
+
+            const msgTextarea = getDomElement('sms_message');
+            if (msgTextarea) {
+                msgTextarea.addEventListener('input', () => {
+                    const len = msgTextarea.value.length;
+                    const counter = getDomElement('sms_char_count');
+                    if (counter) counter.innerText = len;
+                });
+            }
+
+            const refreshBtn = getDomElement('sms_refresh_btn');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', () => {
+                    sendWsCommand('get_sms_list');
+                });
+            }
+
+            const smsList = getDomElement('sms_list');
+            if (smsList) {
+                smsList.addEventListener('click', (e) => {
+                    const item = e.target.closest('.sms-item');
+                    if (!item) return;
+                    const index = parseInt(item.dataset.index, 10);
+                    if (isNaN(index)) return;
+                    const msg = currentSmsMessages[index];
+                    if (msg) {
+                        showSmsDetail(msg);
+                    }
+                });
+            }
+
+            const closeBtn = getDomElement('sms_reader_close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    getDomElement('sms_reader_card')?.classList.add('hidden');
+                });
+            }
+
+            const replyBtn = getDomElement('sms_reader_reply');
+            if (replyBtn) {
+                replyBtn.addEventListener('click', () => {
+                    const senderNum = getDomElement('sms_reader_sender')?.innerText;
+                    const recipientInput = getDomElement('sms_recipient');
+                    const messageInput = getDomElement('sms_message');
+                    if (senderNum && recipientInput) {
+                        recipientInput.value = senderNum;
+                        if (messageInput) {
+                            messageInput.focus();
+                        }
+                    }
+                });
+            }
+
+            const copyBtn = getDomElement('sms_reader_copy');
+            if (copyBtn) {
+                copyBtn.addEventListener('click', () => {
+                    const bodyText = getDomElement('sms_reader_body')?.innerText;
+                    if (bodyText) {
+                        navigator.clipboard.writeText(bodyText).then(() => {
+                            const originalText = copyBtn.innerText;
+                            copyBtn.innerText = '成功复制 Copied!';
+                            copyBtn.classList.add('text-indigo-600', 'dark:text-indigo-400', 'font-semibold');
+                            setTimeout(() => {
+                                copyBtn.innerText = originalText;
+                                copyBtn.classList.remove('text-indigo-600', 'dark:text-indigo-400', 'font-semibold');
+                            }, 2000);
+                        }).catch(err => {
+                            console.error('Failed to copy: ', err);
+                        });
+                    }
+                });
+            }
+        }
+
+        function showSmsDetail(msg) {
+            const card = getDomElement('sms_reader_card');
+            const sender = getDomElement('sms_reader_sender');
+            const time = getDomElement('sms_reader_time');
+            const body = getDomElement('sms_reader_body');
+
+            if (!card || !sender || !time || !body) return;
+
+            sender.innerText = msg.sender || 'Unknown';
+            time.innerText = msg.timestamp || '';
+            body.innerText = msg.text || '';
+
+            card.classList.remove('hidden');
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function initDevicePanel() {
+            const refreshBtn = getDomElement('dev_refresh_btn');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', () => {
+                    sendWsCommand('get_device_info');
+                });
+            }
+
+            getDomElement('dev_specs_details')?.addEventListener('toggle', (e) => {
+                if (e.target.open && socket && socket.readyState === WebSocket.OPEN) {
+                    sendWsCommand('get_device_info');
+                }
+            });
+        }
+
+        function initIntervalSetter() {
+            const select = getDomElement('refreshRateSelect');
+            const btn = getDomElement('setRefreshBtn');
+            if (!select || !btn) return;
+            btn.addEventListener('click', () => {
+                const seconds = parseInt(select.value, 10);
+                if (!isNaN(seconds)) {
+                    sendWsCommand('set_interval', seconds);
+                    console.log(`下发成功：设置刷新率为 ${seconds} 秒`);
+                }
+            });
+        }
+
+        function initVisibilityHandler() {
+            document.addEventListener('visibilitychange', () => {
+                isVisible = !document.hidden;
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        action: "set_view_state",
+                        payload: isVisible ? "active" : "idle"
+                    }));
+                }
+            });
+        }
+
+        function initTheme() {
+            const html = document.documentElement;
+            const savedTheme = localStorage.getItem('theme');
+            const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+            if (savedTheme === 'dark' || (!savedTheme && systemPrefersDark)) {
+                html.classList.add('dark');
+            } else {
+                html.classList.remove('dark');
+            }
+
+            const themeBtn = getDomElement('theme_toggle');
+            if (themeBtn) {
+                themeBtn.addEventListener('click', () => {
+                    if (html.classList.contains('dark')) {
+                        html.classList.remove('dark');
+                        localStorage.setItem('theme', 'light');
+                    } else {
+                        html.classList.add('dark');
+                        localStorage.setItem('theme', 'dark');
+                    }
+                });
+            }
+        }
+
+        initTheme();
+        connectWs();
+        initIntervalSetter();
+        initVisibilityHandler();
+        initConsole();
+        initNetworkPanel();
+        initScanPanel();
+        initSettingsPanel();
+        initSmsPanel();
+        initDevicePanel();
+        initCopyOnClick();
+        initCopyToastDismiss();
+    </script>
+</body>
+
+</html>

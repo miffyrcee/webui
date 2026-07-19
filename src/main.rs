@@ -955,7 +955,7 @@ async fn send_at_command_inner_with_timeout(
     let _lock = get_at_lock().lock().await;
     let _file_lock = acquire_serial_lock().await?;
 
-    let child = tokio::process::Command::new("/opt/atcmd_rs")
+    let child = tokio::process::Command::new("atcmd_rs")
         .arg("-p")
         .arg(serial_path)
         .arg(cmd)

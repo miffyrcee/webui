@@ -180,7 +180,7 @@ fn build_qcainfo_entry(pair: pest::iterators::Pair<'_, Rule>) -> QcainfoEntry {
                     Rule::earfcn => entry.earfcn = field.as_str().to_string(),
                     Rule::bandwidth => entry.bandwidth = field.as_str().to_string(),
                     Rule::band => entry.band = field.as_str().trim_matches('"').to_string(),
-                    Rule::pci => {} // SCC 的首个 pci 不覆盖 entry.pci
+                    Rule::pci => entry.pci = field.as_str().to_string(),
                     Rule::scc_idx => entry.scc_idx = Some(field.as_str().to_string()),
                     Rule::scc_pci => entry.pci = field.as_str().to_string(),
                     Rule::scc_rsrp => entry.rsrp = Some(field.as_str().to_string()),

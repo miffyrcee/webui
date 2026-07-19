@@ -518,7 +518,11 @@ pub fn parse_qcainfo(qca_res: &str, telemetry: &mut crate::TelemetryData) {
         telemetry.bands = Some(bands.join(", "));
     }
     if !bw_parts.is_empty() {
-        telemetry.bandwidth = Some(format!("NR {} MHz ({})", total_bw, bw_parts.join("+")));
+        if bw_parts.len() > 1 {
+            telemetry.bandwidth = Some(format!("NR {} MHz ({})", total_bw, bw_parts.join("+")));
+        } else {
+            telemetry.bandwidth = Some(format!("NR {} MHz", total_bw));
+        }
     }
     if !earfcns.is_empty() {
         telemetry.earfcn = Some(earfcns.join(", "));
@@ -887,6 +891,19 @@ OK\r\n";
         assert_eq!(telemetry.earfcn, Some("504990, 156490".to_string()));
         // SCC pci 通过结构化 AST 正确匹配 scc_pci 字段，无字段偏移问题
         assert_eq!(telemetry.pci, Some("751, 0".to_string()));
+    }
+
+    #[test]
+    fn test_parse_qcainfo_single_carrier() {
+        // 单载波场景：QCAINFO 仅返回一行 PCC，频宽不应有冗余括号
+        let raw = "+QCAINFO: \"PCC\",504990,12,\"NR5G BAND 41\",751";
+        let mut telemetry = crate::TelemetryData::default();
+        parse_qcainfo(raw, &mut telemetry);
+
+        assert_eq!(telemetry.bands, Some("NR5G BAND 41".to_string()));
+        assert_eq!(telemetry.bandwidth, Some("NR 100 MHz".to_string()));
+        assert_eq!(telemetry.earfcn, Some("504990".to_string()));
+        assert_eq!(telemetry.pci, Some("751".to_string()));
     }
 
     #[test]

@@ -8,164 +8,138 @@
 
 /* 2. 注册自定义全局主题色（将原 Indigo 颜色重映射为 Argon 经典蓝紫主色） */
 @theme {
-    --color-indigo-600: #5c7df2;
-    --color-indigo-500: #4869e8;
-    --color-indigo-400: #728ff4;
+  --color-indigo-600: #5c7df2;
+  --color-indigo-500: #4869e8;
+  --color-indigo-400: #728ff4;
 
-    --color-brandBg: #12141a;
-    --color-brandCard: #1b1e25;
-    --color-brandBorder: #2a2f3b;
-    --color-brandMuted: #9ca3af;
+  --color-brandBg: #12141a;
+  --color-brandCard: #1b1e25;
+  --color-brandBorder: #2a2f3b;
+  --color-brandMuted: #9ca3af;
 }
 
 /* ============================================================================
-   3. CSS 自定义属性 — Argon 发光与环境色值
-   ============================================================================ */
-:root {
-    --glow-primary-soft: rgba(92, 125, 242, 0.07);
-    --glow-primary-medium: rgba(92, 125, 242, 0.15);
-    --glow-primary-strong: rgba(92, 125, 242, 0.3);
-    --glow-primary-signal: rgba(92, 125, 242, 0.4);
-    --glow-scrollbar-thumb: rgba(92, 125, 242, 0.2);
-    --glow-scrollbar-thumb-hover: rgba(92, 125, 242, 0.45);
-    --glow-accent-soft: rgba(114, 143, 244, 0.07);
-    --glow-accent-dim: rgba(114, 143, 244, 0.05);
-    --glow-dark-primary: rgba(92, 125, 242, 0.12);
-    --glow-dark-accent: rgba(114, 143, 244, 0.07);
-    --glow-emerald: rgba(16, 185, 129, 0.3);
-    --glow-amber: rgba(245, 158, 11, 0.25);
-    --glow-form-focus: rgba(92, 125, 242, 0.15);
-}
-
-/* ============================================================================
-   4. 自定义实用工具 (Utilities)
+   3. 自定义实用工具 (Utilities)
    ============================================================================ */
 
 /* 极致无边框滚动条（Argon极简风格） */
 @utility scrollbar-none {
-    scrollbar-width: none;
-    -ms-overflow-style: none;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 
-    &::-webkit-scrollbar {
-        display: none;
-    }
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* 优雅超窄滚动条（带 Argon 蓝紫微弱发光） */
 @utility scrollbar-thin {
-    scrollbar-width: thin;
-    -ms-overflow-style: auto;
+  scrollbar-width: thin;
+  -ms-overflow-style: auto;
 
-    &::-webkit-scrollbar {
-        width: 5px;
-        height: 5px;
-    }
+  &::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
 
-    &::-webkit-scrollbar-thumb {
-        background: var(--glow-scrollbar-thumb);
-        border-radius: 10px;
-        transition: background 0.2s ease;
-    }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(92, 125, 242, 0.25);
+    border-radius: 10px;
+    transition: background 0.2s ease;
+  }
 
-    &::-webkit-scrollbar-thumb:hover {
-        background: var(--glow-scrollbar-thumb-hover);
-    }
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgba(92, 125, 242, 0.45);
+  }
 
-    &::-webkit-scrollbar-track {
-        background: transparent;
-    }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }
 
 /* ============================================================================
-   5. 基础层覆盖样式 (Base Overrides)
+   4. 基础层覆盖样式 (Base Overrides)
    使用标准 CSS 结合环境发光与毛玻璃质感，重塑全站 UI
    ============================================================================ */
 
-/* 5.1 全局环境背景（Argon 标志性的多光源冷暖径向发光） */
+/* 4.1 全局环境背景（Argon 标志性的多光源冷暖径向发光） */
 body {
-    background-attachment: fixed !important;
-    background-position: center !important;
-    background-size: cover !important;
-    background: radial-gradient(circle at 5% 5%, var(--glow-primary-soft) 0%, transparent 45%),
-        radial-gradient(circle at 95% 95%, var(--glow-accent-dim) 0%, transparent 40%),
-        #f4f6fa !important;
-    transition: background 0.3s ease, color 0.3s ease;
+  background-attachment: fixed !important;
+  background-position: center !important;
+  background-size: cover !important;
+  background: radial-gradient(circle at 5% 5%, rgba(92, 125, 242, 0.07) 0%, transparent 45%),
+              radial-gradient(circle at 95% 95%, rgba(114, 143, 244, 0.05) 0%, transparent 40%),
+              #f4f6fa !important;
+  transition: background 0.3s ease, color 0.3s ease;
 }
 
 .dark body {
-    background: radial-gradient(circle at 5% 5%, var(--glow-dark-primary) 0%, transparent 50%),
-        radial-gradient(circle at 95% 95%, var(--glow-dark-accent) 0%, transparent 50%),
-        #080a10 !important;
+  background: radial-gradient(circle at 5% 5%, rgba(92, 125, 242, 0.12) 0%, transparent 50%),
+              radial-gradient(circle at 95% 95%, rgba(114, 143, 244, 0.07) 0%, transparent 50%),
+              #080a10 !important;
 }
 
-/* 5.2 按钮轻度悬浮动画与立体阴影 */
-button {
-    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease !important;
-}
-
-button:hover {
-    transform: translateY(-1px);
-}
-
-button:active {
-    transform: translateY(1px);
-}
-
-/* 5.3 胶囊式导航菜单设计 */
+/* 4.2 侧边栏按钮样式覆盖（实现左侧高亮过渡） */
 .tab-btn {
-    border-radius: 8px !important;
-    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.25s ease !important;
+  color: #64748b !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0px 8px 8px 0px !important;
+  cursor: pointer;
+  transition: color 0.25s cubic-bezier(0.4, 0, 0.2, 1), background 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.dark .tab-btn {
+  color: #94a3b8 !important;
+}
+
+.tab-btn:hover {
+  color: #5c7df2 !important;
+  background: rgba(92, 125, 242, 0.06) !important;
+}
+
+.dark .tab-btn:hover {
+  background: rgba(92, 125, 242, 0.1) !important;
+}
+
+/* 激活态（经典 Argon 亮条效果与阴影） */
 .tab-btn[aria-selected="true"] {
-    background: linear-gradient(135deg, var(--color-indigo-600) 0%, var(--color-indigo-400) 100%) !important;
-    box-shadow: 0 4px 15px 0 var(--glow-primary-strong) !important;
+  color: #ffffff !important;
+  background: linear-gradient(90deg, #5c7df2 0%, #728ff4 100%) !important;
+  box-shadow: 0 4px 12px 0 rgba(92, 125, 242, 0.25) !important;
 }
 
-div[role="tablist"] {
-    background: rgba(255, 255, 255, 0.4);
-    backdrop-filter: blur(10px);
-    border-color: rgba(226, 232, 240, 0.8);
-    padding: 6px;
-}
-
-.dark div[role="tablist"] {
-    background: rgba(10, 13, 20, 0.4);
-    border-color: rgba(255, 255, 255, 0.05);
-}
-
-/* 5.4 磨砂毛玻璃卡片（完美契合原有 HTML 类的类名覆盖） */
-.bg-white,
+/* 4.3 磨砂毛玻璃卡片（类名覆盖） */
+.bg-white, 
 .bg-white\/80 {
-    background-color: rgba(255, 255, 255, 0.7) !important;
-    backdrop-filter: blur(20px) saturate(120%) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(120%) !important;
-    border-color: rgba(226, 232, 240, 0.8) !important;
-    box-shadow: 0 8px 32px 0 rgba(148, 163, 184, 0.06) !important;
-    border-width: 1px !important;
+  background-color: rgba(255, 255, 255, 0.7) !important;
+  backdrop-filter: blur(20px) saturate(120%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(120%) !important;
+  border-color: rgba(226, 232, 240, 0.8) !important;
+  box-shadow: 0 8px 32px 0 rgba(148, 163, 184, 0.06) !important;
+  border-width: 1px !important;
 }
 
-/* 适配原 HTML 中的暗黑卡片背景 */
 .dark .dark\:bg-\[\#111622\] {
-    background-color: rgba(18, 24, 38, 0.65) !important;
-    backdrop-filter: blur(20px) saturate(140%) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(140%) !important;
-    border-color: rgba(255, 255, 255, 0.05) !important;
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.35) !important;
-    border-width: 1px !important;
+  background-color: rgba(18, 24, 38, 0.65) !important;
+  backdrop-filter: blur(20px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(140%) !important;
+  border-color: rgba(255, 255, 255, 0.05) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.35) !important;
+  border-width: 1px !important;
 }
 
-/* 5.5 表单与文本域毛玻璃优化 */
+/* 4.4 表单与文本域毛玻璃优化 */
 input[type="text"],
 input[type="password"],
 input[type="number"],
 input[type="tel"],
 select,
 textarea {
-    background-color: rgba(255, 255, 255, 0.45) !important;
-    border-color: rgba(226, 232, 240, 0.8) !important;
-    border-radius: 8px !important;
-    transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out, background-color 0.2s ease-in-out !important;
+  background-color: rgba(255, 255, 255, 0.45) !important;
+  border-color: rgba(226, 232, 240, 0.8) !important;
+  border-radius: 8px !important;
+  transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out, background-color 0.2s ease-in-out !important;
 }
 
 .dark input[type="text"],
@@ -174,50 +148,56 @@ textarea {
 .dark input[type="tel"],
 .dark select,
 .dark textarea {
-    background-color: rgba(10, 13, 20, 0.45) !important;
-    border-color: rgba(255, 255, 255, 0.05) !important;
-    color: #f1f5f9 !important;
+  background-color: rgba(10, 13, 20, 0.45) !important;
+  border-color: rgba(255, 255, 255, 0.05) !important;
+  color: #f1f5f9 !important;
 }
 
 input:focus,
 select:focus,
 textarea:focus {
-    border-color: var(--color-indigo-600) !important;
-    box-shadow: 0 0 0 3px var(--glow-form-focus) !important;
-    outline: none !important;
-    background-color: rgba(255, 255, 255, 0.7) !important;
+  border-color: #5c7df2 !important;
+  box-shadow: 0 0 0 3px rgba(92, 125, 242, 0.15) !important;
+  outline: none !important;
+  background-color: rgba(255, 255, 255, 0.7) !important;
 }
 
 .dark input:focus,
 .dark select:focus,
 .dark textarea:focus {
-    background-color: rgba(10, 13, 20, 0.7) !important;
+  background-color: rgba(10, 13, 20, 0.7) !important;
 }
 
-/* 5.6 霓虹灯与发光信号指标 */
-#rsrq_bar,
-#rsrp_bar,
-#sinr_bar {
-    filter: drop-shadow(0 0 3px var(--glow-primary-signal));
+/* 4.5 霓虹灯与发光信号指标 */
+#rsrq_bar, #rsrp_bar, #sinr_bar {
+  filter: drop-shadow(0 0 3px rgba(92, 125, 242, 0.4));
 }
 
-.text-emerald-600,
-.text-emerald-400 {
-    text-shadow: 0 0 8px var(--glow-emerald);
+.text-emerald-600, .text-emerald-400 {
+  text-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
 }
 
 .text-amber-500 {
-    text-shadow: 0 0 8px var(--glow-amber);
+  text-shadow: 0 0 8px rgba(245, 158, 11, 0.25);
 }
 
-/* ============================================================================
-   6. 可访问性 — 减少动效支持
-   ============================================================================ */
+/* 按钮悬浮 */
+button {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+button:hover {
+  transform: translateY(-1px);
+}
+button:active {
+  transform: translateY(1px);
+}
+
+/* 6. 可访问性 — 减少动效支持 */
 @media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-        animation-duration: 0.01ms !important;
-        transition-duration: 0.01ms !important;
-    }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

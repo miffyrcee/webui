@@ -10,31 +10,81 @@
     <meta name="theme-color" content="#0c0f16" media="(prefers-color-scheme: dark)">
 </head>
 
-<body class="bg-slate-150/40 dark:bg-[#0c0f16] text-slate-800 dark:text-slate-200 font-sans min-h-full p-4 md:p-8 transition-colors duration-300">
+<body class="bg-slate-150/40 dark:bg-[#0c0f16] text-slate-800 dark:text-slate-200 font-sans min-h-screen flex overflow-hidden transition-colors duration-300">
 
-    <div id="main_container" class="max-w-7xl mx-auto space-y-6 transition-all duration-300">
-
-        <!-- 头部标题区 -->
-        <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-slate-200 dark:border-slate-800/60 gap-3">
-            <div class="flex items-center space-x-3">
-                <div class="relative flex items-center">
-                    <span class="text-lg font-bold tracking-wider text-indigo-600 dark:text-indigo-400">QUECTEL RM520N</span>
-                    <div id="ws_status_dot" class="ml-3 w-2.5 h-2.5 bg-red-500 rounded-full transition-all duration-500 shadow-lg shadow-red-500/50"></div>
+    <!-- ========================== 1. 左侧固定侧边栏 (Sidebar) ========================== -->
+    <aside id="sidebar" class="fixed md:static inset-y-0 left-0 w-64 h-screen bg-white dark:bg-[#111622] border-r border-slate-200 dark:border-slate-800/60 flex flex-col justify-between shrink-0 z-30 -translate-x-full md:translate-x-0 transition-transform duration-300">
+        <div>
+            <!-- 标志与 WebSocket 连接指示灯 -->
+            <div class="p-6 border-b border-slate-100 dark:border-slate-800/40 flex items-center justify-between">
+                <div class="flex items-center space-x-2.5">
+                    <span class="text-xl font-black tracking-wider text-indigo-600 dark:text-indigo-400">Argon</span>
+                    <span class="text-[9px] bg-slate-100 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded font-bold tracking-wider">RM520N</span>
                 </div>
-                <span class="hidden sm:inline-block text-[10px] bg-slate-200/80 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded font-medium tracking-wider">5G NR SA/NSA</span>
+                <div id="ws_status_dot" class="w-2.5 h-2.5 bg-red-500 rounded-full transition-all duration-500 shadow-lg shadow-red-500/50"></div>
+            </div>
+
+            <!-- 垂直导航菜单区 (右侧采用单侧圆角，边缘贴合更显高级) -->
+            <nav role="tablist" class="py-4 pr-4 space-y-1">
+                <button id="tab_dashboard" role="tab" aria-selected="true" onclick="switchTab('dashboard')"
+                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4zM14 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2v-4z"/></svg>
+                    <span>仪表盘 Dashboard</span>
+                </button>
+                <button id="tab_network" role="tab" aria-selected="false" onclick="switchTab('network')"
+                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                    <span>连接配置 Control</span>
+                </button>
+                <button id="tab_locks" role="tab" aria-selected="false" onclick="switchTab('locks')"
+                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                    <span>高级锁频与诊断 Locks</span>
+                </button>
+                <button id="tab_sms" role="tab" aria-selected="false" onclick="switchTab('sms')"
+                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                    <span>短信中心 SMS</span>
+                </button>
+                <button id="tab_logs" role="tab" aria-selected="false" onclick="switchTab('logs')"
+                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    <span>系统日志 Logs</span>
+                </button>
+            </nav>
+        </div>
+
+        <!-- 侧边栏页脚底座 -->
+        <div class="p-6 border-t border-slate-100 dark:border-slate-800/40">
+            <div class="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest text-center">
+                固件版本: <span id="firmware_ver" class="font-bold text-slate-700 dark:text-slate-300">--</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- 移动端侧边栏遮罩背景 -->
+    <div id="sidebar_overlay" class="fixed inset-0 bg-black/40 z-20 hidden md:hidden transition-opacity duration-300"></div>
+
+    <!-- ========================== 2. 右侧主体内容容器 ========================== -->
+    <div id="main_container" class="flex-1 h-screen flex flex-col overflow-hidden transition-all duration-300">
+        
+        <!-- 顶部蓝色 Argon Header -->
+        <header class="h-16 shrink-0 bg-indigo-600 dark:bg-indigo-600/95 flex items-center justify-between px-6 md:px-8 text-white shadow-md z-10 transition-colors duration-300">
+            <div class="flex items-center">
+                <!-- 汉堡折叠按钮 -->
+                <button id="sidebar_toggle" class="md:hidden p-2 -ml-2 mr-2 text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer" title="展开菜单">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                </button>
+                <span id="current_page_title" class="text-xs font-bold tracking-widest uppercase">STATUS / OVERVIEW</span>
             </div>
 
             <div class="flex items-center space-x-4">
-                <div class="text-xs text-slate-500 dark:text-slate-400">
-                    固件版本: <span id="firmware_ver" class="text-slate-800 dark:text-slate-200 font-semibold">--</span>
-                </div>
-                <!-- 主题切换按钮 -->
-                <button id="theme_toggle" class="p-2 rounded-lg bg-slate-200/80 dark:bg-slate-800/80 hover:bg-slate-300 dark:hover:bg-slate-700 transition-all active:scale-95 text-slate-600 dark:text-slate-400" title="切换白天/夜晚模式">
-                    <!-- 太阳图标 (白天可见) -->
+                <span class="hidden sm:inline-block text-[10px] bg-white/20 text-white px-2.5 py-1 rounded-full font-bold tracking-wider uppercase border border-white/10">Auto Refresh On</span>
+                <!-- 主题日光/月光转换开关 -->
+                <button id="theme_toggle" class="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-all active:scale-95 text-white cursor-pointer" title="切换白天/夜晚模式">
                     <svg aria-hidden="true" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m12.728 12.728l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
                     </svg>
-                    <!-- 月亮图标 (夜晚可见) -->
                     <svg aria-hidden="true" class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
                     </svg>
@@ -42,657 +92,640 @@
             </div>
         </header>
 
-        <!-- 导航菜单（增加了 Logs 日志独立界面） -->
-        <div role="tablist" class="flex space-x-1 bg-slate-200/50 dark:bg-[#151a24]/60 rounded-lg p-1 border border-slate-200 dark:border-slate-800/60 overflow-x-auto scrollbar-none w-full">
-            <button id="tab_dashboard" role="tab" aria-selected="true" onclick="switchTab('dashboard')"
-                class="tab-btn px-4 py-2 text-xs sm:text-sm rounded-md font-medium transition-all bg-indigo-600 text-white shadow-sm whitespace-nowrap">仪表盘 Dashboard</button>
-            <button id="tab_network" role="tab" aria-selected="false" onclick="switchTab('network')"
-                class="tab-btn px-4 py-2 text-xs sm:text-sm rounded-md font-medium transition-all text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-300/60 dark:hover:bg-[#1f2735] whitespace-nowrap">连接配置 Control</button>
-            <button id="tab_locks" role="tab" aria-selected="false" onclick="switchTab('locks')"
-                class="tab-btn px-4 py-2 text-xs sm:text-sm rounded-md font-medium transition-all text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-300/60 dark:hover:bg-[#1f2735] whitespace-nowrap">高级锁频与诊断 Locks &amp; Tools</button>
-            <button id="tab_sms" role="tab" aria-selected="false" onclick="switchTab('sms')"
-                class="tab-btn px-4 py-2 text-xs sm:text-sm rounded-md font-medium transition-all text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-300/60 dark:hover:bg-[#1f2735] whitespace-nowrap">短信中心 SMS</button>
-            <button id="tab_logs" role="tab" aria-selected="false" onclick="switchTab('logs')"
-                class="tab-btn px-4 py-2 text-xs sm:text-sm rounded-md font-medium transition-all text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-300/60 dark:hover:bg-[#1f2735] whitespace-nowrap">系统日志 Logs</button>
-        </div>
+        <!-- 独立滚动渲染主体 (Main Container) -->
+        <main class="flex-1 overflow-y-auto scrollbar-thin p-6 md:p-8 space-y-6">
 
-        <!-- 1. Dashboard 面板 -->
-        <div id="panel_dashboard" role="tabpanel" class="space-y-6">
+            <!-- 2.1 Dashboard 仪表盘面板 -->
+            <div id="panel_dashboard" role="tabpanel" class="space-y-6">
 
-            <!-- 顶部核心指标卡片 -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
-                    <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
-                        <span class="text-xs font-semibold tracking-wider uppercase">工作温度 Temp</span>
-                        <svg aria-hidden="true" class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2V5a3 3 0 116 0v14zm0 0h6m-6-4h6m-6-4h4m-4-4h4"></path></svg>
+                <!-- 核心指标发光卡片 -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
+                        <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
+                            <span class="text-xs font-semibold tracking-wider uppercase">工作温度 Temp</span>
+                            <svg aria-hidden="true" class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2V5a3 3 0 116 0v14zm0 0h6m-6-4h6m-6-4h4m-4-4h4"></path></svg>
+                        </div>
+                        <div class="mt-2"><span id="temp" class="text-xl font-bold tracking-tight text-amber-500">-- °C</span></div>
                     </div>
-                    <div class="mt-2"><span id="temp" class="text-xl font-bold tracking-tight text-amber-500">-- °C</span></div>
+
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
+                        <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
+                            <span class="text-xs font-semibold tracking-wider uppercase">SIM 卡状态 SIM</span>
+                            <svg aria-hidden="true" class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2" stroke-linejoin="round"></rect><path d="M12 9h4m-4 4h4m-4 4h4M8 7v10" stroke-linecap="round"></path></svg>
+                        </div>
+                        <div class="mt-2"><span id="sim_status" class="text-xl font-bold tracking-tight text-indigo-600 dark:text-indigo-400">--</span></div>
+                    </div>
+
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
+                        <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
+                            <span class="text-xs font-semibold tracking-wider uppercase">信号质量 Signal</span>
+                            <svg aria-hidden="true" class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 10h.01M15 13h.01M12 16h.01M9 19h.01M21 6h.01"></path><path stroke-linecap="round" d="M12 18v2m3-5v5m3-8v8M9 20v-1"></path></svg>
+                        </div>
+                        <div class="mt-2"><span id="signal_pct" class="text-xl font-bold tracking-tight text-blue-600 dark:text-blue-400">--%</span></div>
+                    </div>
+
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
+                        <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
+                            <span class="text-xs font-semibold tracking-wider uppercase">因特网连接 Link</span>
+                            <svg aria-hidden="true" class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path></svg>
+                        </div>
+                        <div class="mt-2"><span id="conn_status" class="text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">--</span></div>
+                    </div>
                 </div>
 
-                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
-                    <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
-                        <span class="text-xs font-semibold tracking-wider uppercase">SIM 卡状态 SIM</span>
-                        <svg aria-hidden="true" class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2" stroke-linejoin="round"></rect><path d="M12 9h4m-4 4h4m-4 4h4M8 7v10" stroke-linecap="round"></path></svg>
+                <!-- 核心双栏指标面板 -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                    <!-- 左栏: 网络信息（磨砂磁贴） -->
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col justify-between shadow-sm overflow-hidden">
+                        <div>
+                            <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
+                                <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">网络架构参数 / Network Info</h2>
+                            </div>
+                            <div class="p-4 grid grid-cols-2 gap-3.5 text-xs sm:text-sm">
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">活跃卡槽 Slot</span>
+                                    <span id="info_sim" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">运营商 Provider</span>
+                                    <span id="info_provider" class="text-slate-800 dark:text-slate-200 font-semibold mt-1 truncate" title="双击复制全称">--</span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">MCCMNC</span>
+                                    <span id="info_mccmnc" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">APN 接入点</span>
+                                    <span id="info_apn" class="text-slate-800 dark:text-slate-200 font-semibold mt-1 select-all uppercase">--</span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">网络模式 Mode</span>
+                                    <span id="info_mode" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">可用载波总频宽</span>
+                                    <span id="info_bandwidth" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 col-span-2">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">当前工作频段 Bands</span>
+                                    <span id="info_bands" class="text-slate-800 dark:text-slate-200 font-semibold mt-1 overflow-x-auto scrollbar-none whitespace-nowrap">--</span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">E/ARFCN 频点</span>
+                                    <span id="info_earfcn" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">PCI 小区编号</span>
+                                    <span id="info_pci" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">IPv4 地址</span>
+                                    <span id="info_ipv4" class="text-indigo-600 dark:text-indigo-400 font-semibold mt-1 select-all">--</span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">运行时间 Uptime</span>
+                                    <span id="info_uptime" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 col-span-2">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">IPv6 地址</span>
+                                    <span id="info_ipv6" class="text-indigo-600 dark:text-indigo-400 font-semibold mt-1 overflow-x-auto scrollbar-none whitespace-nowrap select-all">--</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-3 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-[#161d2b]/20 flex items-center justify-between">
+                            <span class="text-xs text-slate-400 dark:text-slate-500">实时轮询频率</span>
+                            <div class="flex space-x-2">
+                                <select id="refreshRateSelect"
+                                    class="bg-white dark:bg-[#111622] border border-slate-200 dark:border-slate-800 text-xs rounded-lg px-2 py-1 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500">
+                                    <option value="3">3 秒一次</option>
+                                    <option value="5" selected>5 秒一次</option>
+                                    <option value="10">10 秒一次</option>
+                                </select>
+                                <button id="setRefreshBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1 text-xs rounded-lg transition-all active:scale-95 shadow-sm">更新</button>
+                            </div>
+                        </div>
                     </div>
-                    <div class="mt-2"><span id="sim_status" class="text-xl font-bold tracking-tight text-indigo-600 dark:text-indigo-400">--</span></div>
+
+                    <!-- 右栏: 信号空口轨道指标 -->
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col justify-between shadow-sm overflow-hidden">
+                        <div>
+                            <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
+                                <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">物理层空口指标 / Signal Info</h2>
+                            </div>
+                            <div class="p-4 grid grid-cols-2 gap-3.5 text-xs sm:text-sm">
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">空口状况评估</span>
+                                    <span id="sig_assessment" class="text-indigo-600 dark:text-indigo-400 font-semibold mt-1">--</span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">累计下行/上行流量</span>
+                                    <span id="sig_traffic" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">CELL ID 小区标识</span>
+                                    <span id="sig_cell_id" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">eNB ID 基站编号</span>
+                                    <span id="sig_enb" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 col-span-2">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">TAC 追踪区编码</span>
+                                    <span id="sig_tac" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
+                                </div>
+                            </div>
+
+                            <!-- 信号电平与信噪比弧线 -->
+                            <div class="px-4 pb-4 space-y-3.5 border-t border-slate-100/60 dark:border-slate-850/40 pt-4">
+                                <div class="space-y-1.5">
+                                    <div class="flex justify-between items-center px-1">
+                                        <span class="text-slate-500 dark:text-slate-400 text-xs font-semibold">RSRQ (信噪比质量) <span class="text-[9px] text-slate-400 ml-1">5G</span></span>
+                                        <span id="rsrq_val" class="text-slate-850 dark:text-slate-200 text-xs font-bold font-mono">-- / --%</span>
+                                    </div>
+                                    <div class="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
+                                        <div id="rsrq_bar" class="bg-indigo-600 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+                                    </div>
+                                </div>
+
+                                <div class="space-y-1.5">
+                                    <div class="flex justify-between items-center px-1">
+                                        <span class="text-slate-500 dark:text-slate-400 text-xs font-semibold">RSRP (参考信号接收功率) <span class="text-[9px] text-slate-400 ml-1">5G</span></span>
+                                        <span id="rsrp_val" class="text-slate-850 dark:text-slate-200 text-xs font-bold font-mono">-- / --%</span>
+                                    </div>
+                                    <div class="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
+                                        <div id="rsrp_bar" class="bg-indigo-600 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+                                    </div>
+                                </div>
+
+                                <div class="space-y-1.5">
+                                    <div class="flex justify-between items-center px-1">
+                                        <span class="text-slate-500 dark:text-slate-400 text-xs font-semibold">SINR (信号与干扰加噪声比) <span class="text-[9px] text-slate-400 ml-1">5G</span></span>
+                                        <span id="sinr_val" class="text-slate-850 dark:text-slate-200 text-xs font-bold font-mono">-- / --%</span>
+                                    </div>
+                                    <div class="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
+                                        <div id="sinr_bar" class="bg-indigo-600 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-4 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-[#161d2b]/20 flex justify-between items-center text-xs text-slate-400 dark:text-slate-500">
+                            <span>本地基准时间</span>
+                            <span id="last_updated" class="text-slate-700 dark:text-slate-300 font-medium">--</span>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
-                    <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
-                        <span class="text-xs font-semibold tracking-wider uppercase">信号质量 Signal</span>
-                        <svg aria-hidden="true" class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 10h.01M15 13h.01M12 16h.01M9 19h.01M21 6h.01"></path><path stroke-linecap="round" d="M12 18v2m3-5v5m3-8v8M9 20v-1"></path></svg>
-                    </div>
-                    <div class="mt-2"><span id="signal_pct" class="text-xl font-bold tracking-tight text-blue-600 dark:text-blue-400">--%</span></div>
-                </div>
+                <!-- 硬件资产折叠抽屉 -->
+                <details id="dev_specs_details" class="group bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl shadow-sm overflow-hidden transition-all duration-300">
+                    <summary class="flex justify-between items-center p-4 cursor-pointer select-none hover:bg-slate-50 dark:hover:bg-slate-900/20 transition-colors">
+                        <div class="flex items-center space-x-2">
+                            <svg aria-hidden="true" class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                            <h2 class="text-xs font-bold tracking-wider text-slate-500 dark:text-slate-400 uppercase">硬件底层资产规格 &amp; 空口能力 (点击展开)</h2>
+                        </div>
+                        <svg aria-hidden="true" class="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                    </summary>
 
-                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
-                    <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
-                        <span class="text-xs font-semibold tracking-wider uppercase">因特网连接 Link</span>
-                        <svg aria-hidden="true" class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path></svg>
+                    <div class="p-4 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/30 dark:bg-[#161d2b]/10 text-xs text-slate-700 dark:text-slate-300">
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">模组制造商</span><span id="dev_manufacturer" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">产品型号</span><span id="dev_model" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">当前固件分支</span><span id="dev_firmware" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">IMEI 识别码</span><span id="dev_imei" class="font-semibold text-slate-800 dark:text-slate-200 mt-1 truncate" title="双击复制">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">出厂硬件序列号</span><span id="dev_serial" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">卡套主存状态</span><span id="dev_sim_status" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">硬件 PCB 版本</span><span id="dev_hw_ver" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">底层架构类别</span><span id="dev_type" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 col-span-2"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">IMSI 标识卡号</span><span id="dev_imsi" class="font-semibold text-slate-800 dark:text-slate-200 mt-1 truncate" title="双击复制">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 col-span-2"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">ICCID 芯片编码</span><span id="dev_iccid" class="font-semibold text-slate-800 dark:text-slate-200 mt-1 truncate" title="双击复制">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">绑定手机号码</span><span id="dev_phone" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">网络注册状态</span><span id="dev_net_status" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">当前射频信号</span><span id="dev_signal" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">当前温度</span><span id="dev_temp" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">VoLTE 通话支持</span><span id="dev_volte" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">GNSS 定位支持</span><span id="dev_gnss" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
+                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">极限理论传输速率</span><span id="dev_rate" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
+                        </div>
+                        <div class="flex flex-col py-3 px-3 mt-3 border-t border-slate-100/60 dark:border-slate-850/40">
+                            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">基站射频所支持的频段全集 Supported Bands</span>
+                            <span id="dev_bands" class="text-slate-700 dark:text-slate-300 break-words leading-relaxed text-xs font-semibold mt-1">--</span>
+                        </div>
+                        <div class="flex justify-end pt-3 px-2">
+                            <button id="dev_refresh_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm">手动拉取规格信息</button>
+                        </div>
                     </div>
-                    <div class="mt-2"><span id="conn_status" class="text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">--</span></div>
-                </div>
+                </details>
             </div>
 
-            <!-- 主体双栏参数表格 -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- 2.2 Connection 拨号配置与网卡控制 -->
+            <div id="panel_network" role="tabpanel" class="hidden space-y-6">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-                <!-- 左栏: 网络信息（Tiles 矩阵布局） -->
-                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col justify-between shadow-sm overflow-hidden">
-                    <div>
-                        <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
-                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">网络架构参数 / Network Info</h2>
-                        </div>
-                        <div class="p-4 grid grid-cols-2 gap-3.5 text-xs sm:text-sm">
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">活跃卡槽 Slot</span>
-                                <span id="info_sim" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
-                            </div>
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">运营商 Provider</span>
-                                <span id="info_provider" class="text-slate-800 dark:text-slate-200 font-semibold mt-1 truncate" title="双击复制全称">--</span>
-                            </div>
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">MCCMNC</span>
-                                <span id="info_mccmnc" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
-                            </div>
-                            <!-- APN 数据行（已取消边框） -->
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">APN 接入点</span>
-                                <span id="info_apn" class="text-slate-800 dark:text-slate-200 font-semibold mt-1 select-all uppercase">--</span>
-                            </div>
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">网络模式 Mode</span>
-                                <span id="info_mode" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
-                            </div>
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">可用载波总频宽</span>
-                                <span id="info_bandwidth" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
-                            </div>
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 col-span-2">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">当前工作频段 Bands</span>
-                                <span id="info_bands" class="text-slate-800 dark:text-slate-200 font-semibold mt-1 overflow-x-auto scrollbar-none whitespace-nowrap">--</span>
-                            </div>
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">E/ARFCN 频点</span>
-                                <span id="info_earfcn" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
-                            </div>
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">PCI 小区编号</span>
-                                <span id="info_pci" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
-                            </div>
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">IPv4 地址</span>
-                                <span id="info_ipv4" class="text-indigo-600 dark:text-indigo-400 font-semibold mt-1 select-all">--</span>
-                            </div>
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">运行时间 Uptime</span>
-                                <span id="info_uptime" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
-                            </div>
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 col-span-2">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">IPv6 地址</span>
-                                <span id="info_ipv6" class="text-indigo-600 dark:text-indigo-400 font-semibold mt-1 overflow-x-auto scrollbar-none whitespace-nowrap select-all">--</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="p-3 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-[#161d2b]/20 flex items-center justify-between">
-                        <span class="text-xs text-slate-400 dark:text-slate-500">实时轮询速率控制</span>
-                        <div class="flex space-x-2">
-                            <select id="refreshRateSelect"
-                                class="bg-white dark:bg-[#111622] border border-slate-200 dark:border-slate-800 text-xs rounded-lg px-2 py-1 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500">
-                                <option value="3">3 秒一次</option>
-                                <option value="5" selected>5 秒一次</option>
-                                <option value="10">10 秒一次</option>
-                            </select>
-                            <button id="setRefreshBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1 text-xs rounded-lg transition-all active:scale-95 shadow-sm">更新</button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 右栏: 信号状态（Tiles + 分立轨道） -->
-                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col justify-between shadow-sm overflow-hidden">
-                    <div>
-                        <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
-                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">物理层空口指标 / Signal Info</h2>
-                        </div>
-                        <div class="p-4 grid grid-cols-2 gap-3.5 text-xs sm:text-sm">
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">空口状况评估</span>
-                                <span id="sig_assessment" class="text-indigo-600 dark:text-indigo-400 font-semibold mt-1">--</span>
-                            </div>
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">累计下行/上行流量</span>
-                                <span id="sig_traffic" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
-                            </div>
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">CELL ID 小区标识</span>
-                                <span id="sig_cell_id" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
-                            </div>
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">eNB ID 基站编号</span>
-                                <span id="sig_enb" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
-                            </div>
-                            <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 col-span-2">
-                                <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">TAC 追踪区编码</span>
-                                <span id="sig_tac" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
-                            </div>
-                        </div>
-
-                        <!-- 信号质量进度条 -->
-                        <div class="px-4 pb-4 space-y-3.5 border-t border-slate-100/60 dark:border-slate-850/40 pt-4">
-                            <div class="space-y-1.5">
-                                <div class="flex justify-between items-center px-1">
-                                    <span class="text-slate-500 dark:text-slate-400 text-xs font-semibold">RSRQ (信噪比质量) <span class="text-[9px] text-slate-400 ml-1">5G</span></span>
-                                    <span id="rsrq_val" class="text-slate-850 dark:text-slate-200 text-xs font-bold font-mono">-- / --%</span>
-                                </div>
-                                <div class="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
-                                    <div id="rsrq_bar" class="bg-indigo-600 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
-                                </div>
-                            </div>
-
-                            <div class="space-y-1.5">
-                                <div class="flex justify-between items-center px-1">
-                                    <span class="text-slate-500 dark:text-slate-400 text-xs font-semibold">RSRP (参考信号接收功率) <span class="text-[9px] text-slate-400 ml-1">5G</span></span>
-                                    <span id="rsrp_val" class="text-slate-850 dark:text-slate-200 text-xs font-bold font-mono">-- / --%</span>
-                                </div>
-                                <div class="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
-                                    <div id="rsrp_bar" class="bg-indigo-600 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
-                                </div>
-                            </div>
-
-                            <div class="space-y-1.5">
-                                <div class="flex justify-between items-center px-1">
-                                    <span class="text-slate-500 dark:text-slate-400 text-xs font-semibold">SINR (信号与干扰加噪声比) <span class="text-[9px] text-slate-400 ml-1">5G</span></span>
-                                    <span id="sinr_val" class="text-slate-850 dark:text-slate-200 text-xs font-bold font-mono">-- / --%</span>
-                                </div>
-                                <div class="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
-                                    <div id="sinr_bar" class="bg-indigo-600 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="p-4 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-[#161d2b]/20 flex justify-between items-center text-xs text-slate-400 dark:text-slate-500">
-                        <span>本地基准时间</span>
-                        <span id="last_updated" class="text-slate-700 dark:text-slate-300 font-medium">--</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 底层规格折叠区（重构为 Tiles 磁贴） -->
-            <details id="dev_specs_details" class="group bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl shadow-sm overflow-hidden transition-all duration-300">
-                <summary class="flex justify-between items-center p-4 cursor-pointer select-none hover:bg-slate-50 dark:hover:bg-slate-900/20 transition-colors">
-                    <div class="flex items-center space-x-2">
-                        <svg aria-hidden="true" class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                        <h2 class="text-xs font-bold tracking-wider text-slate-500 dark:text-slate-400 uppercase">硬件底层资产规格 &amp; 空口能力 (点击展开)</h2>
-                    </div>
-                    <svg aria-hidden="true" class="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
-                </summary>
-
-                <div class="p-4 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/30 dark:bg-[#161d2b]/10 text-xs text-slate-700 dark:text-slate-300">
-                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">模组制造商</span><span id="dev_manufacturer" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">产品型号</span><span id="dev_model" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">当前固件分支</span><span id="dev_firmware" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">IMEI 识别码</span><span id="dev_imei" class="font-semibold text-slate-800 dark:text-slate-200 mt-1 truncate" title="双击复制">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">出厂硬件序列号</span><span id="dev_serial" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">卡套主存状态</span><span id="dev_sim_status" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">硬件 PCB 版本</span><span id="dev_hw_ver" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">底层架构类别</span><span id="dev_type" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 col-span-2"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">IMSI 标识卡号</span><span id="dev_imsi" class="font-semibold text-slate-800 dark:text-slate-200 mt-1 truncate" title="双击复制">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 col-span-2"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">ICCID 芯片编码</span><span id="dev_iccid" class="font-semibold text-slate-800 dark:text-slate-200 mt-1 truncate" title="双击复制">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">绑定手机号码</span><span id="dev_phone" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">网络注册状态</span><span id="dev_net_status" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">当前射频信号</span><span id="dev_signal" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">当前温度</span><span id="dev_temp" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">VoLTE 通话支持</span><span id="dev_volte" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">GNSS 定位支持</span><span id="dev_gnss" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
-                        <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"><span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">极限理论传输速率</span><span id="dev_rate" class="font-semibold text-slate-800 dark:text-slate-200 mt-1">--</span></div>
-                    </div>
-                    <div class="flex flex-col py-3 px-3 mt-3 border-t border-slate-100/60 dark:border-slate-850/40">
-                        <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">基站射频所支持的频段全集 Supported Bands</span>
-                        <span id="dev_bands" class="text-slate-700 dark:text-slate-300 break-words leading-relaxed text-xs font-semibold mt-1">--</span>
-                    </div>
-                    <div class="flex justify-end pt-3 px-2">
-                        <button id="dev_refresh_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm">手动拉取规格信息</button>
-                    </div>
-                </div>
-            </details>
-        </div>
-
-        <!-- 2. Connection 控制面板 -->
-        <div id="panel_network" role="tabpanel" class="hidden space-y-6">
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-                <!-- APN 配置 -->
-                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
-                    <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
-                        <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">IMS / APN 配置管理</h2>
-                    </div>
-                    <div class="p-4 space-y-3">
-                        <div class="flex flex-col gap-1">
-                            <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">APN 接入点 (例如: ims 或 3gnet)</label>
-                            <input id="net_apn_input" type="text" placeholder="e.g. ims"
-                                class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
-                        </div>
-                        <div class="flex flex-col gap-1">
-                            <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">拨号鉴权用户名 (可留空)</label>
-                            <input id="net_user_input" type="text" placeholder="（可选）"
-                                class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
-                        </div>
-                        <div class="flex flex-col gap-1">
-                            <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">拨号鉴权密码 (可留空)</label>
-                            <input id="net_pass_input" type="password" placeholder="（可选）" autocomplete="off"
-                                class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
-                        </div>
-                        <div class="flex flex-col gap-1">
-                            <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">安全鉴定类型</label>
-                            <select id="net_auth_select"
-                                class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
-                                <option value="0">NONE (默认)</option>
-                                <option value="1">PAP</option>
-                                <option value="2">CHAP</option>
-                                <option value="3">PAP or CHAP</option>
-                            </select>
-                        </div>
-                        <button id="net_apply_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm mt-2">应用 APN 保存</button>
-                    </div>
-                </div>
-
-                <!-- 射频控制、SIM卡槽与网卡模式 -->
-                <div class="space-y-6">
+                    <!-- APN 配置卡 -->
                     <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                         <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
-                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">射频锁网 &amp; SA/NSA 融合控制</h2>
-                        </div>
-                        <div class="p-4 space-y-3">
-                            <select id="net_mode_select"
-                                class="w-full bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
-                                <option value="auto">全自动搜网模式 (AUTO)</option>
-                                <option value="nr5g">纯 5G 锁定模式 (NR5G Only)</option>
-                                <option value="lte">纯 4G 锁定模式 (LTE Only)</option>
-                                <option value="nr5g_lte">5G NR + LTE 协同工作模式</option>
-                                <option value="wcdma">3G WCDMA 留底搜网模式</option>
-                            </select>
-                            <button id="net_mode_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm">更新选网偏好</button>
-
-                            <div class="border-t border-slate-100 dark:border-slate-800/40 pt-3 mt-1">
-                                <h3 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase mb-2">5G 组网类型重分配</h3>
-                                <div class="flex flex-wrap gap-2">
-                                    <button id="net_disable_sa_btn" class="flex-1 min-w-[90px] bg-amber-600 hover:bg-amber-700 text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm">禁用 SA (NSA)</button>
-                                    <button id="net_disable_nsa_btn" class="flex-1 min-w-[90px] bg-amber-600 hover:bg-amber-700 text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm">禁用 NSA (SA)</button>
-                                    <button id="net_enable_all_5g_btn" class="flex-1 min-w-[90px] bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm">全开启 (双模)</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 网卡驱动与卡槽 -->
-                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
-                        <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
-                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">卡槽切换与 USB 网卡驱动模式</h2>
+                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">IMS / APN 配置管理</h2>
                         </div>
                         <div class="p-4 space-y-3">
                             <div class="flex flex-col gap-1">
-                                <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">网卡驱动通讯协议选择 (默认为 MBIM)</label>
-                                <select id="usbnet_mode_select"
+                                <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">APN 接入点 (例如: ims 或 3gnet)</label>
+                                <input id="net_apn_input" type="text" placeholder="e.g. ims"
                                     class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
-                                    <option value="0">ECM (虚拟以太网)</option>
-                                    <option value="1">NCM (网络控制芯片模式)</option>
-                                    <option value="2" selected>MBIM (微软移动宽带协议)</option>
-                                    <option value="3">RNDIS (远程NDIS驱动)</option>
-                                    <option value="5">QMI (高通QMI底层内核驱动)</option>
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">拨号鉴权用户名 (可留空)</label>
+                                <input id="net_user_input" type="text" placeholder="（可选）"
+                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">拨号鉴权密码 (可留空)</label>
+                                <input id="net_pass_input" type="password" placeholder="（可选）" autocomplete="off"
+                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">安全鉴定类型</label>
+                                <select id="net_auth_select"
+                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                                    <option value="0">NONE (默认)</option>
+                                    <option value="1">PAP</option>
+                                    <option value="2">CHAP</option>
+                                    <option value="3">PAP or CHAP</option>
                                 </select>
                             </div>
-                            <button id="usbnet_apply_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm">应用网卡模式修改</button>
+                            <button id="net_apply_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm mt-2">应用 APN 保存</button>
+                        </div>
+                    </div>
 
-                            <div class="border-t border-slate-100 dark:border-slate-800/40 pt-3 mt-1">
-                                <h3 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase mb-2">SIM 双卡槽实体物理切换</h3>
-                                <div class="flex space-x-2">
-                                    <button id="sim_slot_1_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">卡槽 1</button>
-                                    <button id="sim_slot_2_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">卡槽 2</button>
+                    <!-- 射频锁网与SA/NSA -->
+                    <div class="space-y-6">
+                        <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                            <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
+                                <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">射频锁网 &amp; SA/NSA 融合控制</h2>
+                            </div>
+                            <div class="p-4 space-y-3">
+                                <select id="net_mode_select"
+                                    class="w-full bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                                    <option value="auto">全自动搜网模式 (AUTO)</option>
+                                    <option value="nr5g">纯 5G 锁定模式 (NR5G Only)</option>
+                                    <option value="lte">纯 4G 锁定模式 (LTE Only)</option>
+                                    <option value="nr5g_lte">5G NR + LTE 协同工作模式</option>
+                                    <option value="wcdma">3G WCDMA 留底搜网模式</option>
+                                </select>
+                                <button id="net_mode_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm">更新选网偏好</button>
+
+                                <div class="border-t border-slate-100 dark:border-slate-800/40 pt-3 mt-1">
+                                    <h3 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase mb-2">5G 组网类型重分配</h3>
+                                    <div class="flex flex-wrap gap-2">
+                                        <button id="net_disable_sa_btn" class="flex-1 min-w-[90px] bg-amber-600 hover:bg-amber-700 text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm">禁用 SA (NSA)</button>
+                                        <button id="net_disable_nsa_btn" class="flex-1 min-w-[90px] bg-amber-600 hover:bg-amber-700 text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm">禁用 NSA (SA)</button>
+                                        <button id="net_enable_all_5g_btn" class="flex-1 min-w-[90px] bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm">全开启 (双模)</button>
+                                    </div>
                                 </div>
                             </div>
+                        </div>
 
-                            <div class="border-t border-slate-100 dark:border-slate-800/40 pt-3 flex space-x-2">
-                                <button id="net_connect_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">命令拨号连接</button>
-                                <button id="net_disconnect_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">断开拨号连接</button>
+                        <!-- 协议切换与实体卡槽 -->
+                        <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                            <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
+                                <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">卡槽切换与 USB 网卡驱动模式</h2>
                             </div>
-                            <div id="usbnet_sim_status" class="text-xs text-slate-400 dark:text-slate-500 mt-1">交互反馈：等待操作。</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+                            <div class="p-4 space-y-3">
+                                <div class="flex flex-col gap-1">
+                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">网卡驱动通讯协议选择 (默认为 MBIM)</label>
+                                    <select id="usbnet_mode_select"
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                                        <option value="0">ECM (虚拟以太网)</option>
+                                        <option value="1">NCM (网络控制芯片模式)</option>
+                                        <option value="2" selected>MBIM (微软移动宽带协议)</option>
+                                        <option value="3">RNDIS (远程NDIS驱动)</option>
+                                        <option value="5">QMI (高通QMI底层内核驱动)</option>
+                                    </select>
+                                </div>
+                                <button id="usbnet_apply_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm">应用网卡模式修改</button>
 
-        <!-- 3. Locks & Tools 面板 -->
-        <div id="panel_locks" role="tabpanel" class="hidden space-y-6">
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                <div class="border-t border-slate-100 dark:border-slate-800/40 pt-3 mt-1">
+                                    <h3 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase mb-2">SIM 双卡槽实体物理切换</h3>
+                                    <div class="flex space-x-2">
+                                        <button id="sim_slot_1_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">卡槽 1</button>
+                                        <button id="sim_slot_2_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">卡槽 2</button>
+                                    </div>
+                                </div>
 
-                <!-- 频段锁定（已重构为纯手点波段矩阵） -->
-                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
-                    <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
-                        <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">工作频段锁定 (Band Lock Grid)</h2>
-                    </div>
-                    <div class="p-4 space-y-4">
-                        <div class="flex space-x-4">
-                            <label class="flex items-center space-x-2 cursor-pointer">
-                                <input type="radio" name="band_rat" value="nr5g" checked class="accent-indigo-600">
-                                <span class="text-xs text-slate-700 dark:text-slate-300 font-semibold">5G (NR5G)</span>
-                            </label>
-                            <label class="flex items-center space-x-2 cursor-pointer">
-                                <input type="radio" name="band_rat" value="lte" class="accent-indigo-600">
-                                <span class="text-xs text-slate-700 dark:text-slate-300 font-semibold">4G (LTE)</span>
-                            </label>
-                        </div>
-                        
-                        <!-- 锁频交互面板：点击可直接快速多选/单选 -->
-                        <div class="space-y-1">
-                            <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">请直接点击以下波段磁贴进行锁定组合：</label>
-                            
-                            <!-- 5G 常用频段网格 -->
-                            <div id="nr5g_bands_grid" class="grid grid-cols-4 sm:grid-cols-6 gap-2 pt-1">
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="1">n1</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="3">n3</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="5">n5</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="7">n7</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="8">n8</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="20">n20</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="28">n28</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="38">n38</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="41">n41</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="71">n71</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="77">n77</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="78">n78</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="79">n79</button>
+                                <div class="border-t border-slate-100 dark:border-slate-800/40 pt-3 flex space-x-2">
+                                    <button id="net_connect_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">命令拨号连接</button>
+                                    <button id="net_disconnect_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">断开拨号连接</button>
+                                </div>
+                                <div id="usbnet_sim_status" class="text-xs text-slate-400 dark:text-slate-500 mt-1">交互反馈：等待操作。</div>
                             </div>
-
-                            <!-- 4G LTE 常用频段网格 -->
-                            <div id="lte_bands_grid" class="grid grid-cols-4 sm:grid-cols-6 gap-2 pt-1 hidden">
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="1">B1</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="3">B3</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="5">B5</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="7">B7</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="8">B8</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="20">B20</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="28">B28</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="34">B34</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="38">B38</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="39">B39</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="40">B40</button>
-                                <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="41">B41</button>
-                            </div>
-                        </div>
-
-                        <!-- 选定编译预览串（取代旧文本框输入） -->
-                        <div class="p-3 bg-slate-50/50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex items-center justify-between text-xs sm:text-sm">
-                            <span class="text-slate-400 dark:text-slate-500 font-medium">当前选定编译预览</span>
-                            <span id="band_lock_preview" class="font-bold text-slate-800 dark:text-slate-200 select-all font-mono">all (默认出厂全频段)</span>
-                        </div>
-
-                        <div class="flex space-x-2">
-                            <button id="band_lock_apply_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm">应用频段强制锁定</button>
-                            <button id="band_lock_reset_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm">恢复所有出厂频段</button>
-                        </div>
-                        <div id="band_lock_status" class="text-xs font-mono text-slate-400 dark:text-slate-500 pt-1">锁定反馈：就绪</div>
-                    </div>
-                </div>
-
-                <!-- 小区物理锁定 -->
-                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
-                    <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
-                        <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">物理小区频点锁定 (Cell Lock)</h2>
-                    </div>
-                    <div class="p-4 space-y-3">
-                        <div class="flex space-x-4">
-                            <label class="flex items-center space-x-2 cursor-pointer">
-                                <input type="radio" name="cell_tech" value="lte" checked class="accent-indigo-600">
-                                <span class="text-xs text-slate-700 dark:text-slate-300 font-semibold">4G (LTE)</span>
-                            </label>
-                            <label class="flex items-center space-x-2 cursor-pointer">
-                                <input type="radio" name="cell_tech" value="5g" class="accent-indigo-600">
-                                <span class="text-xs text-slate-700 dark:text-slate-300 font-semibold">5G (NR)</span>
-                            </label>
-                        </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div class="flex flex-col gap-1">
-                                <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">目标 PCI</label>
-                                <input id="cell_pci_input" type="number" placeholder="PCI"
-                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
-                            </div>
-                            <div class="flex flex-col gap-1">
-                                <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">绝对频点号 EARFCN</label>
-                                <input id="cell_earfcn_input" type="number" placeholder="EARFCN"
-                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
-                            </div>
-                        </div>
-                        <div class="flex flex-col gap-1">
-                            <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">制式 Band 物理频段 (5G锁定必填)</label>
-                            <input id="cell_band_input" type="number" placeholder="41"
-                                class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
-                        </div>
-                        <div class="flex space-x-2">
-                            <button id="cell_lock_apply_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">应用小区强制绑定</button>
-                            <button id="cell_lock_unlock_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">解除物理小区锁</button>
-                        </div>
-                        <div id="cell_lock_status" class="text-xs text-slate-400 dark:text-slate-500 pt-1">小区反馈：就绪</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 搜网扫频工具 -->
-            <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
-                <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/10">
-                    <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">空中基站深度扫频扫描</h2>
-                    <button id="scan_start_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm">
-                        <span id="scan_btn_text">触发搜网扫描 (15s+)</span>
-                    </button>
-                </div>
-                <div id="scan_status" class="px-4 py-2 text-[11px] text-slate-400 dark:text-slate-500 bg-slate-50/30 dark:bg-black/10 border-b border-slate-100 dark:border-slate-800/40">
-                    等待搜网。请确保射频已经开启，搜网操作大约会中断空口连接 15-30 秒。
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-xs sm:text-sm">
-                        <thead>
-                            <tr class="border-b border-slate-100 dark:border-slate-800/60 bg-slate-50 dark:bg-slate-900/20 text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider">
-                                <th class="p-3 text-left font-semibold">索引</th>
-                                <th class="p-3 text-left font-semibold">公共运营商</th>
-                                <th class="p-3 text-left font-semibold">MCC/MNC</th>
-                                <th class="p-3 text-left font-semibold">接入技术</th>
-                                <th class="p-3 text-left font-semibold">可用状态</th>
-                                <th class="p-3 text-left font-semibold">制式频点</th>
-                            </tr>
-                        </thead>
-                        <tbody id="scan_results_body">
-                            <tr>
-                                <td colspan="6" class="p-8 text-center text-slate-400">目前暂无扫频历史。</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <!-- 快捷诊断 -->
-                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
-                    <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
-                        <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">移远底层专线诊断 (Diagnostics)</h2>
-                    </div>
-                    <div class="p-4 space-y-3">
-                        <div class="flex flex-wrap gap-2">
-                            <button id="diag_neighbour_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95">邻区侦测</button>
-                            <button id="diag_qlts_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95">时区校准</button>
-                            <button id="diag_mbn_list_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95">MBN 分配</button>
-                            <button id="diag_autosel_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95">AutoSel MBN</button>
-                        </div>
-                        <pre id="diag_output" class="p-3 bg-slate-50 dark:bg-slate-900/30 rounded-lg border border-slate-200/50 dark:border-slate-850/40 text-xs font-mono text-indigo-600 dark:text-indigo-400 max-h-[250px] overflow-y-auto whitespace-pre-wrap">点击按钮查询并触发高级诊断交互。</pre>
-                    </div>
-                </div>
-
-                <!-- 调度操作 -->
-                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
-                    <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
-                        <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">模组硬件硬中断复位</h2>
-                    </div>
-                    <div class="p-4 space-y-3">
-                        <div class="flex space-x-2">
-                            <button id="settings_reboot_btn" class="flex-1 bg-yellow-600 hover:bg-yellow-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">全热重启模组 (Reboot)</button>
-                            <button id="settings_reset_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">恢复出厂配置 (Reset)</button>
-                        </div>
-                        <div class="flex space-x-2">
-                            <button id="settings_flight_on_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">启动飞行模式</button>
-                            <button id="settings_flight_off_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">退出飞行模式</button>
-                        </div>
-                        <div class="grid grid-cols-2 gap-2 text-xs text-slate-400 dark:text-slate-500 mt-1">
-                            <div>后端通讯端口: <span id="settings_port" class="text-indigo-600 dark:text-indigo-400 font-medium">--</span></div>
-                            <div>活动连接端数: <span id="settings_views" class="text-indigo-600 dark:text-indigo-400 font-medium">--</span></div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- AT 命令行 -->
-            <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden min-h-[300px]">
-                <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
-                    <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">高通底层 AT 命令控制交互终端 (Console)</h2>
-                </div>
-                <div id="console_output" class="flex-1 p-4 font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-slate-50 dark:bg-[#0c0f16]/60 overflow-y-auto max-h-[250px] space-y-1 whitespace-pre-wrap">
-                    <div class="text-slate-400 dark:text-slate-500">┌─ AT Console Ready ───────────────────────────────┐</div>
-                    <div class="text-slate-400 dark:text-slate-500">│ 键入标准 3GPP AT 指令后点击 Enter 发送。          │</div>
-                    <div class="text-slate-400 dark:text-slate-500">└─────────────────────────────────────────────────┘</div>
-                </div>
-                <div class="p-4 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-[#161d2b]/20 flex space-x-2">
-                    <input id="console_input" type="text" placeholder="AT+CGMI"
-                        class="flex-1 bg-white dark:bg-[#111622] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
-                        autocomplete="off" spellcheck="false">
-                    <button id="console_send_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-5 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">命令发送</button>
-                </div>
-                <div id="console_quick_btns" class="px-4 pb-4 pt-2 flex flex-wrap gap-2 text-xs">
-                    <span class="text-slate-400 dark:text-slate-500 self-center mr-1">快捷指令板:</span>
-                    <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+CGMI</button>
-                    <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+CGSN</button>
-                    <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+CSQ</button>
-                    <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+COPS?</button>
-                    <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+CGPADDR</button>
-                    <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+QENG</button>
-                    <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+CGDCONT?</button>
-                </div>
-            </div>
-        </div>
+            <!-- 2.3 Locks Advanced 锁频与诊断工具 -->
+            <div id="panel_locks" role="tabpanel" class="hidden space-y-6">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-        <!-- 2. Connection 控制面板 -->
-        <!-- 控制面板已无多余日志面板占用，空间利用率极大提升 -->
-
-        <!-- 4. SMS 短信中心面板 -->
-        <div id="panel_sms" role="tabpanel" class="hidden space-y-4">
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <!-- 收件箱列表 -->
-                <div class="lg:col-span-1 bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden max-h-[600px]">
-                    <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/10">
-                        <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">短信收件箱 (Inbox)</h2>
-                        <button id="sms_refresh_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1 text-xs rounded-lg transition-all active:scale-95 shadow-sm">读取列表</button>
-                    </div>
-                    <div id="sms_list" class="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/30">
-                        <div class="p-4 text-center text-xs text-slate-400">目前卡内无短信。</div>
-                    </div>
-                </div>
-
-                <!-- 详情与发送区 -->
-                <div class="lg:col-span-2 space-y-4 overflow-y-auto max-h-[600px] scrollbar-none">
-
-                    <!-- 短信阅读卡 -->
-                    <div id="sms_reader_card" class="hidden bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden transition-all duration-300">
-                        <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/10">
-                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">短信阅读器 (SMS Reader)</h2>
-                            <button id="sms_reader_close" class="text-xs text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white border border-slate-200 dark:border-slate-700 rounded px-2 py-0.5 hover:bg-slate-100 dark:hover:bg-white/10">关闭阅读</button>
-                        </div>
-                        <div class="p-4 space-y-3">
-                            <div class="flex justify-between items-center text-xs text-slate-400 dark:text-slate-500">
-                                <span>发件人：<strong id="sms_reader_sender" class="text-slate-800 dark:text-slate-200 select-text font-semibold">--</strong></span>
-                                <span id="sms_reader_time" class="font-medium">--</span>
-                            </div>
-                            <div id="sms_reader_body" class="p-3 bg-slate-50 dark:bg-slate-900/40 rounded-lg border border-slate-200/60 dark:border-slate-800/40 text-xs sm:text-sm select-text break-words leading-relaxed whitespace-pre-wrap text-slate-700 dark:text-slate-300">
-                                --
-                            </div>
-                            <div class="flex space-x-2 pt-1 justify-end">
-                                <button id="sms_reader_reply" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm">快捷回复</button>
-                                <button id="sms_reader_copy" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-4 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm">无损复制文本</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 发送短信 -->
+                    <!-- 频段多选磁贴 -->
                     <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                         <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
-                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">短信发送引擎 (Send SMS)</h2>
+                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">工作频段锁定 (Band Lock Grid)</h2>
                         </div>
-                        <div class="p-4 space-y-3">
-                            <div class="flex flex-col gap-1">
-                                <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">发件目标号码 (Recipient)</label>
-                                <input id="sms_recipient" type="tel" placeholder="+8613800138000"
-                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                        <div class="p-4 space-y-4">
+                            <div class="flex space-x-4">
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="radio" name="band_rat" value="nr5g" checked class="accent-indigo-600">
+                                    <span class="text-xs text-slate-700 dark:text-slate-300 font-semibold">5G (NR5G)</span>
+                                </label>
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="radio" name="band_rat" value="lte" class="accent-indigo-600">
+                                    <span class="text-xs text-slate-700 dark:text-slate-300 font-semibold">4G (LTE)</span>
+                                </label>
                             </div>
-                            <div class="flex flex-col gap-1">
-                                <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">发信正文 (支持多载波扩容，最大 160 字符)</label>
-                                <textarea id="sms_message" rows="4" maxlength="160" placeholder="键入需要发送的正文..."
-                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
-                                <div class="flex justify-between items-center text-xs text-slate-400 dark:text-slate-500">
-                                    <span>输入计数器: <span id="sms_char_count">0</span> / 160 字符</span>
+                            
+                            <div class="space-y-1">
+                                <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">直接点击下方波段磁贴进行组合锁定：</label>
+                                
+                                <!-- 5G Grid -->
+                                <div id="nr5g_bands_grid" class="grid grid-cols-4 sm:grid-cols-6 gap-2 pt-1">
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="1">n1</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="3">n3</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="5">n5</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="7">n7</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="8">n8</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="20">n20</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="28">n28</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="38">n38</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="41">n41</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="71">n71</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="77">n77</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="78">n78</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="79">n79</button>
+                                </div>
+
+                                <!-- 4G Grid -->
+                                <div id="lte_bands_grid" class="grid grid-cols-4 sm:grid-cols-6 gap-2 pt-1 hidden">
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="1">B1</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="3">B3</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="5">B5</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="7">B7</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="8">B8</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="20">B20</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="28">B28</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="34">B34</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="38">B38</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="39">B39</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="40">B40</button>
+                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="41">B41</button>
                                 </div>
                             </div>
-                            <button id="sms_send_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm">立刻发信</button>
+
+                            <div class="p-3 bg-slate-50/50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex items-center justify-between text-xs sm:text-sm">
+                                <span class="text-slate-400 dark:text-slate-500 font-medium">当前选定编译预览</span>
+                                <span id="band_lock_preview" class="font-bold text-slate-800 dark:text-slate-200 select-all font-mono">all (默认出厂全频段)</span>
+                            </div>
+
+                            <div class="flex space-x-2">
+                                <button id="band_lock_apply_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm">应用频段强制锁定</button>
+                                <button id="band_lock_reset_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm">恢复所有出厂频段</button>
+                            </div>
+                            <div id="band_lock_status" class="text-xs font-mono text-slate-400 dark:text-slate-500 pt-1">锁定反馈：就绪</div>
                         </div>
-                        <div id="sms_send_status" class="px-4 pb-4 text-xs text-slate-400 dark:text-slate-500"></div>
                     </div>
 
-                </div>
-            </div>
-        </div>
-
-        <!-- 5. Logs 独立日志控制台面板 -->
-        <div id="panel_logs" role="tabpanel" class="hidden space-y-6">
-            <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden min-h-[450px]">
-                <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/10">
-                    <div class="flex items-center space-x-2">
-                        <svg aria-hidden="true" class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
-                        </svg>
-                        <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">系统日志控制台 / System Memory Logs</h2>
+                    <!-- 物理小区锁定卡 -->
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                        <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
+                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">物理小区频点锁定 (Cell Lock)</h2>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <div class="flex space-x-4">
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="radio" name="cell_tech" value="lte" checked class="accent-indigo-600">
+                                    <span class="text-xs text-slate-700 dark:text-slate-300 font-semibold">4G (LTE)</span>
+                                </label>
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="radio" name="cell_tech" value="5g" class="accent-indigo-600">
+                                    <span class="text-xs text-slate-700 dark:text-slate-300 font-semibold">5G (NR)</span>
+                                </label>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div class="flex flex-col gap-1">
+                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">目标 PCI</label>
+                                    <input id="cell_pci_input" type="number" placeholder="PCI"
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
+                                </div>
+                                <div class="flex flex-col gap-1">
+                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">绝对频点号 EARFCN</label>
+                                    <input id="cell_earfcn_input" type="number" placeholder="EARFCN"
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
+                                </div>
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">制式 Band 物理频段 (5G锁定必填)</label>
+                                <input id="cell_band_input" type="number" placeholder="41"
+                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
+                            </div>
+                            <div class="flex space-x-2">
+                                <button id="cell_lock_apply_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">应用小区强制绑定</button>
+                                <button id="cell_lock_unlock_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">解除物理小区锁</button>
+                            </div>
+                            <div id="cell_lock_status" class="text-xs text-slate-400 dark:text-slate-500 pt-1">小区反馈：就绪</div>
+                        </div>
                     </div>
-                    <button id="log_refresh_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 shadow-sm">手动刷新日志</button>
                 </div>
-                <div id="settings_log" class="flex-1 p-5 font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-slate-50 dark:bg-[#0c0f16]/60 overflow-y-auto max-h-[500px] space-y-1">
-                    <div class="text-slate-400 dark:text-slate-500">加载中... 请在进入该诊断面板时手动刷新。</div>
+
+                <!-- 扫频基站扫描 -->
+                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                    <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/10">
+                        <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">空中基站深度扫频扫描</h2>
+                        <button id="scan_start_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm">
+                            <span id="scan_btn_text">触发扫频 (15s+)</span>
+                        </button>
+                    </div>
+                    <div id="scan_status" class="px-4 py-2 text-[11px] text-slate-400 dark:text-slate-500 bg-slate-50/30 dark:bg-black/10 border-b border-slate-100 dark:border-slate-800/40">
+                        等待搜网。请确保射频已经开启，搜网操作大约会中断空口连接 15-30 秒。
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-xs sm:text-sm">
+                            <thead>
+                                <tr class="border-b border-slate-100 dark:border-slate-800/60 bg-slate-50 dark:bg-slate-900/20 text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider">
+                                    <th class="p-3 text-left font-semibold">索引</th>
+                                    <th class="p-3 text-left font-semibold">公共运营商</th>
+                                    <th class="p-3 text-left font-semibold">MCC/MNC</th>
+                                    <th class="p-3 text-left font-semibold">接入技术</th>
+                                    <th class="p-3 text-left font-semibold">可用状态</th>
+                                    <th class="p-3 text-left font-semibold">制式频点</th>
+                                </tr>
+                            </thead>
+                            <tbody id="scan_results_body">
+                                <tr>
+                                    <td colspan="6" class="p-8 text-center text-slate-400">目前暂无扫频历史。</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- 快捷诊断区 -->
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                        <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
+                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">移远底层专线诊断 (Diagnostics)</h2>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <div class="flex flex-wrap gap-2">
+                                <button id="diag_neighbour_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95">邻区侦测</button>
+                                <button id="diag_qlts_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95">时区校准</button>
+                                <button id="diag_mbn_list_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95">MBN 分配</button>
+                                <button id="diag_autosel_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95">AutoSel MBN</button>
+                            </div>
+                            <pre id="diag_output" class="p-3 bg-slate-50 dark:bg-slate-900/30 rounded-lg border border-slate-200/50 dark:border-slate-850/40 text-xs font-mono text-indigo-600 dark:text-indigo-400 max-h-[250px] overflow-y-auto whitespace-pre-wrap">点击按钮查询并触发高级诊断交互。</pre>
+                        </div>
+                    </div>
+
+                    <!-- 重置与中断控制 -->
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                        <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
+                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">模组硬件硬中断复位</h2>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <div class="flex space-x-2">
+                                <button id="settings_reboot_btn" class="flex-1 bg-yellow-600 hover:bg-yellow-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">全热重启模组 (Reboot)</button>
+                                <button id="settings_reset_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">恢复出厂配置 (Reset)</button>
+                            </div>
+                            <div class="flex space-x-2">
+                                <button id="settings_flight_on_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">启动飞行模式</button>
+                                <button id="settings_flight_off_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">退出飞行模式</button>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 text-xs text-slate-400 dark:text-slate-500 mt-1">
+                                <div>后端通讯端口: <span id="settings_port" class="text-indigo-600 dark:text-indigo-400 font-medium">--</span></div>
+                                <div>活动连接端数: <span id="settings_views" class="text-indigo-600 dark:text-indigo-400 font-medium">--</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AT 命令行控制台 -->
+                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden min-h-[300px]">
+                    <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
+                        <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">高通底层 AT 命令控制交互终端 (Console)</h2>
+                    </div>
+                    <div id="console_output" class="flex-1 p-4 font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-slate-50 dark:bg-[#0c0f16]/60 overflow-y-auto max-h-[250px] space-y-1 whitespace-pre-wrap">
+                        <div class="text-slate-400 dark:text-slate-500">┌─ AT Console Ready ───────────────────────────────┐</div>
+                        <div class="text-slate-400 dark:text-slate-500">│ 键入标准 3GPP AT 指令后点击 Enter 发送。          │</div>
+                        <div class="text-slate-400 dark:text-slate-500">└─────────────────────────────────────────────────┘</div>
+                    </div>
+                    <div class="p-4 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-[#161d2b]/20 flex space-x-2">
+                        <input id="console_input" type="text" placeholder="AT+CGMI"
+                            class="flex-1 bg-white dark:bg-[#111622] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
+                            autocomplete="off" spellcheck="false">
+                        <button id="console_send_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-5 py-2 text-xs sm:text-sm rounded-lg transition-all active:scale-95 shadow-sm">命令发送</button>
+                    </div>
+                    <div id="console_quick_btns" class="px-4 pb-4 pt-2 flex flex-wrap gap-2 text-xs">
+                        <span class="text-slate-400 dark:text-slate-500 self-center mr-1">快捷指令板:</span>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+CGMI</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+CGSN</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+CSQ</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+COPS?</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+CGPADDR</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+QENG</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300">AT+CGDCONT?</button>
+                    </div>
                 </div>
             </div>
-        </div>
 
+            <!-- 2.4 SMS 短信中心面板 -->
+            <div id="panel_sms" role="tabpanel" class="hidden space-y-4">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <!-- 卡内短信收件箱 -->
+                    <div class="lg:col-span-1 bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden max-h-[600px]">
+                        <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/10">
+                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">短信收件箱 (Inbox)</h2>
+                            <button id="sms_refresh_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1 text-xs rounded-lg transition-all active:scale-95 shadow-sm">读取列表</button>
+                        </div>
+                        <div id="sms_list" class="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/30">
+                            <div class="p-4 text-center text-xs text-slate-400">目前卡内无短信。</div>
+                        </div>
+                    </div>
+
+                    <!-- 短信详情与发送 -->
+                    <div class="lg:col-span-2 space-y-4 overflow-y-auto max-h-[600px] scrollbar-none">
+                        <!-- 阅读器卡 -->
+                        <div id="sms_reader_card" class="hidden bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden transition-all duration-300">
+                            <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/10">
+                                <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">短信阅读器 (SMS Reader)</h2>
+                                <button id="sms_reader_close" class="text-xs text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white border border-slate-200 dark:border-slate-700 rounded px-2 py-0.5 hover:bg-slate-100 dark:hover:bg-white/10">关闭阅读</button>
+                            </div>
+                            <div class="p-4 space-y-3">
+                                <div class="flex justify-between items-center text-xs text-slate-400 dark:text-slate-500">
+                                    <span>发件人：<strong id="sms_reader_sender" class="text-slate-800 dark:text-slate-200 select-text font-semibold">--</strong></span>
+                                    <span id="sms_reader_time" class="font-medium">--</span>
+                                </div>
+                                <div id="sms_reader_body" class="p-3 bg-slate-50 dark:bg-slate-900/40 rounded-lg border border-slate-200/60 dark:border-slate-800/40 text-xs sm:text-sm select-text break-words leading-relaxed whitespace-pre-wrap text-slate-700 dark:text-slate-300">
+                                    --
+                                </div>
+                                <div class="flex space-x-2 pt-1 justify-end">
+                                    <button id="sms_reader_reply" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm">快捷回复</button>
+                                    <button id="sms_reader_copy" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-4 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm">无损复制文本</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 发送中心 -->
+                        <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                            <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
+                                <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">短信发送引擎 (Send SMS)</h2>
+                            </div>
+                            <div class="p-4 space-y-3">
+                                <div class="flex flex-col gap-1">
+                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">发件目标号码 (Recipient)</label>
+                                    <input id="sms_recipient" type="tel" placeholder="+8613800138000"
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                                </div>
+                                <div class="flex flex-col gap-1">
+                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">发信正文 (支持多载波，最大 160 字符)</label>
+                                    <textarea id="sms_message" rows="4" maxlength="160" placeholder="键入需要发送的正文..."
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded-lg px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
+                                    <div class="flex justify-between items-center text-xs text-slate-400 dark:text-slate-500">
+                                        <span>输入计数器: <span id="sms_char_count">0</span> / 160 字符</span>
+                                    </div>
+                                </div>
+                                <button id="sms_send_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-lg transition-all active:scale-95 shadow-sm">立刻发信</button>
+                            </div>
+                            <div id="sms_send_status" class="px-4 pb-4 text-xs text-slate-400 dark:text-slate-500"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2.5 Logs 独立内存日志面板 -->
+            <div id="panel_logs" role="tabpanel" class="hidden space-y-6">
+                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden min-h-[450px]">
+                    <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/10">
+                        <div class="flex items-center space-x-2">
+                            <svg aria-hidden="true" class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+                            </svg>
+                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">系统内存环形日志控制台</h2>
+                        </div>
+                        <button id="log_refresh_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 shadow-sm">手动刷新日志</button>
+                    </div>
+                    <div id="settings_log" class="flex-1 p-5 font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-slate-50 dark:bg-[#0c0f16]/60 overflow-y-auto max-h-[500px] space-y-1">
+                        <div class="text-slate-400 dark:text-slate-500">加载中... 请在进入该诊断面板时手动刷新。</div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
     </div>
 
-    <!-- 复制成功提示气泡 -->
+    <!-- 复制气泡 -->
     <div id="copy_toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900/95 dark:bg-indigo-600 text-white text-xs sm:text-sm px-4 py-2 rounded-lg shadow-xl transition-all duration-300 opacity-0 translate-y-4 z-50 cursor-pointer select-none">
         已无缝复制至剪贴板
     </div>
 
+    <!-- ========================== 3. 原生 JS 逻辑 (完全对齐逻辑) ========================== -->
     <script>
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -702,6 +735,13 @@
         let currentSmsMessages = [];
 
         const allTabs = ['dashboard', 'network', 'locks', 'sms', 'logs'];
+        const TAB_TITLES = {
+            'dashboard': 'STATUS / OVERVIEW',
+            'network': 'CONTROL / CONNECTION',
+            'locks': 'ADVANCED LOCKS & DIAGNOSTICS',
+            'sms': 'SMS / MESSAGE CENTER',
+            'logs': 'SYSTEM MEMORY LOGS'
+        };
 
         const domElements = {};
         function getDomElement(id) {
@@ -720,28 +760,67 @@
             }
         }
 
+        // 修改：左右菜单切换同步头部标题与移动端自动折叠
         function switchTab(tab) {
             currentTab = tab;
+
+            // 顶栏面包屑跟随（带守卫条件，避免无效赋值）
+            const headerTitle = getDomElement('current_page_title');
+            if (headerTitle) {
+                const newTitle = TAB_TITLES[tab] || 'ARGON CONTROL';
+                if (headerTitle.innerText !== newTitle) {
+                    headerTitle.innerText = newTitle;
+                }
+            }
+
             allTabs.forEach(t => {
                 const btn = getDomElement(`tab_${t}`);
                 const panel = getDomElement(`panel_${t}`);
                 if (!btn || !panel) return;
                 if (t === tab) {
-                    btn.classList.remove('text-slate-500', 'dark:text-slate-400', 'hover:text-slate-900', 'dark:hover:text-white', 'hover:bg-slate-300/60', 'dark:hover:bg-[#1f2735]');
-                    btn.classList.add('bg-indigo-600', 'text-white', 'shadow-sm');
                     btn.setAttribute('aria-selected', 'true');
                     panel.classList.remove('hidden');
                 } else {
-                    btn.classList.remove('bg-indigo-600', 'text-white', 'shadow-sm');
-                    btn.classList.add('text-slate-500', 'dark:text-slate-400', 'hover:text-slate-900', 'dark:hover:text-white', 'hover:bg-slate-300/60', 'dark:hover:bg-[#1f2735]');
                     btn.setAttribute('aria-selected', 'false');
                     panel.classList.add('hidden');
                 }
             });
 
+            // 移动端菜单切换完毕后，自动缩回侧边栏
+            closeMobileSidebar();
+
             if (tab === 'logs' && socket && socket.readyState === WebSocket.OPEN) {
                 sendWsCommand('get_backend_log');
             }
+        }
+
+        // 移动端侧边栏滑出交互
+        function initMobileSidebar() {
+            const toggle = getDomElement('sidebar_toggle');
+            const sidebar = getDomElement('sidebar');
+            const overlay = getDomElement('sidebar_overlay');
+
+            if (toggle && sidebar) {
+                toggle.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    sidebar.classList.toggle('-translate-x-full');
+                    if (overlay) {
+                        overlay.classList.toggle('hidden');
+                    }
+                });
+            }
+
+            if (overlay) {
+                overlay.addEventListener('click', closeMobileSidebar);
+            }
+        }
+
+        function closeMobileSidebar() {
+            if (window.innerWidth >= 768) return;
+            const sidebar = getDomElement('sidebar');
+            const overlay = getDomElement('sidebar_overlay');
+            if (sidebar) sidebar.classList.add('-translate-x-full');
+            if (overlay) overlay.classList.add('hidden');
         }
 
         function sendWsCommand(action, payload) {
@@ -757,14 +836,14 @@
             const container = getDomElement("main_container");
             if (connected) {
                 if (dot) {
-                    dot.className = "ml-3 w-2.5 h-2.5 bg-green-500 rounded-full shadow-lg shadow-green-500/50 animate-pulse";
+                    dot.className = "w-2.5 h-2.5 bg-green-500 rounded-full shadow-lg shadow-green-500/50 animate-pulse";
                 }
                 if (container) {
                     container.classList.remove("opacity-60", "pointer-events-none");
                 }
             } else {
                 if (dot) {
-                    dot.className = "ml-3 w-2.5 h-2.5 bg-red-500 rounded-full shadow-lg shadow-red-500/50 animate-ping";
+                    dot.className = "w-2.5 h-2.5 bg-red-500 rounded-full shadow-lg shadow-red-500/50 animate-ping";
                 }
                 if (container) {
                     container.classList.add("opacity-60", "pointer-events-none");
@@ -1431,7 +1510,7 @@
                 });
             }
 
-            // 锁频交互：手点多选 pill 磁贴
+            // 锁频手选 Pill 交互
             function getActiveBandGrid() {
                 const nr5g = document.querySelector('input[name="band_rat"]:checked')?.value === 'nr5g';
                 const grid = getDomElement(nr5g ? 'nr5g_bands_grid' : 'lte_bands_grid');
@@ -1507,7 +1586,7 @@
                     const { nr5g, bands } = getSelectedBandNumbers();
                     sendWsCommand('set_band_lock', { nr5g, bands: bands.join(':') });
                     const status = getDomElement('band_lock_status');
-                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在底层极速锁定重载中...</span>';
+                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在锁定重载中...</span>';
                 });
             }
 
@@ -1519,7 +1598,7 @@
                     updateSelectedBandsString();
                     sendWsCommand('set_band_lock', { nr5g, bands: 'all' });
                     const status = getDomElement('band_lock_status');
-                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在重置回退全频段中...</span>';
+                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在重置全频段...</span>';
                 });
             }
 
@@ -1608,7 +1687,7 @@
                         return;
                     }
                     sendWsCommand('send_sms', { recipient, message });
-                    if (status) status.innerHTML = '<span class="text-[#744df0] font-semibold">正在封装多载波下发短信包并传送中...</span>';
+                    if (status) status.innerHTML = '<span class="text-[#744df0] font-semibold">正在发送短信...</span>';
                     const msgInput = getDomElement('sms_message');
                     if (msgInput) msgInput.value = '';
                     const counter = getDomElement('sms_char_count');
@@ -1728,7 +1807,7 @@
                 const seconds = parseInt(select.value, 10);
                 if (!isNaN(seconds)) {
                     sendWsCommand('set_interval', seconds);
-                    console.log(`下发成功：设置空口刷新率间隔为 ${seconds} 秒`);
+                    console.log(`设置空口刷新间隔为 ${seconds} 秒`);
                 }
             });
         }
@@ -1770,9 +1849,10 @@
             }
         }
 
-        // 统一初始化调度
+        // 初始化所有组件
         initTheme();
         connectWs();
+        initMobileSidebar();
         initIntervalSetter();
         initVisibilityHandler();
         initConsole();

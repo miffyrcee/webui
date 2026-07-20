@@ -85,88 +85,72 @@ body {
     border-radius: 10px !important;
 }
 
-/* 4.3 核心改变：重塑信息面板为完美的左对齐双列系统表格行
-   限制在 .grid 容器内，使得左右两侧的值在垂直方向上实现完美的格栅化对齐 */
-.grid>div.p-3.bg-slate-50,
-.grid>div.p-3.bg-slate-50\/40,
-.grid>div.p-3.bg-slate-50\/30,
-.dark .grid>div.p-3.bg-slate-50,
-.dark .grid>div.p-3.bg-slate-50\/40,
-.dark .grid>div.p-3.bg-slate-50\/30 {
+/* 4.3 核心改变：重塑信息面板为完美的左对齐信息行系统
+   使用 .param-row 类名（避免脆弱的 Tailwind 类名组合选择器） */
+.param-row {
     background-color: transparent !important;
     border: none !important;
     border-bottom: 1px solid rgba(0, 0, 0, 0.04) !important;
     border-radius: 0px !important;
     padding: 11px 12px !important;
-    /* 舒适的上下行间距 */
     display: flex !important;
     flex-direction: row !important;
     justify-content: flex-start !important;
-    /* 摒弃两端分散，改用左对齐 */
     align-items: center !important;
     transition: background-color 0.15s ease !important;
 }
 
-.dark .grid>div.p-3.bg-slate-50,
-.dark .grid>div.p-3.bg-slate-50\/40,
-.dark .grid>div.p-3.bg-slate-50\/30 {
+.dark .param-row {
     border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
 }
 
 /* 鼠标悬停行高亮（LuCI 经典交互） */
-.grid>div.p-3.bg-slate-50:hover,
-.grid>div.p-3.bg-slate-50\/40:hover,
-.grid>div.p-3.bg-slate-50\/30:hover {
+.param-row:hover {
     background-color: rgba(94, 114, 228, 0.03) !important;
 }
 
-.dark .grid>div.p-3.bg-slate-50:hover,
-.dark .grid>div.p-3.bg-slate-50\/40:hover,
-.dark .grid>div.p-3.bg-slate-50\/30:hover {
+.dark .param-row:hover {
     background-color: rgba(130, 94, 228, 0.04) !important;
 }
 
 /* 左侧键名格式（固定比例宽度，起跑线严格统一） */
-.grid>div.p-3.bg-slate-50>span:first-child,
-.grid>div.p-3.bg-slate-50\/40>span:first-child,
-.grid>div.p-3.bg-slate-50\/30>span:first-child {
+.param-row>span:first-child {
     width: 40% !important;
-    /* 占用格内 40% 的黄金比例 */
     min-width: 120px !important;
     max-width: 220px !important;
     flex-shrink: 0 !important;
     font-size: 13px !important;
     font-weight: 500 !important;
     color: #4b5563 !important;
-    /* 柔和中性的键名灰 */
     text-transform: none !important;
     letter-spacing: normal !important;
     text-align: left !important;
 }
 
-.dark .grid>div.p-3.bg-slate-50>span:first-child,
-.dark .grid>div.p-3.bg-slate-50\/40>span:first-child,
-.dark .grid>div.p-3.bg-slate-50\/30>span:first-child {
+.dark .param-row>span:first-child {
     color: #9ca3af !important;
 }
 
 /* 右侧键值格式（规避过粗字体，展现精细美感） */
-.grid>div.p-3.bg-slate-50>span:last-child,
-.grid>div.p-3.bg-slate-50\/40>span:last-child,
-.grid>div.p-3.bg-slate-50\/30>span:last-child {
+.param-row>span:last-child {
     flex-grow: 1 !important;
     font-size: 13px !important;
     font-weight: 500 !important;
-    /* 摒弃重粗体，采用适中字重 */
     color: #111827 !important;
     margin-top: 0px !important;
     text-align: left !important;
 }
 
-.dark .grid>div.p-3.bg-slate-50>span:last-child,
-.dark .grid>div.p-3.bg-slate-50\/40>span:last-child,
-.dark .grid>div.p-3.bg-slate-50\/30>span:last-child {
+.dark .param-row>span:last-child {
     color: #e5e7eb !important;
+}
+
+/* 移动端缩小标签宽度占比，给值更多空间 */
+@media (max-width: 480px) {
+    .param-row>span:first-child {
+        min-width: 80px !important;
+        width: 35% !important;
+    }
 }
 
 /* 4.4 去除磨砂玻璃滤镜，采用扁平清透的系统卡片背景色 */

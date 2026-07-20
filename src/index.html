@@ -142,52 +142,52 @@
                             <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
                                 <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">网络架构参数 / Network Info</h2>
                             </div>
-                            <div class="p-4 grid grid-cols-2 gap-3.5 text-xs sm:text-sm">
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                            <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">活跃卡槽 Slot</span>
                                     <span id="info_sim" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
                                 </div>
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">运营商 Provider</span>
                                     <span id="info_provider" class="text-slate-800 dark:text-slate-200 font-semibold mt-1 truncate" title="双击复制全称">--</span>
                                 </div>
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">MCCMNC</span>
                                     <span id="info_mccmnc" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
                                 </div>
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">APN 接入点</span>
                                     <span id="info_apn" class="text-slate-800 dark:text-slate-200 font-semibold mt-1 select-all uppercase">--</span>
                                 </div>
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">网络模式 Mode</span>
                                     <span id="info_mode" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
                                 </div>
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">可用载波总频宽</span>
                                     <span id="info_bandwidth" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
                                 </div>
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 col-span-2">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 sm:col-span-2">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">当前工作频段 Bands</span>
                                     <span id="info_bands" class="text-slate-800 dark:text-slate-200 font-semibold mt-1 overflow-x-auto scrollbar-none whitespace-nowrap">--</span>
                                 </div>
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">E/ARFCN 频点</span>
                                     <span id="info_earfcn" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
                                 </div>
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">PCI 小区编号</span>
                                     <span id="info_pci" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
                                 </div>
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">IPv4 地址</span>
                                     <span id="info_ipv4" class="text-indigo-600 dark:text-indigo-400 font-semibold mt-1 select-all">--</span>
                                 </div>
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">运行时间 Uptime</span>
                                     <span id="info_uptime" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
                                 </div>
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 col-span-2">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 sm:col-span-2">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">IPv6 地址</span>
                                     <span id="info_ipv6" class="text-indigo-600 dark:text-indigo-400 font-semibold mt-1 overflow-x-auto scrollbar-none whitespace-nowrap select-all">--</span>
                                 </div>
@@ -213,24 +213,24 @@
                             <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
                                 <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">物理层空口指标 / Signal Info</h2>
                             </div>
-                            <div class="p-4 grid grid-cols-2 gap-3.5 text-xs sm:text-sm">
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                            <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">空口状况评估</span>
                                     <span id="sig_assessment" class="text-indigo-600 dark:text-indigo-400 font-semibold mt-1">--</span>
                                 </div>
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">累计下行/上行流量</span>
                                     <span id="sig_traffic" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
                                 </div>
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">CELL ID 小区标识</span>
                                     <span id="sig_cell_id" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
                                 </div>
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">eNB ID 基站编号</span>
                                     <span id="sig_enb" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
                                 </div>
-                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 col-span-2">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 sm:col-span-2">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">TAC 追踪区编码</span>
                                     <span id="sig_tac" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
                                 </div>

@@ -585,3 +585,175 @@ textarea:focus {
     border-color: #825ee4 !important;
     box-shadow: 0 0 0 3px rgba(130, 94, 228, 0.3) !important;
 }
+
+/* ============================================================================
+   5. Argon 核心组件样式 (CSS Variables, Glassmorphism, Toggle Switch, Scrollbar)
+   ============================================================================ */
+
+/* 5.1 Argon 主题 CSS 变量 — 对齐 luci-theme-argon 色盘 */
+:root {
+    --argon-primary: #5e72e4;
+    --argon-primary-hover: #435ebe;
+    --argon-primary-glow: rgba(94, 114, 228, 0.25);
+    --argon-bg: #f8f9fe;
+    --argon-card-bg: rgba(255, 255, 255, 0.75);
+    --argon-card-border: rgba(255, 255, 255, 0.5);
+    --argon-text: #32325d;
+    --argon-text-muted: #8898aa;
+    --argon-card-shadow: 0 15px 35px rgba(50, 50, 93, 0.05), 0 5px 15px rgba(0, 0, 0, 0.03);
+    --argon-blur: 12px;
+}
+
+.dark {
+    --argon-bg: #101726;
+    --argon-card-bg: rgba(26, 34, 52, 0.7);
+    --argon-card-border: rgba(255, 255, 255, 0.06);
+    --argon-text: #f6f9fc;
+    --argon-text-muted: #a0aec0;
+    --argon-card-shadow: 0 15px 35px rgba(0, 0, 0, 0.3), 0 5px 15px rgba(0, 0, 0, 0.2);
+}
+
+/* 5.2 毛玻璃拟态卡片 */
+.argon-card {
+    background-color: var(--argon-card-bg) !important;
+    backdrop-filter: blur(var(--argon-blur)) !important;
+    -webkit-backdrop-filter: blur(var(--argon-blur)) !important;
+    border: 1px solid var(--argon-card-border) !important;
+    border-radius: 12px !important;
+    box-shadow: var(--argon-card-shadow) !important;
+    padding: 1.5rem !important;
+    transition: transform 0.3s ease, box-shadow 0.3s ease, background-color 0.3s ease !important;
+}
+
+.argon-card:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 20px 40px rgba(50, 50, 93, 0.08), 0 8px 20px rgba(0, 0, 0, 0.05) !important;
+}
+
+/* 5.3 Argon 风格开关 (Toggle Switch) */
+.argon-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+}
+
+.argon-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+
+.argon-switch .slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.1);
+    border-radius: 34px;
+    transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dark .argon-switch .slider {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.argon-switch .slider::before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: #ffffff;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+    transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.argon-switch input:checked + .slider {
+    background-color: var(--argon-primary);
+}
+
+.argon-switch input:checked + .slider::before {
+    transform: translateX(20px);
+}
+
+/* 5.4 Argon 风格输入框 */
+.argon-input {
+    width: 100% !important;
+    padding: 10px 16px !important;
+    background-color: rgba(255, 255, 255, 0.85) !important;
+    border: 1px solid var(--argon-card-border) !important;
+    border-radius: 6px !important;
+    color: var(--argon-text) !important;
+    outline: none !important;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.dark .argon-input {
+    background-color: rgba(16, 23, 38, 0.6) !important;
+}
+
+.argon-input:focus {
+    border-color: var(--argon-primary) !important;
+    box-shadow: 0 0 0 3px var(--argon-primary-glow) !important;
+    background-color: #ffffff !important;
+}
+
+.dark .argon-input:focus {
+    background-color: rgba(16, 23, 38, 0.9) !important;
+}
+
+/* 5.5 沉浸式登录背景罩 */
+.login-wallpaper-container {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    background: linear-gradient(135deg, #5e72e4, #111726);
+}
+
+.login-wallpaper-container::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, rgba(16, 23, 38, 0.2), rgba(16, 23, 38, 0.6));
+    pointer-events: none;
+}
+
+.login-bg-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: blur(2px);
+    transform: scale(1.05);
+}
+
+/* 5.6 极简纤细滚动条 */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.25);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+}

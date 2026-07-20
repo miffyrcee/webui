@@ -36,6 +36,14 @@ fn extract_values(pair: pest::iterators::Pair<'_, Rule>) -> Vec<String> {
     result
 }
 
+/// 判断 APN 是否为可用的数据 APN（跳过 ims 等信令 APN）
+pub fn is_valid_data_apn(apn: &str) -> bool {
+    !apn.is_empty()
+        && !apn.contains("placeholder")
+        && !apn.starts_with("apn")
+        && !apn.eq_ignore_ascii_case("ims")
+}
+
 /// Parse a full AT response and extract all result lines
 #[allow(dead_code)]
 pub fn parse_at_response(raw: &str) -> Vec<ParsedLine> {

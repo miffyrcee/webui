@@ -681,54 +681,34 @@ impl HardwareBackend for RealBackend {
         push_log("INFO", "System", "[3/5] 获取运营商...");
         let network_provider = fetch_network_provider(&self.serial_path).await;
 
-        push_log("INFO", "System", "[4/5] 获取 APN (AT+CGCONTRDP)...");
+        push_log("INFO", "System", "[4/5] 获取 APN (AT+CGDCONT?)...");
         let mut apn = String::new();
-        let mut found_apn = false;
-        if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+CGCONTRDP").await {
-            if let Some(parsed_apn) = resp.lines().find_map(|l| {
-                match at::parser::parse_single_line(l) {
-                    Some(at::parser::ParsedLine::Cgcontrdp(c_resp))
-                        if !c_resp.apn.is_empty() =>
-                    {
-                        Some(c_resp.apn)
-                    }
-                    _ => None,
-                }
-            }) {
-                apn = parsed_apn;
-                found_apn = true;
-            }
-        }
-        if !found_apn {
-            push_log("INFO", "System", "[4/5] 回退 AT+CGDCONT? 获取 APN...");
-            if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+CGDCONT?").await {
-                let cgdcont_entries: Vec<_> = resp
-                    .lines()
-                    .filter_map(|l| {
-                        match at::parser::parse_single_line(l) {
-                            Some(at::parser::ParsedLine::Cgdcont(entry))
-                                if !entry.apn.is_empty() =>
-                            {
-                                Some(entry)
-                            }
-                            _ => None,
+        if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+CGDCONT?").await {
+            let cgdcont_entries: Vec<_> = resp
+                .lines()
+                .filter_map(|l| {
+                    match at::parser::parse_single_line(l) {
+                        Some(at::parser::ParsedLine::Cgdcont(entry))
+                            if !entry.apn.is_empty() =>
+                        {
+                            Some(entry)
                         }
-                    })
-                    .collect();
-
-                // 优先选取非 placeholder 的有效 APN
-                if let Some(entry) = cgdcont_entries.iter().find(|e| {
-                    !e.apn.contains("placeholder") && !e.apn.starts_with("apn")
-                }) {
-                    apn = entry.apn.clone();
-                    found_apn = true;
-                }
-
-                // 次选：无差别选取第一个被成功解析出来的 APN
-                if !found_apn {
-                    if let Some(entry) = cgdcont_entries.first() {
-                        apn = entry.apn.clone();
+                        _ => None,
                     }
+                })
+                .collect();
+
+            // 优先选取有效数据 APN（跳过 ims/SOS 等信令 APN）
+            if let Some(entry) = cgdcont_entries.iter().find(|e| {
+                at::parser::is_valid_data_apn(&e.apn)
+            }) {
+                apn = entry.apn.clone();
+            }
+
+            // 次选：无差别选取第一个被成功解析出来的 APN
+            if apn.is_empty() {
+                if let Some(entry) = cgdcont_entries.first() {
+                    apn = entry.apn.clone();
                 }
             }
         }

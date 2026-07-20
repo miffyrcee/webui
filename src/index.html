@@ -384,38 +384,13 @@
                             </div>
                         </div>
 
-                        <!-- 协议切换与实体卡槽 -->
+                        <!-- 拨号连接控制 -->
                         <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
-                            <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
-                                <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">卡槽切换与 USB 网卡驱动模式</h2>
-                            </div>
                             <div class="p-4 space-y-3">
-                                <div class="flex flex-col gap-1">
-                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">网卡驱动通讯协议选择 (默认为 MBIM)</label>
-                                    <select id="usbnet_mode_select"
-                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer">
-                                        <option value="0">ECM (虚拟以太网)</option>
-                                        <option value="1">NCM (网络控制芯片模式)</option>
-                                        <option value="2" selected>MBIM (微软移动宽带协议)</option>
-                                        <option value="3">RNDIS (远程NDIS驱动)</option>
-                                        <option value="5">QMI (高通QMI底层内核驱动)</option>
-                                    </select>
-                                </div>
-                                <button id="usbnet_apply_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">应用网卡模式修改</button>
-
-                                <div class="border-t border-slate-100 dark:border-slate-800/40 pt-3 mt-1">
-                                    <h3 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase mb-2">SIM 双卡槽实体物理切换</h3>
-                                    <div class="flex space-x-2">
-                                        <button id="sim_slot_1_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">卡槽 1</button>
-                                        <button id="sim_slot_2_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">卡槽 2</button>
-                                    </div>
-                                </div>
-
-                                <div class="border-t border-slate-100 dark:border-slate-800/40 pt-3 flex space-x-2">
+                                <div class="flex space-x-2">
                                     <button id="net_connect_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">命令拨号连接</button>
                                     <button id="net_disconnect_btn" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">断开拨号连接</button>
                                 </div>
-                                <div id="usbnet_sim_status" class="text-xs text-slate-400 dark:text-slate-500 mt-1">交互反馈：等待操作。</div>
                             </div>
                         </div>
                     </div>
@@ -879,10 +854,6 @@
                         handleBandLockRes(data.data);
                     } else if (data.type === "cell_lock_res") {
                         handleCellLockRes(data.data);
-                    } else if (data.type === "usbnet_res") {
-                        handleUsbnetRes(data.data);
-                    } else if (data.type === "sim_slot_res") {
-                        handleSimSlotRes(data.data);
                     } else if (data.type === "diagnostics_res") {
                         handleDiagnosticsRes(data.data);
                     } else if (data.type === "settings_log") {
@@ -1004,34 +975,6 @@
             if (!el) return;
             if (data.success) {
                 el.innerHTML = '<span class="text-indigo-600 dark:text-indigo-400 font-semibold">✓ ' + escapeHtml(data.msg || 'OK') + '</span>';
-            } else {
-                el.innerHTML = '<span class="text-red-500 font-semibold">✗ ' + escapeHtml(data.msg || 'Failed') + '</span>';
-            }
-        }
-
-        function handleUsbnetRes(data) {
-            const el = getDomElement('usbnet_sim_status');
-            if (!el) return;
-            if (data.success) {
-                let html = '<span class="text-indigo-600 dark:text-indigo-400 font-semibold">✓ ' + escapeHtml(data.msg || 'OK') + '</span>';
-                if (data.advise === 'reboot_required') {
-                    html += '<div class="text-amber-500 dark:text-amber-400 mt-1 font-semibold">⚠ 驱动通信重定义，需要热重启模组才能生效。 <button onclick="if(confirm(\'确认复位模组内核？\')){sendWsCommand(\'reboot\');}" class="underline hover:text-white cursor-pointer">立即复位重启</button></div>';
-                }
-                el.innerHTML = html;
-            } else {
-                el.innerHTML = '<span class="text-red-500 font-semibold">✗ ' + escapeHtml(data.msg || 'Failed') + '</span>';
-            }
-        }
-
-        function handleSimSlotRes(data) {
-            const el = getDomElement('usbnet_sim_status');
-            if (!el) return;
-            if (data.success) {
-                let html = '<span class="text-indigo-600 dark:text-indigo-400 font-semibold">✓ ' + escapeHtml(data.msg || 'OK') + '</span>';
-                if (data.advise === 'reconnecting') {
-                    html += '<div class="text-amber-500 dark:text-amber-400 mt-1 font-semibold">⏳ 物理卡套硬切换执行中，信号短暂中断重连中...</div>';
-                }
-                el.innerHTML = html;
             } else {
                 el.innerHTML = '<span class="text-red-500 font-semibold">✗ ' + escapeHtml(data.msg || 'Failed') + '</span>';
             }
@@ -1626,30 +1569,6 @@
                     if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 解除绑定复位中...</span>';
                 });
             }
-
-            const usbnetApply = getDomElement('usbnet_apply_btn');
-            if (usbnetApply) {
-                usbnetApply.addEventListener('click', () => {
-                    const mode = parseInt(getDomElement('usbnet_mode_select')?.value, 10) || 0;
-                    sendWsCommand('set_usbnet', mode);
-                    const status = getDomElement('usbnet_sim_status');
-                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在下发通讯网卡修改命令...</span>';
-                });
-            }
-
-            function setupSimSlotBtn(id, slot) {
-                const btn = getDomElement(id);
-                if (btn) {
-                    btn.addEventListener('click', () => {
-                        if (!confirm('确认底层切换物理卡槽到 SIM ' + slot + '？（空口连接会因强制射频重置而中断20秒，请不要断开电源）')) return;
-                        sendWsCommand('switch_sim_slot', slot);
-                        const status = getDomElement('usbnet_sim_status');
-                        if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在对卡套底层发送物理硬切换信号...</span>';
-                    });
-                }
-            }
-            setupSimSlotBtn('sim_slot_1_btn', 1);
-            setupSimSlotBtn('sim_slot_2_btn', 2);
 
             function setupDiagBtn(id, subCmd) {
                 const btn = getDomElement(id);

@@ -85,10 +85,6 @@ enum AtAction {
     SetBandLock { is_nr5g: bool, bands: String },
     /// (tech, pci, earfcn, band, enable) — enable=false 解除锁定
     SetCellLock { tech: String, pci: u32, earfcn: u32, band: Option<u32>, enable: bool },
-    /// USB 网络模式（有效值: 0,1,2,3,5）
-    SetUsbNet(u8),
-    /// SIM 卡槽编号
-    SwitchSimSlot(u8),
     /// 诊断子命令
     GetDiagnostics(DiagnosticType),
 }
@@ -302,12 +298,6 @@ trait HardwareBackend: Send + Sync {
 
     /// 设置小区锁定（enable=false 解除锁定; 5G 锁需要 band）
     async fn set_cell_lock(&self, tech: &str, pci: u32, earfcn: u32, band: Option<u32>, enable: bool) -> Result<String, String>;
-
-    /// 设置 USB 网络模式（0: ECM, 1: NCM, 2: MBIM, 3: RNDIS, 5: QMI）
-    async fn set_usb_net(&self, mode: u8) -> Result<String, String>;
-
-    /// 切换 SIM 卡槽（含 CFUN 重注册）
-    async fn switch_sim_slot(&self, slot: u8) -> Result<String, String>;
 
     /// 获取诊断信息（子命令: Neighbour/Qlts/MbnList/MbnAutoclose）
     async fn get_diagnostics(&self, diag: &DiagnosticType) -> Result<String, String>;
@@ -564,26 +554,6 @@ impl HardwareBackend for RealBackend {
         } else {
             send_at_command_inner(&self.serial_path, &format!("AT+QNWLOCK=\"common/lte\",1,{},{}", earfcn, pci)).await
         }
-    }
-
-    async fn set_usb_net(&self, mode: u8) -> Result<String, String> {
-        if ![0, 1, 2, 3, 5].contains(&mode) {
-            return Err("非法的 usbnet 模式代码，有效值: 0(ECM) 1(NCM) 2(MBIM) 3(RNDIS) 5(QMI)".to_string());
-        }
-        send_at_command_inner(&self.serial_path, &format!("AT+QCFG=\"usbnet\",{}", mode)).await
-    }
-
-    async fn switch_sim_slot(&self, slot: u8) -> Result<String, String> {
-        if slot != 1 && slot != 2 {
-            return Err("SIM 卡槽只能为 1 或 2".to_string());
-        }
-        send_at_command_inner(&self.serial_path, &format!("AT+QUIMSLOT={}", slot)).await?;
-        // CFUN 循环使 SIM 切换生效
-        push_log("INFO", "System", "执行 CFUN=0 软射频关闭...");
-        let _ = send_at_command_inner(&self.serial_path, "AT+CFUN=0").await;
-        tokio::time::sleep(Duration::from_millis(1500)).await;
-        push_log("INFO", "System", "执行 CFUN=1 重新激活搜网...");
-        send_at_command_inner(&self.serial_path, "AT+CFUN=1").await
     }
 
     async fn get_diagnostics(&self, diag: &DiagnosticType) -> Result<String, String> {
@@ -1325,30 +1295,6 @@ async fn handle_at_request(
                 "data": { "success": res.is_ok(), "msg": res.unwrap_or_else(|e| e) }
             }));
         }
-        AtAction::SetUsbNet(mode) => {
-            push_log("INFO", "Actor", &format!("设置USB网络模式: {}", mode));
-            let res = backend.set_usb_net(mode).await;
-            let _ = req.resp_tx.send(serde_json::json!({
-                "type": "usbnet_res",
-                "data": {
-                    "success": res.is_ok(),
-                    "advise": "reboot_required",
-                    "msg": res.unwrap_or_else(|e| e)
-                }
-            }));
-        }
-        AtAction::SwitchSimSlot(slot) => {
-            push_log("INFO", "Actor", &format!("切换SIM卡槽: {}", slot));
-            let res = backend.switch_sim_slot(slot).await;
-            let _ = req.resp_tx.send(serde_json::json!({
-                "type": "sim_slot_res",
-                "data": {
-                    "success": res.is_ok(),
-                    "advise": "reconnecting",
-                    "msg": res.unwrap_or_else(|e| e)
-                }
-            }));
-        }
         AtAction::GetDiagnostics(diag) => {
             push_log("INFO", "Actor", &format!("获取诊断信息: {}", diag));
             let res = backend.get_diagnostics(&diag).await;
@@ -1687,14 +1633,6 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             let band = payload.and_then(|p| p.get("band")).and_then(|v| v.as_u64()).map(|v| v as u32);
                             let enable = payload.and_then(|p| p.get("enable")).and_then(|v| v.as_bool()).unwrap_or(true);
                             AtAction::SetCellLock { tech, pci, earfcn, band, enable }
-                        }
-                        "set_usbnet" => {
-                            let mode = cmd.payload.as_ref().and_then(|p| p.as_u64()).unwrap_or(0) as u8;
-                            AtAction::SetUsbNet(mode)
-                        }
-                        "switch_sim_slot" => {
-                            let slot = cmd.payload.as_ref().and_then(|p| p.as_u64()).unwrap_or(1) as u8;
-                            AtAction::SwitchSimSlot(slot)
                         }
                         "get_diagnostics" => {
                             let sub = cmd.payload.as_ref().and_then(|p| p.as_str()).unwrap_or("");

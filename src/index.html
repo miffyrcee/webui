@@ -711,8 +711,8 @@
                         </div>
                         <button id="log_refresh_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 text-xs font-semibold rounded transition-all active:scale-95 shadow-sm cursor-pointer">手动刷新日志</button>
                     </div>
-                    <div id="settings_log" class="flex-1 p-5 font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-slate-50 dark:bg-[#0c0f16]/60 overflow-y-auto max-h-[500px] space-y-1">
-                        <div class="text-slate-400 dark:text-slate-500">加载中... 请在进入该诊断面板时手动刷新。</div>
+                    <div id="settings_log" class="flex-1 p-5 font-mono text-xs text-slate-300 dark:text-slate-200 bg-slate-50 dark:bg-[#0c0f16]/60 overflow-y-auto max-h-[500px] space-y-1">
+                        <div class="text-slate-500 dark:text-slate-400">加载中... 请在进入该诊断面板时手动刷新。</div>
                     </div>
                 </div>
             </div>
@@ -1139,15 +1139,15 @@
             const logEl = getDomElement('settings_log');
             if (!logEl) return;
             if (!logs || logs.length === 0) {
-                logEl.innerHTML = '<div class="text-slate-400">目前本地无日志快照，请触发交互拉取。</div>';
+                logEl.innerHTML = '<div class="text-slate-500 dark:text-slate-400">目前本地无日志快照，请触发交互拉取。</div>';
                 return;
             }
 
             logEl.innerHTML = logs.map(log => {
-                let colorClass = "text-slate-400 dark:text-slate-500";
-                if (log.includes("[ERROR]")) colorClass = "text-red-500 font-semibold";
-                else if (log.includes("[WARN]")) colorClass = "text-yellow-600 dark:text-yellow-500 font-semibold";
-                else if (log.includes("[INFO]")) colorClass = "text-slate-700 dark:text-slate-300";
+                let colorClass = "text-slate-300 dark:text-slate-200";
+                if (log.includes("[ERROR]")) colorClass = "text-red-400 dark:text-red-300 font-semibold";
+                else if (log.includes("[WARN]")) colorClass = "text-amber-500 dark:text-amber-400 font-semibold";
+                else if (log.includes("[INFO]")) colorClass = "text-cyan-600 dark:text-cyan-300";
 
                 return `<div class="${colorClass}">${escapeHtml(log)}</div>`;
             }).join('');

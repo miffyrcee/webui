@@ -77,12 +77,12 @@ body {
     background-color: #080a0f !important;
 }
 
-/* 4.2 彻底重塑圆角（全站统一缩减为 LuCI 经典的 4px 紧凑圆角） */
-.rounded-2xl,
-.rounded-xl,
-.rounded-lg,
-.rounded-md {
-    border-radius: 4px !important;
+/* 4.2 差异化圆角体系 — 大卡片保留 Argon 大圆角，控件保持紧凑 */
+.rounded-2xl {
+    border-radius: 16px !important;
+}
+.rounded-xl {
+    border-radius: 10px !important;
 }
 
 /* 4.3 核心改变：重塑信息面板为完美的左对齐双列系统表格行
@@ -173,8 +173,8 @@ body {
 .bg-white,
 .bg-white\/80 {
     background-color: #ffffff !important;
-    border: 1px solid #e2e8f0 !important;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
+    border: 1px solid rgba(226, 232, 240, 0.6) !important;
+    box-shadow: 0 15px 35px rgba(50, 50, 93, 0.04), 0 5px 15px rgba(0, 0, 0, 0.02) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
 }
@@ -183,8 +183,8 @@ body {
 .dark .bg-white\/80,
 .dark .dark\:bg-\[\#111622\] {
     background-color: #151922 !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2), 0 5px 15px rgba(0, 0, 0, 0.1) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
 }
@@ -216,19 +216,19 @@ h2.text-xs.font-bold {
     color: #825ee4 !important;
 }
 
-/* 4.6 左侧栏样式优化 */
+/* 4.6 左侧栏样式优化 — 柔和边界 + 轻微冷蓝底色 */
 aside#sidebar {
-    background-color: #ffffff !important;
-    border-right: 1px solid #e2e8f0 !important;
+    background-color: #f8f9fe !important;
+    border-right: 1px solid rgba(0, 0, 0, 0.04) !important;
 }
 
 .dark aside#sidebar {
     background-color: #141821 !important;
-    border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.04) !important;
 }
 
 .tab-btn {
-    border-radius: 4px !important;
+    border-radius: 8px !important;
     margin: 4px 12px !important;
     padding: 11px 16px !important;
     font-size: 13.5px !important;
@@ -238,7 +238,7 @@ aside#sidebar {
     align-items: center !important;
     background: transparent !important;
     border: none !important;
-    transition: all 0.15s ease !important;
+    transition: all 0.2s ease !important;
 }
 
 .dark .tab-btn {
@@ -251,28 +251,75 @@ aside#sidebar {
 }
 
 .dark .tab-btn:hover {
-    background: rgba(94, 114, 228, 0.15) !important;
+    background: rgba(94, 114, 228, 0.12) !important;
     color: #825ee4 !important;
 }
 
-/* 侧边栏活动项目高亮渐变色与阴影 */
+/* 侧边栏活动项目 — 胶囊半透明高亮，弃用满铺渐变 */
 .tab-btn[aria-selected="true"] {
-    color: #ffffff !important;
-    background: linear-gradient(135deg, #5e72e4 0%, #825ee4 100%) !important;
-    box-shadow: 0 4px 12px 0 rgba(94, 114, 228, 0.25) !important;
+    color: #5e72e4 !important;
+    background: rgba(94, 114, 228, 0.1) !important;
+    box-shadow: none !important;
 }
 
 .dark .tab-btn[aria-selected="true"] {
-    color: #ffffff !important;
-    background: linear-gradient(135deg, #5e72e4 0%, #825ee4 100%) !important;
+    color: #825ee4 !important;
+    background: rgba(130, 94, 228, 0.15) !important;
 }
 
-/* 4.7 顶端蓝色页眉栏 */
+/* 4.7 顶端页眉栏 — 透明毛玻璃，取代实色渐变 */
 header.bg-indigo-600,
 header.bg-indigo-600\/90 {
-    background: linear-gradient(135deg, #5e72e4 0%, #825ee4 100%) !important;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08) !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+    background: rgba(255, 255, 255, 0.72) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    box-shadow: none !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05) !important;
+    color: #32325d !important;
+}
+
+.dark header.bg-indigo-600,
+.dark header.bg-indigo-600\/90 {
+    background: rgba(12, 15, 22, 0.8) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+    color: #e2e8f0 !important;
+}
+
+/* 顶栏子元素重着色 — 适配透明背景 */
+header .bg-white\/20,
+header .bg-white\/10,
+header button.text-white,
+header [class*="text-white"] {
+    color: #525f7f !important;
+}
+header .bg-white\/20,
+header .bg-white\/10 {
+    background-color: rgba(0, 0, 0, 0.06) !important;
+    border-color: rgba(0, 0, 0, 0.05) !important;
+}
+header .bg-white\/20:hover,
+header .bg-white\/10:hover {
+    background-color: rgba(0, 0, 0, 0.1) !important;
+}
+.dark header .bg-white\/20,
+.dark header .bg-white\/10,
+.dark header button.text-white,
+.dark header [class*="text-white"] {
+    color: #a0aec0 !important;
+}
+.dark header .bg-white\/20,
+.dark header .bg-white\/10 {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+}
+.dark header .bg-white\/20:hover,
+.dark header .bg-white\/10:hover {
+    background-color: rgba(255, 255, 255, 0.12) !important;
+}
+header svg {
+    color: #525f7f !important;
+}
+.dark header svg {
+    color: #a0aec0 !important;
 }
 
 /* 4.8 经典指示角标与控制组件 */
@@ -447,22 +494,30 @@ tr:hover td {
     background-color: rgba(255, 255, 255, 0.02) !important;
 }
 
-/* 4.15 终端控制台与系统调试输出 */
+/* 4.15 终端控制台与系统调试输出 — Argon 深蓝黑质感 */
 #console_output,
 #diag_output,
 #settings_log {
-    background-color: #0f172a !important;
+    background-color: #111723 !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    font-family: 'Fira Code', 'Consolas', 'SFMono-Regular', 'Menlo', monospace !important;
+    border-radius: 10px !important;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.25) !important;
+    line-height: 1.6 !important;
+    font-size: 13px !important;
+    padding: 16px !important;
+}
+
+#console_output,
+#diag_output {
     color: #38bdf8 !important;
-    border: 1px solid #1e293b !important;
-    font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace !important;
-    border-radius: 4px !important;
 }
 
 .dark #console_output,
 .dark #diag_output,
 .dark #settings_log {
-    background-color: #080c14 !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    background-color: #0a0e16 !important;
+    border: 1px solid rgba(255, 255, 255, 0.04) !important;
 }
 
 #console_output div.text-indigo-600,
@@ -475,26 +530,26 @@ tr:hover td {
 /* 4.16 顶层4张基础指标卡片悬空及内衬优化 */
 div.min-h-\[110px\] {
     background-color: #ffffff !important;
-    border: 1px solid #e2e8f0 !important;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.04), 0 2px 4px -1px rgba(0, 0, 0, 0.02) !important;
-    border-radius: 4px !important;
+    border: 1px solid rgba(226, 232, 240, 0.7) !important;
+    box-shadow: 0 15px 35px rgba(50, 50, 93, 0.04), 0 5px 15px rgba(0, 0, 0, 0.02) !important;
+    border-radius: 16px !important;
     padding: 18px 22px !important;
     transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out !important;
 }
 
 .dark div.min-h-\[110px\] {
     background-color: #151922 !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2), 0 5px 15px rgba(0, 0, 0, 0.1) !important;
 }
 
 div.min-h-\[110px\]:hover {
     transform: translateY(-2px);
-    box-shadow: 0 10px 15px -3px rgba(94, 114, 228, 0.1), 0 4px 6px -2px rgba(94, 114, 228, 0.05) !important;
+    box-shadow: 0 20px 40px rgba(50, 50, 93, 0.08), 0 8px 20px rgba(0, 0, 0, 0.05) !important;
 }
 
 .dark div.min-h-\[110px\]:hover {
-    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3) !important;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3) !important;
 }
 
 div.min-h-\[110px\] span.text-xs {

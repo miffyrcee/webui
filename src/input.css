@@ -322,6 +322,14 @@ header svg {
     color: #a0aec0 !important;
 }
 
+/* 头栏内所有按钮 hover 统一适配透明背景 */
+header button:hover {
+    background-color: rgba(0, 0, 0, 0.06) !important;
+}
+.dark header button:hover {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
 /* 4.8 经典指示角标与控制组件 */
 span.bg-white\/25 {
     background-color: rgba(255, 255, 255, 0.18) !important;

@@ -18,37 +18,37 @@
             <!-- 标志与 WebSocket 连接指示灯 -->
             <div class="p-6 border-b border-slate-100 dark:border-slate-800/40 flex items-center justify-between">
                 <div class="flex items-center space-x-2.5">
-                    <span class="text-xl font-black tracking-wider text-indigo-600 dark:text-indigo-400">Argon</span>
-                    <span class="text-[9px] bg-slate-100 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded font-bold tracking-wider">RM520N</span>
+                    <span class="text-xl font-black tracking-wider bg-gradient-to-r from-indigo-600 to-purple-500 bg-clip-text text-transparent">Argon</span>
+                    <span class="text-[9px] bg-indigo-500/10 dark:bg-indigo-400/10 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded font-bold tracking-wider border border-indigo-500/20">RM520N</span>
                 </div>
-                <div id="ws_status_dot" class="w-2.5 h-2.5 bg-red-500 rounded-full transition-all duration-500 shadow-lg shadow-red-500/50"></div>
+                <div id="ws_status_dot" class="w-2.5 h-2.5 bg-red-500 rounded-full transition-all duration-500 shadow-lg shadow-red-500/30"></div>
             </div>
 
-            <!-- 垂直导航菜单区 -->
-            <nav role="tablist" class="py-4 pr-4 space-y-1">
+            <!-- 垂直导航菜单区 — Argon 风格左指示条 -->
+            <nav role="tablist" class="py-2 space-y-0.5">
                 <button id="tab_dashboard" role="tab" aria-selected="true" onclick="switchTab('dashboard')"
-                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium cursor-pointer">
-                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4zM14 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2v-4z"/></svg>
+                    class="tab-btn w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer">
+                    <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>
                     <span>仪表盘 Dashboard</span>
                 </button>
                 <button id="tab_network" role="tab" aria-selected="false" onclick="switchTab('network')"
-                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium cursor-pointer">
-                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                    class="tab-btn w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer">
+                    <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                     <span>连接配置 Control</span>
                 </button>
                 <button id="tab_locks" role="tab" aria-selected="false" onclick="switchTab('locks')"
-                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium cursor-pointer">
-                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                    class="tab-btn w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer">
+                    <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
                     <span>高级锁频与诊断 Locks</span>
                 </button>
                 <button id="tab_sms" role="tab" aria-selected="false" onclick="switchTab('sms')"
-                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium cursor-pointer">
-                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                    class="tab-btn w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer">
+                    <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
                     <span>短信中心 SMS</span>
                 </button>
                 <button id="tab_logs" role="tab" aria-selected="false" onclick="switchTab('logs')"
-                    class="tab-btn w-full flex items-center space-x-3 px-5 py-3 text-sm font-medium cursor-pointer">
-                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    class="tab-btn w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer">
+                    <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
                     <span>系统日志 Logs</span>
                 </button>
             </nav>
@@ -68,20 +68,20 @@
     <!-- ========================== 2. 右侧主体内容容器 ========================== -->
     <div id="main_container" class="flex-1 h-screen flex flex-col overflow-hidden transition-all duration-300">
         
-        <!-- 顶部蓝色 Argon Header -->
-        <header class="h-16 shrink-0 bg-indigo-600 dark:bg-indigo-600/95 flex items-center justify-between px-6 md:px-8 text-white shadow-md z-10 transition-colors duration-300">
+        <!-- 顶部 Argon 毛玻璃 Header -->
+        <header class="h-16 shrink-0 backdrop-blur-xl bg-white/70 dark:bg-[#0c0f16]/80 flex items-center justify-between px-6 md:px-8 border-b border-black/5 dark:border-white/5 z-10 transition-colors duration-300">
             <div class="flex items-center">
                 <!-- 汉堡折叠按钮 -->
-                <button id="sidebar_toggle" class="md:hidden p-2 -ml-2 mr-2 text-white hover:bg-white/10 rounded transition-colors cursor-pointer" title="展开菜单">
+                <button id="sidebar_toggle" class="md:hidden p-2 -ml-2 mr-2 text-slate-600 dark:text-slate-400 hover:bg-black/5 dark:hover:bg-white/10 rounded-lg transition-colors cursor-pointer" title="展开菜单">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
                 </button>
-                <span id="current_page_title" class="text-xs font-bold tracking-widest uppercase">STATUS / OVERVIEW</span>
+                <span id="current_page_title" class="text-xs font-bold tracking-widest uppercase text-slate-600 dark:text-slate-400">STATUS / OVERVIEW</span>
             </div>
 
-            <div class="flex items-center space-x-4">
-                <span class="hidden sm:inline-block text-[10px] bg-white/20 text-white px-2.5 py-1 rounded-full font-bold tracking-wider uppercase border border-white/10">Auto Refresh On</span>
+            <div class="flex items-center space-x-3">
+                <span class="hidden sm:inline-block text-[10px] bg-indigo-500/10 dark:bg-indigo-400/10 text-indigo-600 dark:text-indigo-400 px-2.5 py-1 rounded-full font-bold tracking-wider uppercase border border-indigo-500/20 dark:border-indigo-400/20">Auto Refresh On</span>
                 <!-- 主题日光/月光转换开关 -->
-                <button id="theme_toggle" class="p-2 rounded bg-white/10 hover:bg-white/20 transition-all active:scale-95 text-white cursor-pointer" title="切换白天/夜晚模式">
+                <button id="theme_toggle" class="p-2 rounded-lg bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 transition-all active:scale-95 text-slate-600 dark:text-slate-400 cursor-pointer" title="切换白天/夜晚模式">
                     <svg aria-hidden="true" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m12.728 12.728l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
                     </svg>
@@ -90,7 +90,7 @@
                     </svg>
                 </button>
                 <!-- 退出登录按钮 -->
-                <button onclick="logout()" class="p-2 rounded bg-white/10 hover:bg-white/20 transition-all active:scale-95 text-white cursor-pointer" title="退出登录">
+                <button onclick="logout()" class="p-2 rounded-lg bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 transition-all active:scale-95 text-slate-600 dark:text-slate-400 cursor-pointer" title="退出登录">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                     </svg>
@@ -104,38 +104,46 @@
             <!-- 2.1 Dashboard 仪表盘面板 -->
             <div id="panel_dashboard" role="tabpanel" class="space-y-6">
 
-                <!-- 核心指标发光卡片 -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
-                        <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
-                            <span class="text-xs font-semibold tracking-wider uppercase">工作温度 Temp</span>
-                            <svg aria-hidden="true" class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2V5a3 3 0 116 0v14zm0 0h6m-6-4h6m-6-4h4m-4-4h4"></path></svg>
+                <!-- Argon 核心指标卡片 — 渐变图标容器 -->
+                <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
+                        <div class="flex justify-between items-start">
+                            <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">工作温度 Temp</span>
+                            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20">
+                                <svg aria-hidden="true" class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2V5a3 3 0 116 0v14zm0 0h6m-6-4h6m-6-4h4m-4-4h4"></path></svg>
+                            </div>
                         </div>
-                        <div class="mt-2"><span id="temp" class="text-xl font-bold tracking-tight text-amber-500">-- °C</span></div>
+                        <div class="mt-3"><span id="temp" class="text-2xl font-bold tracking-tight text-amber-500">-- °C</span></div>
                     </div>
 
-                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
-                        <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
-                            <span class="text-xs font-semibold tracking-wider uppercase">SIM 卡状态 SIM</span>
-                            <svg aria-hidden="true" class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2" stroke-linejoin="round"></rect><path d="M12 9h4m-4 4h4m-4 4h4M8 7v10" stroke-linecap="round"></path></svg>
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
+                        <div class="flex justify-between items-start">
+                            <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">SIM 卡状态 SIM</span>
+                            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                                <svg aria-hidden="true" class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2" stroke-linejoin="round"></rect><path d="M12 9h4m-4 4h4m-4 4h4M8 7v10" stroke-linecap="round"></path></svg>
+                            </div>
                         </div>
-                        <div class="mt-2"><span id="sim_status" class="text-xl font-bold tracking-tight text-indigo-600 dark:text-indigo-400">--</span></div>
+                        <div class="mt-3"><span id="sim_status" class="text-2xl font-bold tracking-tight text-indigo-600 dark:text-indigo-400">--</span></div>
                     </div>
 
-                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
-                        <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
-                            <span class="text-xs font-semibold tracking-wider uppercase">信号质量 Signal</span>
-                            <svg aria-hidden="true" class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 10h.01M15 13h.01M12 16h.01M9 19h.01M21 6h.01"></path><path stroke-linecap="round" d="M12 18v2m3-5v5m3-8v8M9 20v-1"></path></svg>
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
+                        <div class="flex justify-between items-start">
+                            <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">信号质量 Signal</span>
+                            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-400 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
+                                <svg aria-hidden="true" class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 10h.01M15 13h.01M12 16h.01M9 19h.01M21 6h.01"></path><path stroke-linecap="round" d="M12 18v2m3-5v5m3-8v8M9 20v-1"></path></svg>
+                            </div>
                         </div>
-                        <div class="mt-2"><span id="signal_pct" class="text-xl font-bold tracking-tight text-blue-600 dark:text-blue-400">--%</span></div>
+                        <div class="mt-3"><span id="signal_pct" class="text-2xl font-bold tracking-tight text-blue-600 dark:text-blue-400">--%</span></div>
                     </div>
 
-                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow transition-all duration-300">
-                        <div class="flex justify-between items-center text-slate-400 dark:text-slate-500">
-                            <span class="text-xs font-semibold tracking-wider uppercase">因特网连接 Link</span>
-                            <svg aria-hidden="true" class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path></svg>
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
+                        <div class="flex justify-between items-start">
+                            <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">因特网连接 Link</span>
+                            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-green-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                                <svg aria-hidden="true" class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path></svg>
+                            </div>
                         </div>
-                        <div class="mt-2"><span id="conn_status" class="text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">--</span></div>
+                        <div class="mt-3"><span id="conn_status" class="text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">--</span></div>
                     </div>
                 </div>
 
@@ -146,7 +154,7 @@
                     <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col justify-between shadow-sm overflow-hidden">
                         <div>
                             <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
-                                <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">网络架构参数 / Network Info</h2>
+                                <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">网络架构参数 / Network Info</h2>
                             </div>
                             <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm">
                                 <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
@@ -217,7 +225,7 @@
                     <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col justify-between shadow-sm overflow-hidden">
                         <div>
                             <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
-                                <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">物理层空口指标 / Signal Info</h2>
+                                <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">物理层空口指标 / Signal Info</h2>
                             </div>
                             <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm">
                                 <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
@@ -250,7 +258,7 @@
                                         <span id="rsrq_val" class="text-slate-850 dark:text-slate-200 text-xs font-bold font-mono">-- / --%</span>
                                     </div>
                                     <div class="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
-                                        <div id="rsrq_bar" class="bg-indigo-600 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+                                        <div id="rsrq_bar" class="bg-gradient-to-r from-indigo-600 to-purple-500 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
                                     </div>
                                 </div>
 
@@ -287,7 +295,7 @@
                     <summary class="flex justify-between items-center p-4 cursor-pointer select-none hover:bg-slate-50 dark:hover:bg-slate-900/20 transition-colors">
                         <div class="flex items-center space-x-2">
                             <svg aria-hidden="true" class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                            <h2 class="text-xs font-bold tracking-wider text-slate-500 dark:text-slate-400 uppercase">硬件底层资产规格 &amp; 空口能力 (点击展开)</h2>
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">硬件底层资产规格 &amp; 空口能力 (点击展开)</h2>
                         </div>
                         <svg aria-hidden="true" class="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
                     </summary>
@@ -330,7 +338,7 @@
                     <!-- APN 配置卡 -->
                     <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                         <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
-                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">IMS / APN 配置管理</h2>
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">IMS / APN 配置管理</h2>
                         </div>
                         <div class="p-4 space-y-3">
                             <div class="flex flex-col gap-1">
@@ -366,7 +374,7 @@
                     <div class="space-y-6">
                         <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                             <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
-                                <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">射频锁网 &amp; SA/NSA 融合控制</h2>
+                                <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">射频锁网 &amp; SA/NSA 融合控制</h2>
                             </div>
                             <div class="p-4 space-y-3">
                                 <select id="net_mode_select"
@@ -380,7 +388,7 @@
                                 <button id="net_mode_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">更新选网偏好</button>
 
                                 <div class="border-t border-slate-100 dark:border-slate-800/40 pt-3 mt-1">
-                                    <h3 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase mb-2">5G 组网类型重分配</h3>
+                                    <h3 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase mb-2">5G 组网类型重分配</h3>
                                     <div class="flex flex-wrap gap-2">
                                         <button id="net_disable_sa_btn" class="flex-1 min-w-[90px] bg-amber-600 hover:bg-amber-700 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">禁用 SA (NSA)</button>
                                         <button id="net_disable_nsa_btn" class="flex-1 min-w-[90px] bg-amber-600 hover:bg-amber-700 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">禁用 NSA (SA)</button>
@@ -410,7 +418,7 @@
                     <!-- 频段多选磁贴 -->
                     <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                         <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
-                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">工作频段锁定 (Band Lock Grid)</h2>
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">工作频段锁定 (Band Lock Grid)</h2>
                         </div>
                         <div class="p-4 space-y-4">
                             <div class="flex space-x-4">
@@ -477,7 +485,7 @@
                     <!-- 物理小区锁定卡 -->
                     <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                         <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
-                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">物理小区频点锁定 (Cell Lock)</h2>
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">物理小区频点锁定 (Cell Lock)</h2>
                         </div>
                         <div class="p-4 space-y-3">
                             <div class="flex space-x-4">
@@ -519,7 +527,7 @@
                 <!-- 扫频基站扫描 -->
                 <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                     <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/10">
-                        <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">空中基站深度扫频扫描</h2>
+                        <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">空中基站深度扫频扫描</h2>
                         <button id="scan_start_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">
                             <span id="scan_btn_text">触发扫频 (15s+)</span>
                         </button>
@@ -552,7 +560,7 @@
                     <!-- 快捷诊断区 -->
                     <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                         <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
-                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">移远底层专线诊断 (Diagnostics)</h2>
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">移远底层专线诊断 (Diagnostics)</h2>
                         </div>
                         <div class="p-4 space-y-3">
                             <div class="flex flex-wrap gap-2">
@@ -568,7 +576,7 @@
                     <!-- 重置与中断控制 -->
                     <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                         <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
-                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">模组硬件硬中断复位</h2>
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">模组硬件硬中断复位</h2>
                         </div>
                         <div class="p-4 space-y-3">
                             <div class="flex space-x-2">
@@ -590,7 +598,7 @@
                 <!-- AT 命令行控制台 -->
                 <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden min-h-[300px]">
                     <div class="p-4 border-b border-slate-100 dark:border-slate-850/60 bg-slate-50/50 dark:bg-slate-900/10">
-                        <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">高通底层 AT 命令控制交互终端 (Console)</h2>
+                        <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">高通底层 AT 命令控制交互终端 (Console)</h2>
                     </div>
                     <div id="console_output" class="flex-1 p-4 font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-slate-50 dark:bg-[#0c0f16]/60 overflow-y-auto max-h-[250px] space-y-1 whitespace-pre-wrap">
                         <div class="text-slate-400 dark:text-slate-500">┌─ AT Console Ready ───────────────────────────────┐</div>
@@ -622,7 +630,7 @@
                     <!-- 卡内短信收件箱 -->
                     <div class="lg:col-span-1 bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden max-h-[600px]">
                         <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/10">
-                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">短信收件箱 (Inbox)</h2>
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">短信收件箱 (Inbox)</h2>
                             <button id="sms_refresh_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">读取列表</button>
                         </div>
                         <div id="sms_list" class="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/30">
@@ -635,7 +643,7 @@
                         <!-- 阅读器卡 -->
                         <div id="sms_reader_card" class="hidden bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden transition-all duration-300">
                             <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/10">
-                                <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">短信阅读器 (SMS Reader)</h2>
+                                <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">短信阅读器 (SMS Reader)</h2>
                                 <button id="sms_reader_close" class="text-xs text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white border border-slate-200 dark:border-slate-700 rounded px-2 py-0.5 hover:bg-slate-100 dark:hover:bg-white/10 cursor-pointer">关闭阅读</button>
                             </div>
                             <div class="p-4 space-y-3">
@@ -656,7 +664,7 @@
                         <!-- 发送中心 -->
                         <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                             <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
-                                <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">短信发送引擎 (Send SMS)</h2>
+                                <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">短信发送引擎 (Send SMS)</h2>
                             </div>
                             <div class="p-4 space-y-3">
                                 <div class="flex flex-col gap-1">
@@ -688,7 +696,7 @@
                             <svg aria-hidden="true" class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
                             </svg>
-                            <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">系统内存环形日志控制台</h2>
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">系统内存环形日志控制台</h2>
                         </div>
                         <button id="log_refresh_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 text-xs font-semibold rounded transition-all active:scale-95 shadow-sm cursor-pointer">手动刷新日志</button>
                     </div>

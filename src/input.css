@@ -1,98 +1,85 @@
+/* ============================================================
+   Argon RM520N WebUI — Tailwind CSS v4 入口
+   最大限度使用 Tailwind 工具类，仅保留必要自定义样式
+   ============================================================ */
+
 @import "tailwindcss";
 
-/* 1. 注册 Tailwind v4 类名手动切换暗黑模式变体 */
+/* 深色模式变体 */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* 指定扫描源 */
+/* 扫描源 */
 @source "./index.html";
 @source "./login.html";
 
-/* 2. 注册系统原生的 Argon 经典渐变主色（#5e72e4） */
+/* ============================================================
+   Argon 设计主题令牌
+   ============================================================ */
 @theme {
     --color-indigo-600: #5e72e4;
     --color-indigo-500: #4a5ee0;
     --color-indigo-400: #825ee4;
+    --color-indigo-300: #a07ee8;
 
     --color-brandBg: #f8f9fe;
-    --color-brandBg-dark: #0a0d14;
+    --color-brandBg-dark: #080b14;
+
+    --color-signal-good: #2dce89;
+    --color-signal-mid: #fb6340;
+    --color-signal-bad: #f5365c;
 }
 
-/* ============================================================================
-   3. 自定义实用工具 (Utilities)
-   ============================================================================ */
+/* ============================================================
+   实用工具类（少量 Tailwind 无法表达的）
+   ============================================================ */
 
-/* 无缝隐藏滚动条 */
+/* 隐藏滚动条 */
 @utility scrollbar-none {
     scrollbar-width: none;
     -ms-overflow-style: none;
-
-    &::-webkit-scrollbar {
-        display: none;
-    }
+    &::-webkit-scrollbar { display: none; }
 }
 
-/* 标准超窄滚动条 */
+/* 纤细滚动条 */
 @utility scrollbar-thin {
     scrollbar-width: thin;
     -ms-overflow-style: auto;
-
-    &::-webkit-scrollbar {
-        width: 5px;
-        height: 5px;
-    }
-
-    &::-webkit-scrollbar-thumb {
-        background: rgba(94, 114, 228, 0.25);
-        border-radius: 4px;
-    }
-
-    &::-webkit-scrollbar-thumb:hover {
-        background: rgba(94, 114, 228, 0.45);
-    }
-
-    &::-webkit-scrollbar-track {
-        background: transparent;
-    }
+    &::-webkit-scrollbar { width: 5px; height: 5px; }
+    &::-webkit-scrollbar-thumb { background: rgba(94, 114, 228, 0.2); border-radius: 4px; }
+    &::-webkit-scrollbar-thumb:hover { background: rgba(94, 114, 228, 0.4); }
+    &::-webkit-scrollbar-track { background: transparent; }
 }
 
-/* ============================================================================
-   4. 基础层覆盖（核心重构，对齐 Jerrykuku 视觉规范）
-   ============================================================================ */
-
-/* 4.1 全局字体与背景（强制覆盖为标准的 Argon 界面字体） */
-html,
-body,
-button,
-input,
-select,
-textarea {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol" !important;
+/* 动画工具 */
+@utility animate-fade-in-up {
+    animation: argon-fade-in-up 0.5s ease-out both;
+}
+@keyframes argon-fade-in-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
+/* ============================================================
+   必要覆盖（Tailwind 无法直接表达的全局样式）
+   ============================================================ */
+
+/* 全局字体与背景 */
+html, body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
 body {
-    background-color: #f4f5f7 !important;
-    /* 对齐标准的轻量灰色背景 */
+    background-color: #f4f5f7;
 }
-
 .dark body {
-    background-color: #080a0f !important;
+    background-color: #080b14;
 }
 
-/* 4.2 差异化圆角体系 — 大卡片保留 Argon 大圆角，控件保持紧凑 */
-.rounded-2xl {
-    border-radius: 16px !important;
-}
-.rounded-xl {
-    border-radius: 10px !important;
-}
-
-/* 4.3 核心改变：重塑信息面板为完美的左对齐信息行系统
-   使用 .param-row 类名（避免脆弱的 Tailwind 类名组合选择器） */
+/* 信息行布局 */
 .param-row {
     background-color: transparent !important;
     border: none !important;
     border-bottom: 1px solid rgba(0, 0, 0, 0.04) !important;
-    border-radius: 0px !important;
+    border-radius: 0 !important;
     padding: 11px 12px !important;
     display: flex !important;
     flex-direction: row !important;
@@ -100,22 +87,11 @@ body {
     align-items: center !important;
     transition: background-color 0.15s ease !important;
 }
+.dark .param-row { border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important; }
+.param-row:hover { background-color: rgba(94, 114, 228, 0.03) !important; }
+.dark .param-row:hover { background-color: rgba(130, 94, 228, 0.04) !important; }
 
-.dark .param-row {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
-}
-
-/* 鼠标悬停行高亮（LuCI 经典交互） */
-.param-row:hover {
-    background-color: rgba(94, 114, 228, 0.03) !important;
-}
-
-.dark .param-row:hover {
-    background-color: rgba(130, 94, 228, 0.04) !important;
-}
-
-/* 左侧键名格式（固定比例宽度，起跑线严格统一） */
-.param-row>span:first-child {
+.param-row > span:first-child {
     width: 40% !important;
     min-width: 120px !important;
     max-width: 220px !important;
@@ -123,562 +99,40 @@ body {
     font-size: 13px !important;
     font-weight: 500 !important;
     color: #4b5563 !important;
-    text-transform: none !important;
-    letter-spacing: normal !important;
     text-align: left !important;
 }
+.dark .param-row > span:first-child { color: #9ca3af !important; }
 
-.dark .param-row>span:first-child {
-    color: #9ca3af !important;
-}
-
-/* 右侧键值格式（规避过粗字体，展现精细美感） */
-.param-row>span:last-child {
+.param-row > span:last-child {
     flex-grow: 1 !important;
     font-size: 13px !important;
     font-weight: 500 !important;
     color: #111827 !important;
-    margin-top: 0px !important;
     text-align: left !important;
 }
+.dark .param-row > span:last-child { color: #e5e7eb !important; }
 
-.dark .param-row>span:last-child {
-    color: #e5e7eb !important;
-}
-
-/* 移动端缩小标签宽度占比，给值更多空间 */
 @media (max-width: 480px) {
-    .param-row>span:first-child {
-        min-width: 80px !important;
-        width: 35% !important;
-    }
+    .param-row > span:first-child { min-width: 80px !important; width: 35% !important; }
 }
 
-/* 4.4 去除磨砂玻璃滤镜，采用扁平清透的系统卡片背景色 */
-.bg-white,
-.bg-white\/80 {
-    background-color: #ffffff !important;
-    border: 1px solid rgba(226, 232, 240, 0.6) !important;
-    box-shadow: 0 15px 35px rgba(50, 50, 93, 0.04), 0 5px 15px rgba(0, 0, 0, 0.02) !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-}
-
-.dark .bg-white,
-.dark .bg-white\/80,
-.dark .dark\:bg-\[\#111622\] {
-    background-color: #151922 !important;
-    border: 1px solid rgba(255, 255, 255, 0.06) !important;
-    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2), 0 5px 15px rgba(0, 0, 0, 0.1) !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-}
-
-/* 4.5 卡片头部栏及标题字体颜色重构（高亮经典的 5e72e4 主题色） */
-.p-4.border-b {
-    background-color: #fafbfc !important;
-    border-bottom: 1px solid #f1f3f9 !important;
-    padding: 14px 20px !important;
-}
-
-.dark .p-4.border-b {
-    background-color: #171d2a !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
-}
-
-.p-4.border-b h2,
-h2.text-xs.font-bold {
-    font-size: 14px !important;
-    font-weight: 600 !important;
-    color: #5e72e4 !important;
-    /* 经典官方蓝紫色 */
-    text-transform: none !important;
-    letter-spacing: 0.5px !important;
-}
-
-.dark .p-4.border-b h2,
-.dark h2.text-xs.font-bold {
-    color: #825ee4 !important;
-}
-
-/* 4.6 左侧栏样式优化 — 柔和边界 + 轻微冷蓝底色 */
-aside#sidebar {
-    background-color: #f8f9fe !important;
-    border-right: 1px solid rgba(0, 0, 0, 0.04) !important;
-}
-
-.dark aside#sidebar {
-    background-color: #141821 !important;
-    border-right: 1px solid rgba(255, 255, 255, 0.04) !important;
-}
-
-.tab-btn {
-    border-radius: 8px !important;
-    margin: 4px 12px !important;
-    padding: 11px 16px !important;
-    font-size: 13.5px !important;
-    font-weight: 500 !important;
-    color: #475569 !important;
-    display: flex !important;
-    align-items: center !important;
-    background: transparent !important;
-    border: none !important;
-    transition: all 0.2s ease !important;
-}
-
-.dark .tab-btn {
-    color: #94a3b8 !important;
-}
-
-.tab-btn:hover {
-    background: rgba(94, 114, 228, 0.08) !important;
-    color: #5e72e4 !important;
-}
-
-.dark .tab-btn:hover {
-    background: rgba(94, 114, 228, 0.12) !important;
-    color: #825ee4 !important;
-}
-
-/* 侧边栏活动项目 — 胶囊半透明高亮，弃用满铺渐变 */
-.tab-btn[aria-selected="true"] {
-    color: #5e72e4 !important;
-    background: rgba(94, 114, 228, 0.1) !important;
-    box-shadow: none !important;
-}
-
-.dark .tab-btn[aria-selected="true"] {
-    color: #825ee4 !important;
-    background: rgba(130, 94, 228, 0.15) !important;
-}
-
-/* 4.7 顶端页眉栏 — 透明毛玻璃，取代实色渐变 */
-header.bg-indigo-600,
-header.bg-indigo-600\/90 {
-    background: rgba(255, 255, 255, 0.72) !important;
-    backdrop-filter: blur(12px) !important;
-    -webkit-backdrop-filter: blur(12px) !important;
-    box-shadow: none !important;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.05) !important;
-    color: #32325d !important;
-}
-
-.dark header.bg-indigo-600,
-.dark header.bg-indigo-600\/90 {
-    background: rgba(12, 15, 22, 0.8) !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
-    color: #e2e8f0 !important;
-}
-
-/* 顶栏子元素重着色 — 适配透明背景 */
-header .bg-white\/20,
-header .bg-white\/10,
-header button.text-white,
-header [class*="text-white"] {
-    color: #525f7f !important;
-}
-header .bg-white\/20,
-header .bg-white\/10 {
-    background-color: rgba(0, 0, 0, 0.06) !important;
-    border-color: rgba(0, 0, 0, 0.05) !important;
-}
-header .bg-white\/20:hover,
-header .bg-white\/10:hover {
-    background-color: rgba(0, 0, 0, 0.1) !important;
-}
-.dark header .bg-white\/20,
-.dark header .bg-white\/10,
-.dark header button.text-white,
-.dark header [class*="text-white"] {
-    color: #a0aec0 !important;
-}
-.dark header .bg-white\/20,
-.dark header .bg-white\/10 {
-    background-color: rgba(255, 255, 255, 0.08) !important;
-}
-.dark header .bg-white\/20:hover,
-.dark header .bg-white\/10:hover {
-    background-color: rgba(255, 255, 255, 0.12) !important;
-}
-header svg {
-    color: #525f7f !important;
-}
-.dark header svg {
-    color: #a0aec0 !important;
-}
-
-/* 头栏内所有按钮 hover 统一适配透明背景 */
-header button:hover {
-    background-color: rgba(0, 0, 0, 0.06) !important;
-}
-.dark header button:hover {
-    background-color: rgba(255, 255, 255, 0.08) !important;
-}
-
-/* 4.8 经典指示角标与控制组件 */
-span.bg-white\/25 {
-    background-color: rgba(255, 255, 255, 0.18) !important;
-    border: 1px solid rgba(255, 255, 255, 0.35) !important;
-    border-radius: 4px !important;
-    padding: 4px 10px !important;
-    font-size: 11px !important;
-    font-weight: bold !important;
-    letter-spacing: 0.5px !important;
-    text-transform: uppercase !important;
-}
-
-.band-pill {
-    border-radius: 4px !important;
-    border: 1px solid #cbd5e0 !important;
-    background-color: #ffffff !important;
-    color: #475569 !important;
-    font-size: 13px !important;
-    font-weight: 600 !important;
-    padding: 8px 12px !important;
-    transition: all 0.15s ease !important;
-}
-
-.dark .band-pill {
-    background-color: #1e293b !important;
-    border: 1px solid rgba(255, 255, 255, 0.12) !important;
-    color: #e2e8f0 !important;
-}
-
-.band-pill.active,
-.band-pill[class*="active"] {
-    background: linear-gradient(135deg, #5e72e4 0%, #825ee4 100%) !important;
-    border-color: #5e72e4 !important;
-    color: #ffffff !important;
-    box-shadow: 0 4px 10px rgba(94, 114, 228, 0.2) !important;
-}
-
-/* 4.9 标准扁平及渐变按钮 */
-.bg-indigo-600,
-button.bg-indigo-600 {
-    background: linear-gradient(135deg, #5e72e4 0%, #7c5ee4 100%) !important;
-    border-radius: 4px !important;
-    border: none !important;
-    font-weight: 600 !important;
-    color: #ffffff !important;
-}
-
-.bg-indigo-600:hover,
-button.bg-indigo-600:hover {
-    background: linear-gradient(135deg, #4b61e0 0%, #6f4fe0 100%) !important;
-}
-
-/* 4.10 警告与危险级别按钮的渐变美化 */
-.bg-red-600,
-button.bg-red-600 {
-    background: linear-gradient(135deg, #f5365c 0%, #f56036 100%) !important;
-    border: none !important;
-    font-weight: 600 !important;
-}
-
-.bg-red-600:hover,
-button.bg-red-600:hover {
-    background: linear-gradient(135deg, #ec254c 0%, #e04a20 100%) !important;
-}
-
-.bg-yellow-600,
-button.bg-yellow-600,
-.bg-amber-600,
-button.bg-amber-600 {
-    background: linear-gradient(135deg, #fb6340 0%, #fbb140 100%) !important;
-    border: none !important;
-    font-weight: 600 !important;
-}
-
-.bg-yellow-600:hover,
-button.bg-yellow-600:hover,
-.bg-amber-600:hover,
-button.bg-amber-600:hover {
-    background: linear-gradient(135deg, #f0502a 0%, #eba02e 100%) !important;
-}
-
-/* 4.11 中性灰色按钮 */
-button.bg-slate-100,
-.bg-slate-100 {
-    background-color: #f7fafc !important;
-    border: 1px solid #e2e8f0 !important;
-    color: #4a5568 !important;
-}
-
-.dark button.bg-slate-100,
-.dark .bg-slate-100,
-button.dark\:bg-slate-800\/80 {
-    background-color: #202737 !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    color: #cbd5e0 !important;
-}
-
-/* 4.12 信号进度条轨道美化 */
-div.bg-slate-100,
-div.dark\:bg-slate-800\/80 {
-    background-color: #e9ecef !important;
-    height: 6px !important;
-    border-radius: 3px !important;
-}
-
-.dark div.bg-slate-100,
-.dark div.dark\:bg-slate-800\/80 {
-    background-color: #2c323f !important;
-}
-
-#rsrq_bar,
-#rsrp_bar,
-#sinr_bar {
-    border-radius: 3px !important;
-}
-
-/* 4.13 折叠底盘抽屉 */
-details#dev_specs_details {
-    border-radius: 4px !important;
-}
-
-details#dev_specs_details summary {
-    background-color: #fafbfc !important;
-    border-bottom: 1px solid #e2e8f0 !important;
-}
-
-.dark details#dev_specs_details summary {
-    background-color: #1a1f2c !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-}
-
-/* 4.14 扫频表格全局对齐 */
-table {
-    border-collapse: collapse !important;
-    width: 100% !important;
-}
-
-th {
-    background-color: #fafbfc !important;
-    color: #8898aa !important;
-    font-size: 11px !important;
-    font-weight: 700 !important;
-    letter-spacing: 1px !important;
-    text-transform: uppercase !important;
-    border-bottom: 1px solid #e2e8f0 !important;
-    padding: 12px 16px !important;
-}
-
-.dark th {
-    background-color: #1a1f2c !important;
-    color: #a0aec0 !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-}
-
-td {
-    padding: 12px 16px !important;
-    font-size: 13px !important;
-    border-bottom: 1px solid #e2e8f0 !important;
-}
-
-.dark td {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
-}
-
-tr:hover td {
-    background-color: #f8f9fe !important;
-}
-
-.dark tr:hover td {
-    background-color: rgba(255, 255, 255, 0.02) !important;
-}
-
-/* 4.15 终端控制台与系统调试输出 — Argon 深蓝黑质感 */
-#console_output,
-#diag_output,
-#settings_log {
-    background-color: #111723 !important;
+/* 控制台/日志 — 深黑背景 */
+#console_output, #diag_output, #settings_log {
+    background-color: #0d1117 !important;
     border: 1px solid rgba(255, 255, 255, 0.06) !important;
     font-family: 'Fira Code', 'Consolas', 'SFMono-Regular', 'Menlo', monospace !important;
     border-radius: 10px !important;
-    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.25) !important;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3) !important;
     line-height: 1.6 !important;
     font-size: 13px !important;
     padding: 16px !important;
-}
-
-#console_output,
-#diag_output {
     color: #38bdf8 !important;
 }
-
-.dark #console_output,
-.dark #diag_output,
-.dark #settings_log {
-    background-color: #0a0e16 !important;
-    border: 1px solid rgba(255, 255, 255, 0.04) !important;
+.dark #console_output, .dark #diag_output, .dark #settings_log {
+    background-color: #080b14 !important;
 }
 
-#console_output div.text-indigo-600,
-#console_output div.dark\:text-indigo-400,
-#console_output .text-indigo-600,
-#console_output .dark\:text-indigo-400 {
-    color: #34d399 !important;
-}
-
-/* 4.16 顶层4张基础指标卡片悬空及内衬优化 */
-div.min-h-\[110px\] {
-    background-color: #ffffff !important;
-    border: 1px solid rgba(226, 232, 240, 0.7) !important;
-    box-shadow: 0 15px 35px rgba(50, 50, 93, 0.04), 0 5px 15px rgba(0, 0, 0, 0.02) !important;
-    border-radius: 16px !important;
-    padding: 18px 22px !important;
-    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out !important;
-}
-
-.dark div.min-h-\[110px\] {
-    background-color: #151922 !important;
-    border: 1px solid rgba(255, 255, 255, 0.06) !important;
-    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2), 0 5px 15px rgba(0, 0, 0, 0.1) !important;
-}
-
-div.min-h-\[110px\]:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 20px 40px rgba(50, 50, 93, 0.08), 0 8px 20px rgba(0, 0, 0, 0.05) !important;
-}
-
-.dark div.min-h-\[110px\]:hover {
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3) !important;
-}
-
-div.min-h-\[110px\] span.text-xs {
-    font-size: 11px !important;
-    font-weight: 600 !important;
-    letter-spacing: 0.5px;
-    color: #8898aa !important;
-}
-
-.dark div.min-h-\[110px\] span.text-xs {
-    color: #90a0b5 !important;
-}
-
-/* 4.17 复制气泡 */
-#copy_toast {
-    background-color: #5e72e4 !important;
-    border-radius: 4px !important;
-    box-shadow: 0 4px 20px rgba(94, 114, 228, 0.3) !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    font-weight: 500 !important;
-}
-
-/* 4.18 短信会话列表元素 */
-.sms-item {
-    border-bottom: 1px solid rgba(0, 0, 0, 0.04) !important;
-    padding: 12px 16px !important;
-    transition: all 0.15s ease !important;
-}
-
-.dark .sms-item {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
-}
-
-.sms-item:hover {
-    background-color: rgba(94, 114, 228, 0.05) !important;
-}
-
-.dark .sms-item:hover {
-    background-color: rgba(130, 94, 228, 0.1) !important;
-}
-
-/* 4.19 全局表单输入框 Argon 聚焦色 */
-input[type="text"],
-input[type="password"],
-input[type="number"],
-input[type="tel"],
-select,
-textarea {
-    background-color: #ffffff !important;
-    border: 1px solid #dee2e6 !important;
-    color: #2d3748 !important;
-    border-radius: 4px !important;
-    padding: 8px 12px !important;
-    font-size: 13px !important;
-    transition: all 0.2s ease !important;
-    box-shadow: 0 1px 3px rgba(50, 50, 93, 0.05) !important;
-}
-
-input[type="text"]:focus,
-input[type="password"]:focus,
-input[type="number"]:focus,
-input[type="tel"]:focus,
-select:focus,
-textarea:focus {
-    border-color: #5e72e4 !important;
-    box-shadow: 0 0 0 3px rgba(94, 114, 228, 0.2) !important;
-    outline: none !important;
-}
-
-.dark input[type="text"],
-.dark input[type="password"],
-.dark input[type="number"],
-.dark input[type="tel"],
-.dark select,
-.dark textarea {
-    background-color: #1a202c !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    color: #e2e8f0 !important;
-    box-shadow: none !important;
-}
-
-.dark input[type="text"]:focus,
-.dark input[type="password"]:focus,
-.dark input[type="number"]:focus,
-.dark input[type="tel"]:focus,
-.dark select:focus,
-.dark textarea:focus {
-    border-color: #825ee4 !important;
-    box-shadow: 0 0 0 3px rgba(130, 94, 228, 0.3) !important;
-}
-
-/* ============================================================================
-   5. Argon 核心组件样式 (CSS Variables, Glassmorphism, Toggle Switch, Scrollbar)
-   ============================================================================ */
-
-/* 5.1 Argon 主题 CSS 变量 — 对齐 luci-theme-argon 色盘 */
-:root {
-    --argon-primary: #5e72e4;
-    --argon-primary-hover: #435ebe;
-    --argon-primary-glow: rgba(94, 114, 228, 0.25);
-    --argon-bg: #f8f9fe;
-    --argon-card-bg: rgba(255, 255, 255, 0.75);
-    --argon-card-border: rgba(255, 255, 255, 0.5);
-    --argon-text: #32325d;
-    --argon-text-muted: #8898aa;
-    --argon-card-shadow: 0 15px 35px rgba(50, 50, 93, 0.05), 0 5px 15px rgba(0, 0, 0, 0.03);
-    --argon-blur: 12px;
-}
-
-.dark {
-    --argon-bg: #101726;
-    --argon-card-bg: rgba(26, 34, 52, 0.7);
-    --argon-card-border: rgba(255, 255, 255, 0.06);
-    --argon-text: #f6f9fc;
-    --argon-text-muted: #a0aec0;
-    --argon-card-shadow: 0 15px 35px rgba(0, 0, 0, 0.3), 0 5px 15px rgba(0, 0, 0, 0.2);
-}
-
-/* 5.2 毛玻璃拟态卡片 */
-.argon-card {
-    background-color: var(--argon-card-bg) !important;
-    backdrop-filter: blur(var(--argon-blur)) !important;
-    -webkit-backdrop-filter: blur(var(--argon-blur)) !important;
-    border: 1px solid var(--argon-card-border) !important;
-    border-radius: 12px !important;
-    box-shadow: var(--argon-card-shadow) !important;
-    padding: 1.5rem !important;
-    transition: transform 0.3s ease, box-shadow 0.3s ease, background-color 0.3s ease !important;
-}
-
-.argon-card:hover {
-    transform: translateY(-2px) !important;
-    box-shadow: 0 20px 40px rgba(50, 50, 93, 0.08), 0 8px 20px rgba(0, 0, 0, 0.05) !important;
-}
-
-/* 5.3 Argon 风格开关 (Toggle Switch) */
+/* Argon 开关 */
 .argon-switch {
     position: relative;
     display: inline-block;
@@ -686,122 +140,53 @@ textarea:focus {
     height: 24px;
     flex-shrink: 0;
 }
-
-.argon-switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-    position: absolute;
-}
-
+.argon-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
 .argon-switch .slider {
-    position: absolute;
-    cursor: pointer;
-    inset: 0;
-    background-color: rgba(0, 0, 0, 0.1);
-    border-radius: 34px;
+    position: absolute; cursor: pointer; inset: 0;
+    background-color: rgba(0, 0, 0, 0.1); border-radius: 34px;
     transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
-
-.dark .argon-switch .slider {
-    background-color: rgba(255, 255, 255, 0.1);
-}
-
+.dark .argon-switch .slider { background-color: rgba(255, 255, 255, 0.1); }
 .argon-switch .slider::before {
-    position: absolute;
-    content: "";
-    height: 18px;
-    width: 18px;
-    left: 3px;
-    bottom: 3px;
-    background-color: #ffffff;
-    border-radius: 50%;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+    position: absolute; content: ""; height: 18px; width: 18px;
+    left: 3px; bottom: 3px; background-color: #fff;
+    border-radius: 50%; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
     transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
+.argon-switch input:checked + .slider { background-color: #5e72e4; }
+.argon-switch input:checked + .slider::before { transform: translateX(20px); }
 
-.argon-switch input:checked + .slider {
-    background-color: var(--argon-primary);
+/* 全局滚动条 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.12); border-radius: 10px; }
+.dark ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.25); }
+.dark ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
+
+/* 复制提示气泡 */
+#copy_toast {
+    background: linear-gradient(135deg, #5e72e4, #825ee4) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 4px 20px rgba(94, 114, 228, 0.3) !important;
 }
 
-.argon-switch input:checked + .slider::before {
-    transform: translateX(20px);
-}
-
-/* 5.4 Argon 风格输入框 */
-.argon-input {
-    width: 100% !important;
-    padding: 10px 16px !important;
-    background-color: rgba(255, 255, 255, 0.85) !important;
-    border: 1px solid var(--argon-card-border) !important;
-    border-radius: 6px !important;
-    color: var(--argon-text) !important;
-    outline: none !important;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
-}
-
-.dark .argon-input {
-    background-color: rgba(16, 23, 38, 0.6) !important;
-}
-
-.argon-input:focus {
-    border-color: var(--argon-primary) !important;
-    box-shadow: 0 0 0 3px var(--argon-primary-glow) !important;
-    background-color: #ffffff !important;
-}
-
-.dark .argon-input:focus {
-    background-color: rgba(16, 23, 38, 0.9) !important;
-}
-
-/* 5.5 沉浸式登录背景罩 */
+/* ============================================================
+   登录页专用背景（几何装饰）
+   ============================================================ */
 .login-wallpaper-container {
-    position: fixed;
-    inset: 0;
-    z-index: -1;
-    overflow: hidden;
-    background: linear-gradient(135deg, #5e72e4, #111726);
+    position: fixed; inset: 0; z-index: -1; overflow: hidden;
+    background: linear-gradient(135deg, #5e72e4, #111726, #0d111a);
 }
-
-.login-wallpaper-container::after {
+.login-wallpaper-container::before {
     content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(to bottom, rgba(16, 23, 38, 0.2), rgba(16, 23, 38, 0.6));
+    position: absolute; top: -20%; right: -10%; width: 60%; height: 80%;
+    background: radial-gradient(circle, rgba(94, 114, 228, 0.15) 0%, transparent 70%);
     pointer-events: none;
 }
-
-.login-bg-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    filter: blur(2px);
-    transform: scale(1.05);
-}
-
-/* 5.6 极简纤细滚动条 */
-::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-}
-
-::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.12);
-    border-radius: 10px;
-}
-
-.dark ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.12);
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 0, 0, 0.25);
-}
-
-.dark ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.25);
+.login-wallpaper-container::after {
+    content: '';
+    position: absolute; bottom: -30%; left: -10%; width: 70%; height: 90%;
+    background: radial-gradient(circle, rgba(130, 94, 228, 0.12) 0%, transparent 70%);
+    pointer-events: none;
 }

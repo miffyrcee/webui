@@ -13,9 +13,13 @@ use axum::{
 };
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
+use base64::Engine;
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use rand::Rng;
+
+type HmacSha256 = Hmac<Sha256>;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -62,13 +66,11 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
 // JWT Authentication Definition
 // ============================================================================
 
-use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
-
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
     sub: String,
-    exp: usize,
-    iat: usize,
+    exp: u64,
+    iat: u64,
 }
 
 #[derive(Deserialize)]
@@ -103,28 +105,59 @@ fn extract_token_from_headers(headers: &HeaderMap) -> Option<String> {
         })
 }
 
-/// 标准 HS256 JWT 编码（使用 jsonwebtoken 库）
+/// HS256 JWT 编码（纯 Rust，无 C 依赖）
 fn jwt_encode(claims: &Claims, secret: &str) -> Result<String, String> {
-    encode(
-        &Header::default(),
-        claims,
-        &EncodingKey::from_secret(secret.as_bytes()),
-    )
-    .map_err(|e| format!("JWT 生成失败: {}", e))
+    let header = serde_json::json!({"alg": "HS256", "typ": "JWT"});
+    let header_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(header.to_string());
+    let payload = serde_json::to_string(claims).map_err(|e| e.to_string())?;
+    let payload_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload);
+    let signing_input = format!("{}.{}", header_b64, payload_b64);
+
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).map_err(|e| e.to_string())?;
+    mac.update(signing_input.as_bytes());
+    let sig_b64 =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+
+    Ok(format!("{}.{}", signing_input, sig_b64))
 }
 
-/// 标准 HS256 JWT 解码与自动防篡改/过期校验
+/// HS256 JWT 解码与验证（纯 Rust，无 C 依赖）
 fn jwt_decode(token: &str, secret: &str) -> Result<Claims, String> {
-    let mut validation = Validation::default();
-    validation.validate_exp = true;
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return Err("无效的 JWT 令牌格式".to_string());
+    }
 
-    decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(secret.as_bytes()),
-        &validation,
-    )
-    .map(|data| data.claims)
-    .map_err(|e| format!("JWT 校验失败: {}", e))
+    let signing_input = format!("{}.{}", parts[0], parts[1]);
+
+    let sig_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[2])
+        .map_err(|e| format!("Base64 解码失败: {}", e))?;
+
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).map_err(|e| e.to_string())?;
+    mac.update(signing_input.as_bytes());
+    mac.verify_slice(&sig_bytes)
+        .map_err(|_| "JWT 签名验证失败".to_string())?;
+
+    let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[1])
+        .map_err(|e| format!("Base64 解码失败: {}", e))?;
+
+    let claims: Claims =
+        serde_json::from_slice(&payload_bytes).map_err(|e| e.to_string())?;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    if claims.exp < now {
+        return Err("JWT 令牌已过期".to_string());
+    }
+
+    Ok(claims)
 }
 
 /// 验证 JWT Token 是否有效
@@ -1387,7 +1420,7 @@ async fn login_post_handler(
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_secs() as usize;
+            .as_secs();
 
         let claims = Claims {
             sub: "admin".to_string(),

@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 use std::fs;
 use std::collections::{HashMap, VecDeque};
 use std::sync::OnceLock;
+use std::sync::Mutex;
 use std::{env, sync::Arc};
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 
@@ -66,6 +67,74 @@ fn get_soc_temperature() -> Option<String> {
         }
     }
     None
+}
+
+/// CPU 统计快照，用于计算两次读取间的使用率差值
+struct CpuSnapshot {
+    total: u64,
+    idle: u64,
+}
+
+static PREV_CPU: Mutex<Option<CpuSnapshot>> = Mutex::new(None);
+
+/// 直接读取 /proc/stat 计算 CPU 使用率（%），零堆内存开销
+fn get_cpu_usage() -> Option<String> {
+    let content = fs::read_to_string("/proc/stat").ok()?;
+    let first_line = content.lines().next()?;
+    if !first_line.starts_with("cpu ") {
+        return None;
+    }
+    let nums: Vec<u64> = first_line
+        .split_whitespace()
+        .skip(1)
+        .filter_map(|s| s.parse::<u64>().ok())
+        .collect();
+    if nums.len() < 4 {
+        return None;
+    }
+    let total: u64 = nums.iter().sum();
+    let idle = nums[3];
+
+    let mut prev = PREV_CPU.lock().ok()?;
+    match prev.as_ref() {
+        Some(prev_snap) => {
+            let total_delta = total.wrapping_sub(prev_snap.total);
+            let idle_delta = idle.wrapping_sub(prev_snap.idle);
+            *prev = Some(CpuSnapshot { total, idle });
+            if total_delta > 0 {
+                let usage = (total_delta - idle_delta) as f64 / total_delta as f64 * 100.0;
+                Some(format!("{:.1}%", usage))
+            } else {
+                None
+            }
+        }
+        None => {
+            *prev = Some(CpuSnapshot { total, idle });
+            None
+        }
+    }
+}
+
+/// 直接读取 /proc/meminfo 计算内存使用率，零堆内存开销
+fn get_memory_usage() -> Option<String> {
+    let content = fs::read_to_string("/proc/meminfo").ok()?;
+    let mut mem_total = 0u64;
+    let mut mem_avail = 0u64;
+    for line in content.lines() {
+        if line.starts_with("MemTotal:") {
+            mem_total = line.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+        } else if line.starts_with("MemAvailable:") {
+            mem_avail = line.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+        }
+    }
+    if mem_total == 0 || mem_avail == 0 {
+        return None;
+    }
+    let used = mem_total.saturating_sub(mem_avail);
+    let pct = used as f64 / mem_total as f64 * 100.0;
+    let used_mb = used as f64 / 1024.0;
+    let total_mb = mem_total as f64 / 1024.0;
+    Some(format!("{:.1}% ({:.0}M/{:.0}M)", pct, used_mb, total_mb))
 }
 
 // ============================================================================
@@ -333,6 +402,8 @@ struct AppState {
 struct GlobalTelemetry {
     firmware_version: Option<String>,
     temperature: Option<String>,
+    cpu_usage: Option<String>,
+    memory_usage: Option<String>,
     sim_status: Option<String>,
     signal_percentage: Option<String>,
     internet_connection: Option<String>,
@@ -371,6 +442,8 @@ impl GlobalTelemetry {
 
         Self {
             temperature: keep_valid(&t.temperature, &g.temperature),
+            cpu_usage: g.cpu_usage.clone(),
+            memory_usage: g.memory_usage.clone(),
             sim_status: keep_valid(&t.sim_status, &g.sim_status),
             signal_percentage: keep_valid(&t.signal_percentage, &g.signal_percentage),
             internet_connection: keep_valid(&t.internet_connection, &g.internet_connection),
@@ -1723,6 +1796,8 @@ async fn hardware_task(
                     });
 
                     let uptime_mins = get_uptime_mins();
+                    let cpu_usage = get_cpu_usage();
+                    let memory_usage = get_memory_usage();
                     let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
                     {
@@ -1741,6 +1816,8 @@ async fn hardware_task(
                             global.apn = apn;
                             global.internet_connection = Some("Disconnected".to_string());
                             global.uptime = Some(format!("{} minutes", uptime_mins));
+                            global.cpu_usage = cpu_usage;
+                            global.memory_usage = memory_usage;
                             global.updated = Some(updated_str);
                         } else {
                             *global = GlobalTelemetry::from_telemetry_and_global(
@@ -1748,6 +1825,12 @@ async fn hardware_task(
                                 Some(format!("{} minutes", uptime_mins)),
                                 Some(updated_str),
                             );
+                            if global.cpu_usage.is_none() {
+                                global.cpu_usage = cpu_usage;
+                            }
+                            if global.memory_usage.is_none() {
+                                global.memory_usage = memory_usage;
+                            }
                         }
 
                         // 预序列化为 JSON 字符串并广播（零重复序列化损耗）
@@ -1760,10 +1843,14 @@ async fn hardware_task(
                 } else if active {
                     push_log("WARN", "Poll", "串口忙或正在执行慢命令，跳过当次采集，复用缓存");
                     let uptime_mins = get_uptime_mins();
+                    let cpu_usage = get_cpu_usage();
+                    let memory_usage = get_memory_usage();
                     let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
                     let mut global = state.global.write().await;
                     global.uptime = Some(format!("{} minutes", uptime_mins));
+                    global.cpu_usage = cpu_usage;
+                    global.memory_usage = memory_usage;
                     global.updated = Some(updated_str);
 
                     let json_str = serialize_global(&global, "delta");

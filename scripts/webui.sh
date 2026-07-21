@@ -10,6 +10,9 @@ Description=webui.service
 After=network.target port_bridge.service dnsmasq.service lighttpd.service
 
 [Service]
+Environment="WEBUI_USERNAME=admin"
+Environment="WEBUI_PASSWORD=admin123"
+Environment="JWT_SECRET=`openssl rand -hex 32`"
 ExecStart=/opt/quectel-webui
 KillSignal=SIGHUP
 Restart=on-failure

@@ -5,6 +5,7 @@
 
 /* 指定扫描源 */
 @source "./index.html";
+@source "./login.html";
 
 /* 2. 注册系统原生的 Argon 经典渐变主色（#5e72e4） */
 @theme {

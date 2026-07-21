@@ -1,128 +1,439 @@
 <!DOCTYPE html>
-<html lang="zh-CN" class="h-full">
+<html lang="zh-CN" class="dark">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RM520N WebUI - 登录</title>
+    <title>登录 - RM520N 5G WebUI</title>
     <link rel="stylesheet" href="/style.css">
-    <meta name="theme-color" content="#5e72e4">
+    <meta name="theme-color" content="#f8f9fe" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#0d111a" media="(prefers-color-scheme: dark)">
+    <style>
+        /* 1. 还原经典 Argon 深色沉浸背景 */
+        html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            background: #0d111a !important;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            overflow: hidden !important;
+            user-select: none !important;
+        }
+
+        /* 2. 居中 Argon 精致卡片 (固定 400px 最佳视效宽度) */
+        .argon-login-card {
+            width: 90% !important;
+            max-width: 400px !important;
+            background: #161b26 !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            border-radius: 16px !important;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 40px rgba(94, 114, 228, 0.12) !important;
+            padding: 36px 32px !important;
+            box-sizing: border-box !important;
+            position: relative !important;
+            z-index: 10 !important;
+        }
+
+        /* 3. 经典 Argon Brand Logo Header */
+        .argon-logo-header {
+            text-align: center !important;
+            margin-bottom: 28px !important;
+        }
+
+        .argon-title-wrap {
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 8px !important;
+            margin-bottom: 6px !important;
+        }
+
+        .argon-title-text {
+            font-size: 26px !important;
+            font-weight: 900 !important;
+            color: #5e72e4 !important;
+            letter-spacing: 1px !important;
+        }
+
+        .argon-badge {
+            background: rgba(94, 114, 228, 0.15) !important;
+            border: 1px solid rgba(94, 114, 228, 0.3) !important;
+            color: #825ee4 !important;
+            font-size: 10px !important;
+            font-weight: 700 !important;
+            padding: 2px 6px !important;
+            border-radius: 4px !important;
+            letter-spacing: 1px !important;
+        }
+
+        .argon-subtitle {
+            font-size: 11px !important;
+            color: #8898aa !important;
+            font-weight: 600 !important;
+            letter-spacing: 1.5px !important;
+            text-transform: uppercase !important;
+            margin: 0 !important;
+        }
+
+        /* 4. 表单与高对比度输入框 */
+        .argon-form-group {
+            margin-bottom: 20px !important;
+        }
+
+        .argon-label {
+            display: block !important;
+            font-size: 12px !important;
+            font-weight: 600 !important;
+            color: #ced4da !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.8px !important;
+            margin-bottom: 8px !important;
+        }
+
+        .argon-input {
+            width: 100% !important;
+            box-sizing: border-box !important;
+            background-color: #1f2636 !important;
+            border: 1px solid #2d374d !important;
+            color: #ffffff !important;
+            border-radius: 10px !important;
+            padding: 12px 14px !important;
+            font-size: 14px !important;
+            outline: none !important;
+            transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
+            box-shadow: none !important;
+        }
+
+        .argon-input:focus {
+            border-color: #5e72e4 !important;
+            background-color: #242c3f !important;
+            box-shadow: 0 0 0 3px rgba(94, 114, 228, 0.25) !important;
+        }
+
+        .argon-input::placeholder {
+            color: #525f7f !important;
+        }
+
+        /* 5. 经典 Argon 渐变解锁按钮 (Gradient Button) */
+        .argon-btn {
+            width: 100% !important;
+            height: 46px !important;
+            background: linear-gradient(135deg, #5e72e4 0%, #825ee4 100%) !important;
+            border: none !important;
+            border-radius: 10px !important;
+            color: #ffffff !important;
+            font-size: 14px !important;
+            font-weight: 700 !important;
+            letter-spacing: 2px !important;
+            cursor: pointer !important;
+            box-shadow: 0 4px 15px rgba(94, 114, 228, 0.35) !important;
+            transition: background-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease !important;
+            margin-top: 10px !important;
+        }
+
+        .argon-btn:hover {
+            background: linear-gradient(135deg, #4b61e0 0%, #6f4fe0 100%) !important;
+            box-shadow: 0 6px 20px rgba(94, 114, 228, 0.5) !important;
+            transform: translateY(-1px) !important;
+        }
+
+        .argon-btn:active {
+            transform: translateY(0) !important;
+        }
+
+        .argon-btn:disabled {
+            opacity: 0.6 !important;
+            cursor: not-allowed !important;
+        }
+
+        /* 6. 错误提示框 */
+        .argon-error {
+            background: rgba(245, 54, 92, 0.12) !important;
+            border: 1px solid rgba(245, 54, 92, 0.3) !important;
+            color: #f5365c !important;
+            font-size: 12px !important;
+            border-radius: 8px !important;
+            padding: 10px !important;
+            text-align: center !important;
+            margin-bottom: 16px !important;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* 7. 页脚底栏 */
+        .argon-footer {
+            margin-top: 24px !important;
+            padding-top: 18px !important;
+            border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
+            font-size: 11px !important;
+            color: #8898aa !important;
+            text-align: center !important;
+            line-height: 1.6 !important;
+        }
+
+        .argon-footer code {
+            color: #825ee4 !important;
+            font-family: monospace !important;
+        }
+
+        /* 8. 白天/日光模式覆盖 (移除 .dark 类时激活) */
+        html:not(.dark) body {
+            background: #f4f5f7 !important;
+        }
+
+        html:not(.dark) .argon-login-card {
+            background: #ffffff !important;
+            border-color: rgba(0, 0, 0, 0.08) !important;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.08), 0 0 40px rgba(94, 114, 228, 0.06) !important;
+        }
+
+        html:not(.dark) .argon-title-text {
+            color: #5e72e4 !important;
+        }
+
+        html:not(.dark) .argon-badge {
+            background: rgba(94, 114, 228, 0.08) !important;
+            border-color: rgba(94, 114, 228, 0.2) !important;
+            color: #5e72e4 !important;
+        }
+
+        html:not(.dark) .argon-subtitle {
+            color: #8898aa !important;
+        }
+
+        html:not(.dark) .argon-label {
+            color: #525f7f !important;
+        }
+
+        html:not(.dark) .argon-input {
+            background-color: #ffffff !important;
+            border-color: #e2e8f0 !important;
+            color: #32325d !important;
+        }
+
+        html:not(.dark) .argon-input:focus {
+            border-color: #5e72e4 !important;
+            background-color: #ffffff !important;
+            box-shadow: 0 0 0 3px rgba(94, 114, 228, 0.15) !important;
+        }
+
+        html:not(.dark) .argon-input::placeholder {
+            color: #adb5bd !important;
+        }
+
+        html:not(.dark) .argon-footer {
+            border-top-color: rgba(0, 0, 0, 0.06) !important;
+            color: #8898aa !important;
+        }
+
+        html:not(.dark) .argon-footer code {
+            color: #5e72e4 !important;
+        }
+
+        /* 9. 主题切换按钮样式 (右上角固定定位) */
+        #theme_toggle {
+            position: fixed !important;
+            top: 20px !important;
+            right: 20px !important;
+            z-index: 100 !important;
+            padding: 8px !important;
+            border-radius: 8px !important;
+            background: rgba(255, 255, 255, 0.08) !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            color: #cbd5e0 !important;
+            cursor: pointer !important;
+            transition: background-color 0.2s ease, color 0.2s ease !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+        }
+
+        #theme_toggle:hover {
+            background: rgba(255, 255, 255, 0.15) !important;
+            color: #ffffff !important;
+        }
+
+        html:not(.dark) #theme_toggle {
+            background: rgba(0, 0, 0, 0.05) !important;
+            border-color: rgba(0, 0, 0, 0.08) !important;
+            color: #8898aa !important;
+        }
+
+        html:not(.dark) #theme_toggle:hover {
+            background: rgba(0, 0, 0, 0.1) !important;
+            color: #32325d !important;
+        }
+    </style>
 </head>
 
-<body class="bg-[#080a0f] text-slate-200 font-sans min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+<body>
 
-    <!-- 沉浸式 Argon 背景壁纸罩 -->
-    <div class="login-wallpaper-container"></div>
+    <!-- 主题日光/月光转换开关 (右上角固定) -->
+    <button id="theme_toggle" title="切换白天/夜晚模式">
+        <svg aria-hidden="true" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m12.728 12.728l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
+        </svg>
+        <svg aria-hidden="true" class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+        </svg>
+    </button>
 
-    <!-- 登录卡片 -->
-    <div class="w-full max-w-md argon-card relative z-10 border border-white/10 shadow-2xl rounded-2xl p-8 bg-[#151922]/90 backdrop-blur-xl">
+    <!-- 登录主卡片 -->
+    <div class="argon-login-card">
 
-        <!-- Branding 标识 -->
-        <div class="text-center mb-8">
-            <div class="inline-flex items-center space-x-3 mb-2">
-                <span class="text-3xl font-black tracking-wider text-indigo-500">Argon</span>
-                <span class="text-xs bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-2 py-0.5 rounded font-bold tracking-wider">RM520N</span>
+        <!-- Header -->
+        <div class="argon-logo-header">
+            <div class="argon-title-wrap">
+                <span class="argon-title-text">Argon</span>
+                <span class="argon-badge">RM520N</span>
             </div>
-            <p class="text-xs text-slate-400 tracking-wider uppercase">5G NR Cellular Control Center</p>
+            <p class="argon-subtitle">5G NR CELLULAR CONTROL CENTER</p>
         </div>
 
-        <!-- 错误提示框 -->
-        <div id="error_alert" class="hidden mb-6 p-3 bg-red-500/10 border border-red-500/30 text-red-400 text-xs rounded-lg text-center font-medium">
-            密码错误，请重新输入
-        </div>
-
-        <!-- 登录表单 -->
-        <form id="login_form" class="space-y-5" onsubmit="handleLogin(event)">
-            <div class="space-y-1.5">
-                <label for="username" class="block text-xs font-semibold text-slate-300 uppercase tracking-wider">用户名 (Username)</label>
-                <div class="relative">
-                    <input id="username" type="text" required placeholder="请输入用户名..."
-                        class="argon-input w-full bg-[#0c0f16]/80 border border-slate-700/80 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all">
-                </div>
-            </div>
-            <div class="space-y-1.5">
-                <label for="password" class="block text-xs font-semibold text-slate-300 uppercase tracking-wider">密码 (Password)</label>
-                <div class="relative">
-                    <input id="password" type="password" required placeholder="请输入密码..."
-                        class="argon-input w-full bg-[#0c0f16]/80 border border-slate-700/80 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all">
-                </div>
+        <!-- 表单 -->
+        <form id="login_form" onsubmit="handleLogin(event)">
+            <div class="argon-form-group">
+                <label for="username" class="argon-label">用户名 (USERNAME)</label>
+                <input id="username" type="text" value="admin" required placeholder="请输入用户名" class="argon-input" />
             </div>
 
-            <button type="submit" id="submit_btn"
-                class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl text-sm transition-all duration-200 active:scale-95 shadow-lg shadow-indigo-600/30 cursor-pointer">
-                解 锁 进 入
-            </button>
+            <div class="argon-form-group">
+                <label for="password" class="argon-label">密码 (PASSWORD)</label>
+                <input id="password" type="password" required placeholder="••••••••" class="argon-input" />
+            </div>
+
+            <!-- 错误提示 -->
+            <div id="error_msg" class="argon-error hidden"></div>
+
+            <!-- 登录按钮 -->
+            <button id="login_btn" type="submit" class="argon-btn">解 锁 进 入</button>
         </form>
 
-        <div class="mt-8 text-center border-t border-slate-800/80 pt-4">
-            <span class="text-[11px] text-slate-500">凭证通过环境变量 <code class="text-indigo-400">WEBUI_USERNAME</code> / <code class="text-indigo-400">WEBUI_PASSWORD</code> 配置，用户名与密码均加密传输</span>
+        <!-- 页脚 -->
+        <div class="argon-footer">
+            凭证通过环境变量 <code>WEBUI_USERNAME</code> / <code>WEBUI_PASSWORD</code> 配置<br>
+            用户名与密码均加密传输
         </div>
     </div>
 
+    <!-- 质询-响应（Challenge-Response）登录验证脚本 -->
     <script>
-        // 浏览器原生 SHA-256 哈希（Web Crypto API）
-        async function sha256(message) {
-            const msgBuffer = new TextEncoder().encode(message);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
+        async function sha256(str) {
+            const buf = new TextEncoder().encode(str);
+            const hashBuf = await crypto.subtle.digest('SHA-256', buf);
+            const hashArray = Array.from(new Uint8Array(hashBuf));
             return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
         }
 
         async function handleLogin(e) {
             e.preventDefault();
+
             const usernameInput = document.getElementById('username');
             const passwordInput = document.getElementById('password');
-            const submitBtn = document.getElementById('submit_btn');
-            const errorAlert = document.getElementById('error_alert');
+            const submitBtn = document.getElementById('login_btn');
+            const errorBox = document.getElementById('error_msg');
 
             const username = usernameInput.value.trim();
-            const password = passwordInput.value.trim();
-            if (!username || !password) return;
+            const password = passwordInput.value;
+
+            if (!username || !password) {
+                showError('请填写用户名和密码');
+                return;
+            }
+
+            // 检测浏览器安全上下文（crypto.subtle 仅 HTTPS 或 localhost 可用）
+            if (!crypto.subtle) {
+                showError('当前页面不在安全上下文中，请使用 HTTPS 或 localhost 访问');
+                return;
+            }
 
             submitBtn.disabled = true;
-            submitBtn.innerText = '正在验证凭证...';
-            errorAlert.classList.add('hidden');
+            submitBtn.innerText = '正在验证...';
+            hideError();
 
             try {
-                // 步骤 1: 向后端索要一次性动态随机数（Nonce）
-                const nonceRes = await fetch('/api/get_nonce');
-                if (!nonceRes.ok) throw new Error('获取随机数失败');
-                const { nonce } = await nonceRes.json();
+                // 1. 获取服务端一次性随机数 Nonce
+                const nonceResp = await fetch('/api/get_nonce');
+                if (!nonceResp.ok) throw new Error('无法获取服务端随机数');
+                const { nonce } = await nonceResp.json();
 
-                // 步骤 2: 前端本地计算哈希响应
-                // 公式: response = SHA256( nonce + username + SHA256(password) )
+                // 2. 计算 Challenge Response: SHA256(nonce + username + SHA256(password))
                 const passHash = await sha256(password);
-                const clientResponse = await sha256(nonce + username + passHash);
+                const combined = nonce + username + passHash;
+                const response = await sha256(combined);
 
-                // 步骤 3: 提交质询响应（密码永不上传）
-                const res = await fetch('/api/login', {
+                // 3. 提交登录暗号
+                const loginResp = await fetch('/api/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        username: username,
-                        nonce: nonce,
-                        response: clientResponse
-                    })
+                    body: JSON.stringify({ username, nonce, response })
                 });
 
-                const data = await res.json();
+                const result = await loginResp.json();
 
-                if (res.ok && data.success) {
+                if (loginResp.ok && result.success) {
                     window.location.href = '/';
                 } else {
-                    errorAlert.innerText = data.msg || '身份验证失败';
-                    errorAlert.classList.remove('hidden');
-                    passwordInput.value = '';
-                    passwordInput.focus();
+                    showError('用户名或密码错误');
                 }
             } catch (err) {
-                errorAlert.innerText = '网络请求失败，请检查服务状态';
-                errorAlert.classList.remove('hidden');
+                console.error(err);
+                showError('登录响应异常: ' + err.message);
             } finally {
                 submitBtn.disabled = false;
                 submitBtn.innerText = '解 锁 进 入';
             }
         }
+
+        function showError(msg) {
+            const errorBox = document.getElementById('error_msg');
+            if (errorBox) {
+                errorBox.innerText = msg;
+                errorBox.classList.remove('hidden');
+            }
+        }
+
+        function hideError() {
+            const errorBox = document.getElementById('error_msg');
+            if (errorBox) {
+                errorBox.classList.add('hidden');
+            }
+        }
+
+        // 白天/夜晚模式初始化
+        function initTheme() {
+            const html = document.documentElement;
+            const savedTheme = localStorage.getItem('theme');
+            const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+            if (savedTheme === 'dark' || (!savedTheme && systemPrefersDark)) {
+                html.classList.add('dark');
+            } else {
+                html.classList.remove('dark');
+            }
+
+            const themeBtn = document.getElementById('theme_toggle');
+            if (themeBtn) {
+                themeBtn.addEventListener('click', function () {
+                    if (html.classList.contains('dark')) {
+                        html.classList.remove('dark');
+                        localStorage.setItem('theme', 'light');
+                    } else {
+                        html.classList.add('dark');
+                        localStorage.setItem('theme', 'dark');
+                    }
+                });
+            }
+        }
+
+        // 页面加载时初始化主题
+        initTheme();
     </script>
 </body>
 

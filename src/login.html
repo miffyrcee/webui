@@ -8,6 +8,12 @@
     <link rel="stylesheet" href="/style.css">
     <meta name="theme-color" content="#f8f9fe" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#080b14" media="(prefers-color-scheme: dark)">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
     <style>
         html, body {
             margin: 0; padding: 0;
@@ -15,17 +21,68 @@
             display: flex; align-items: center; justify-content: center;
             overflow: hidden; user-select: none;
         }
+
+        /* 登录卡片基础与暗色样式修复 */
+        .argon-login-card {
+            width: 100%;
+            max-width: 400px;
+            padding: 2rem;
+            border-radius: 1.5rem;
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 40px rgba(94, 114, 228, 0.15);
+            transition: all 0.3s ease;
+        }
+
+        /* 亮色模式样式覆盖 */
+        html:not(.dark) body {
+            background: #f4f5f7;
+        }
+        html:not(.dark) .argon-login-card {
+            background: rgba(255, 255, 255, 0.85) !important;
+            border-color: rgba(0, 0, 0, 0.08) !important;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.08), 0 0 60px rgba(94, 114, 228, 0.08) !important;
+        }
+        html:not(.dark) .argon-login-card input {
+            background-color: #ffffff !important;
+            border-color: #e2e8f0 !important;
+            color: #1e293b !important;
+        }
+        html:not(.dark) .argon-login-card input:focus {
+            border-color: #5e72e4 !important;
+            box-shadow: 0 0 0 3px rgba(94, 114, 228, 0.15) !important;
+        }
+        html:not(.dark) .argon-login-card input::placeholder {
+            color: #94a3b8 !important;
+        }
+        html:not(.dark) .argon-login-card label {
+            color: #64748b !important;
+        }
+        html:not(.dark) .argon-login-card .border-t {
+            border-color: rgba(0, 0, 0, 0.06) !important;
+        }
+        html:not(.dark) #theme_toggle {
+            background: rgba(0, 0, 0, 0.05) !important;
+            border-color: rgba(0, 0, 0, 0.08) !important;
+            color: #64748b !important;
+        }
+        html:not(.dark) #theme_toggle:hover {
+            background: rgba(0, 0, 0, 0.1) !important;
+            color: #1e293b !important;
+        }
     </style>
 </head>
 
 <body class="font-sans">
 
-    <!-- Argon 几何渐变背景 -->
+    <!-- 背景几何渐变容器 -->
     <div class="login-wallpaper-container"></div>
 
     <!-- 主题切换按钮 -->
-    <button id="theme_toggle" title="切换白天/夜晚模式"
-        class="fixed top-5 right-5 z-50 p-2.5 rounded-xl bg-white/10 dark:bg-white/8 border border-white/15 dark:border-white/10 text-slate-300 dark:text-slate-400 hover:bg-white/20 dark:hover:bg-white/15 hover:text-white transition-all duration-200 cursor-pointer">
+    <button id="theme_toggle" type="button" title="切换白天/夜晚模式"
+        class="fixed top-5 right-5 z-50 p-2.5 rounded-xl bg-white/10 dark:bg-white/10 border border-white/15 dark:border-white/10 text-slate-300 dark:text-slate-400 hover:bg-white/20 hover:text-white transition-all duration-200 cursor-pointer">
         <svg aria-hidden="true" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m12.728 12.728l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
         </svg>
@@ -35,86 +92,50 @@
     </button>
 
     <!-- 登录毛玻璃卡片 -->
-    <div class="argon-login-card">
+    <div class="argon-login-card mx-4">
 
         <!-- Brand Header -->
         <div class="text-center mb-7">
             <div class="inline-flex items-center justify-center gap-2 mb-1.5">
                 <span class="text-[26px] font-black tracking-wider bg-gradient-to-r from-indigo-500 to-purple-500 bg-clip-text text-transparent">Argon</span>
-                <span class="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded bg-indigo-500/15 dark:bg-indigo-500/15 border border-indigo-500/30 dark:border-indigo-400/30 text-indigo-400 dark:text-indigo-400">RM520N</span>
+                <span class="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded bg-indigo-500/15 border border-indigo-500/30 text-indigo-400">RM520N</span>
             </div>
-            <p class="text-[11px] font-semibold tracking-[1.5px] uppercase text-slate-400 dark:text-slate-500 m-0">5G NR CELLULAR CONTROL CENTER</p>
+            <p class="text-[11px] font-semibold tracking-[1.5px] uppercase text-slate-400 dark:text-slate-400 m-0">5G NR CELLULAR CONTROL CENTER</p>
         </div>
 
         <!-- 登录表单 -->
         <form id="login_form" onsubmit="handleLogin(event)" class="space-y-5">
             <div>
-                <label for="username" class="block text-[11px] font-semibold tracking-wider uppercase text-slate-300 dark:text-slate-500 mb-1.5">用户名</label>
+                <label for="username" class="block text-[11px] font-semibold tracking-wider uppercase text-slate-300 dark:text-slate-400 mb-1.5">用户名</label>
                 <input id="username" type="text" value="admin" required placeholder="请输入用户名"
-                    class="w-full box-border bg-[#1f2636] dark:bg-[#1f2636] border border-[#2d374d] dark:border-[#2d374d] text-white rounded-xl px-3.5 py-3 text-[14px] outline-none transition-all duration-200 placeholder:text-[#525f7f] focus:border-indigo-500 focus:bg-[#242c3f] focus:shadow-[0_0_0_3px_rgba(94,114,228,0.25)]" />
+                    class="w-full box-border bg-[#1a202c] border border-[#2d3748] text-white rounded-xl px-3.5 py-3 text-[14px] outline-none transition-all duration-200 placeholder:text-[#525f7f] focus:border-indigo-500 focus:bg-[#20293a] focus:ring-2 focus:ring-indigo-500/20" />
             </div>
 
             <div>
-                <label for="password" class="block text-[11px] font-semibold tracking-wider uppercase text-slate-300 dark:text-slate-500 mb-1.5">密码</label>
+                <label for="password" class="block text-[11px] font-semibold tracking-wider uppercase text-slate-300 dark:text-slate-400 mb-1.5">密码</label>
                 <input id="password" type="password" required placeholder="••••••••"
-                    class="w-full box-border bg-[#1f2636] dark:bg-[#1f2636] border border-[#2d374d] dark:border-[#2d374d] text-white rounded-xl px-3.5 py-3 text-[14px] outline-none transition-all duration-200 placeholder:text-[#525f7f] focus:border-indigo-500 focus:bg-[#242c3f] focus:shadow-[0_0_0_3px_rgba(94,114,228,0.25)]" />
+                    class="w-full box-border bg-[#1a202c] border border-[#2d3748] text-white rounded-xl px-3.5 py-3 text-[14px] outline-none transition-all duration-200 placeholder:text-[#525f7f] focus:border-indigo-500 focus:bg-[#20293a] focus:ring-2 focus:ring-indigo-500/20" />
             </div>
 
             <!-- 错误提示 -->
-            <div id="error_msg" class="hidden text-center text-[12px] py-2.5 px-3 rounded-lg bg-red-500/15 dark:bg-red-500/12 border border-red-500/30 dark:border-red-500/30 text-red-500 dark:text-red-400"></div>
+            <div id="error_msg" class="hidden text-center text-[12px] py-2.5 px-3 rounded-lg bg-red-500/15 border border-red-500/30 text-red-400"></div>
 
             <!-- 登录按钮 -->
             <button id="login_btn" type="submit"
-                class="w-full h-[46px] bg-gradient-to-r from-indigo-600 to-purple-600 dark:from-indigo-500 dark:to-purple-500 border-none rounded-xl text-white text-[14px] font-bold tracking-[2px] cursor-pointer shadow-lg shadow-indigo-600/35 dark:shadow-indigo-500/35 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-indigo-600/50 dark:hover:shadow-indigo-500/50 active:translate-y-0 disabled:opacity-60 disabled:cursor-not-allowed mt-1">
+                class="w-full h-[46px] bg-gradient-to-r from-indigo-600 to-purple-600 border-none rounded-xl text-white text-[14px] font-bold tracking-[2px] cursor-pointer shadow-lg shadow-indigo-600/35 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-indigo-600/50 active:translate-y-0 disabled:opacity-60 disabled:cursor-not-allowed mt-1">
                 解 锁 进 入
             </button>
         </form>
 
         <!-- Footer -->
-        <div class="mt-6 pt-4 border-t border-white/6 dark:border-white/6 text-center text-[11px] text-slate-500 dark:text-slate-500 leading-relaxed">
-            凭证通过环境变量 <code class="text-indigo-400 dark:text-indigo-400 font-mono">WEBUI_USERNAME</code> / <code class="text-indigo-400 dark:text-indigo-400 font-mono">WEBUI_PASSWORD</code> 配置<br>
+        <div class="mt-6 pt-4 border-t border-white/10 text-center text-[11px] text-slate-400 leading-relaxed">
+            凭证通过环境变量 <code class="text-indigo-400 font-mono">WEBUI_USERNAME</code> / <code class="text-indigo-400 font-mono">WEBUI_PASSWORD</code> 配置<br>
             用户名与密码均加密传输
         </div>
     </div>
 
-    <!-- 白天模式覆盖 -->
-    <style>
-        html:not(.dark) body { background: #f4f5f7; }
-        html:not(.dark) .argon-login-card {
-            background: rgba(255,255,255,0.85) !important;
-            backdrop-filter: blur(20px) !important;
-            -webkit-backdrop-filter: blur(20px) !important;
-            border-color: rgba(0,0,0,0.08) !important;
-            box-shadow: 0 25px 60px rgba(0,0,0,0.08), 0 0 60px rgba(94,114,228,0.06) !important;
-        }
-        html:not(.dark) .argon-login-card input {
-            background-color: #fff !important;
-            border-color: #e2e8f0 !important;
-            color: #32325d !important;
-        }
-        html:not(.dark) .argon-login-card input:focus {
-            border-color: #5e72e4 !important;
-            background-color: #fff !important;
-            box-shadow: 0 0 0 3px rgba(94,114,228,0.15) !important;
-        }
-        html:not(.dark) .argon-login-card input::placeholder { color: #adb5bd !important; }
-        html:not(.dark) .argon-login-card label { color: #525f7f !important; }
-        html:not(.dark) .argon-login-card .border-t { border-color: rgba(0,0,0,0.06) !important; }
-        html:not(.dark) .argon-login-card code { color: #5e72e4 !important; }
-        html:not(.dark) #theme_toggle {
-            background: rgba(0,0,0,0.05) !important;
-            border-color: rgba(0,0,0,0.08) !important;
-            color: #8898aa !important;
-        }
-        html:not(.dark) #theme_toggle:hover {
-            background: rgba(0,0,0,0.1) !important;
-            color: #32325d !important;
-        }
-    </style>
-
     <!-- Challenge-Response 登录逻辑 -->
     <script>
-        /* ---- 纯 JS SHA-256 实现（兼容非安全上下文 HTTP） ---- */
         function sha256Pure(data) {
             const K = new Uint32Array([
                 0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,

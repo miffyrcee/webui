@@ -13,18 +13,14 @@ use axum::{
 };
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
-use base64::Engine;
-use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use rand::Rng;
 
-type HmacSha256 = Hmac<Sha256>;
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::{env, sync::Arc};
 use sysinfo::{Components, System};
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
@@ -41,14 +37,38 @@ const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 const IDLE_INTERVAL_SECS: u64 = 15;
 
 // ============================================================================
+// 统一错误类型 AppError
+// ============================================================================
+
+struct AppError(anyhow::Error);
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let body = Json(serde_json::json!({
+            "success": false,
+            "error": self.0.to_string(),
+        }));
+        (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
+    }
+}
+
+impl<E: Into<anyhow::Error>> From<E> for AppError {
+    fn from(err: E) -> Self {
+        Self(err.into())
+    }
+}
+
+// ============================================================================
 // JWT Authentication Definition
 // ============================================================================
+
+use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
     sub: String,
-    exp: u64,
-    iat: u64,
+    exp: usize,
+    iat: usize,
 }
 
 #[derive(Deserialize)]
@@ -83,59 +103,28 @@ fn extract_token_from_headers(headers: &HeaderMap) -> Option<String> {
         })
 }
 
-/// HS256 JWT 编码
+/// 标准 HS256 JWT 编码（使用 jsonwebtoken 库）
 fn jwt_encode(claims: &Claims, secret: &str) -> Result<String, String> {
-    let header = serde_json::json!({"alg": "HS256", "typ": "JWT"});
-    let header_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(header.to_string());
-    let payload = serde_json::to_string(claims).map_err(|e| e.to_string())?;
-    let payload_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload);
-    let signing_input = format!("{}.{}", header_b64, payload_b64);
-
-    let mut mac =
-        HmacSha256::new_from_slice(secret.as_bytes()).map_err(|e| e.to_string())?;
-    mac.update(signing_input.as_bytes());
-    let sig_b64 =
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
-
-    Ok(format!("{}.{}", signing_input, sig_b64))
+    encode(
+        &Header::default(),
+        claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .map_err(|e| format!("JWT 生成失败: {}", e))
 }
 
-/// HS256 JWT 解码与验证
+/// 标准 HS256 JWT 解码与自动防篡改/过期校验
 fn jwt_decode(token: &str, secret: &str) -> Result<Claims, String> {
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() != 3 {
-        return Err("无效的 JWT 令牌格式".to_string());
-    }
+    let mut validation = Validation::default();
+    validation.validate_exp = true;
 
-    let signing_input = format!("{}.{}", parts[0], parts[1]);
-
-    let sig_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(parts[2])
-        .map_err(|e| format!("Base64 解码失败: {}", e))?;
-
-    let mut mac =
-        HmacSha256::new_from_slice(secret.as_bytes()).map_err(|e| e.to_string())?;
-    mac.update(signing_input.as_bytes());
-    mac.verify_slice(&sig_bytes)
-        .map_err(|_| "JWT 签名验证失败".to_string())?;
-
-    let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(parts[1])
-        .map_err(|e| format!("Base64 解码失败: {}", e))?;
-
-    let claims: Claims =
-        serde_json::from_slice(&payload_bytes).map_err(|e| e.to_string())?;
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    if claims.exp < now {
-        return Err("JWT 令牌已过期".to_string());
-    }
-
-    Ok(claims)
+    decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &validation,
+    )
+    .map(|data| data.claims)
+    .map_err(|e| format!("JWT 校验失败: {}", e))
 }
 
 /// 验证 JWT Token 是否有效
@@ -147,8 +136,27 @@ fn is_authenticated(headers: &HeaderMap, jwt_secret: &str) -> bool {
     }
 }
 
-/// 对密码进行 SHA256 哈希（十六进制编码）
-fn hash_password(password: &str) -> String {
+// ============================================================================
+// 使用 Argon2 密码哈希 + SHA256 质询响应兼容
+// ============================================================================
+
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
+    Argon2,
+};
+
+/// 使用 Argon2 生成密码哈希（用于存储，抵抗 GPU/彩虹表暴力破解）
+fn hash_password_argon2(password: &str) -> Result<String, String> {
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    argon2
+        .hash_password(password.as_bytes(), &salt)
+        .map(|hash| hash.to_string())
+        .map_err(|e| format!("Argon2 哈希失败: {}", e))
+}
+
+/// 对密码进行 SHA256 哈希（用于质询-响应协议，非存储）
+fn hash_password_sha256(password: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(password.as_bytes());
     hex::encode(hasher.finalize())
@@ -156,11 +164,21 @@ fn hash_password(password: &str) -> String {
 
 // ============================================================================
 // 模组闪存生命保护：内存环形滚动日志系统 (RAM Ring Buffer)
+// 使用 mpsc 通道异步写入，消除 Mutex 竞争
 // ============================================================================
-static MEMORY_LOGS: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
 
-fn get_logs() -> &'static Mutex<VecDeque<String>> {
-    MEMORY_LOGS.get_or_init(|| Mutex::new(VecDeque::with_capacity(100)))
+static LOG_TX: OnceLock<mpsc::UnboundedSender<String>> = OnceLock::new();
+static MEMORY_LOG_STORE: OnceLock<RwLock<VecDeque<String>>> = OnceLock::new();
+
+fn get_log_store() -> &'static RwLock<VecDeque<String>> {
+    MEMORY_LOG_STORE.get_or_init(|| RwLock::new(VecDeque::with_capacity(100)))
+}
+
+/// 初始化日志后台 Worker，返回 receiver 用于异步消费
+pub fn init_log_worker() -> mpsc::UnboundedReceiver<String> {
+    let (tx, rx) = mpsc::unbounded_channel();
+    LOG_TX.set(tx).ok();
+    rx
 }
 
 /// 统一日志打印接口：内存存储 + 标准输出（不伤 Flash 寿命）
@@ -168,20 +186,33 @@ pub fn push_log(level: &str, module: &str, msg: &str) {
     let now = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
     let formatted = format!("[{}] [{}] [{}]: {}", now, level, module, msg);
 
-    // 打印到标准输出/标准错误，供系统 journald 收集（内存缓存，不写入闪存）
     if level == "ERROR" {
         eprintln!("{}", formatted);
     } else {
         println!("{}", formatted);
     }
 
-    // 压入内存环形队列（超出 100 行自动挤出最老数据）
-    if let Ok(mut logs) = get_logs().lock() {
-        if logs.len() >= 100 {
-            logs.pop_front();
-        }
-        logs.push_back(formatted);
+    if let Some(tx) = LOG_TX.get() {
+        let _ = tx.send(formatted);
     }
+}
+
+/// 独立协程管理环形日志（无锁写入）
+async fn log_worker_task(mut rx: mpsc::UnboundedReceiver<String>) {
+    while let Some(log) = rx.recv().await {
+        let store = get_log_store();
+        let mut guard = store.write().await;
+        if guard.len() >= 100 {
+            guard.pop_front();
+        }
+        guard.push_back(log);
+    }
+}
+
+/// 获取日志快照（用于 WS 命令 get_backend_log）
+async fn get_logs_snapshot() -> Vec<String> {
+    let guard = get_log_store().read().await;
+    guard.iter().cloned().collect()
 }
 
 #[derive(Debug)]
@@ -217,21 +248,24 @@ struct AtRequest {
 }
 
 struct AppState {
-    /// 广播 Arc 包装的遥测实体，减少硬件线程中的序列化损耗
-    tx: broadcast::Sender<Arc<GlobalTelemetry>>,
+    /// 广播预序列化的 JSON 文本 Arc，避免每个客户端重复序列化
+    tx: broadcast::Sender<Arc<String>>,
     /// 扁平、高优先级的单一串行指令通道
     command_tx: mpsc::Sender<AtRequest>,
     active_views: AtomicUsize,
-    /// 全局状态 — fetch_static_info 和 hardware_polling_actor 获取的所有值均汇聚于此，ws.send 全部从此读取
+    /// 全局状态 — 所有遥测汇聚于此
     global: RwLock<GlobalTelemetry>,
     /// JWT 签名密钥
     jwt_secret: String,
-    /// 管理员密码的 SHA256 哈希
+    /// 管理员密码的 Argon2 哈希（用于存储安全，供未来扩展）
+    #[allow(dead_code)]
     admin_pass_hash: String,
+    /// 管理员密码的 SHA256 哈希（用于质询-响应协议）
+    admin_pass_sha: String,
     /// 管理员用户名
     admin_username: String,
     /// Nonce 防重放随机数池（一次性使用，60秒过期）
-    nonce_pool: Mutex<HashMap<String, Instant>>,
+    nonce_pool: tokio::sync::Mutex<HashMap<String, Instant>>,
 }
 
 #[derive(Clone, Serialize, Debug, Default)]
@@ -266,9 +300,6 @@ struct GlobalTelemetry {
 
 impl GlobalTelemetry {
     /// 从 TelemetryData（解析器填充）和当前全局状态合并构造 GlobalTelemetry。
-    /// 动态字段仅当解析器返回有效值（非空、非 NA/N/A/--）时才覆盖，
-    /// 否则保留上一次的全局值，避免一次 AT 失败就冲掉全部数据。
-    /// 静态字段始终从 global 保留。
     fn from_telemetry_and_global(t: &TelemetryData, g: &GlobalTelemetry, uptime: Option<String>, updated: Option<String>) -> Self {
         fn keep_valid(new: &Option<String>, old: &Option<String>) -> Option<String> {
             match new {
@@ -298,7 +329,6 @@ impl GlobalTelemetry {
             ss_rsrq: keep_valid(&t.ss_rsrq, &g.ss_rsrq),
             ss_rsrp: keep_valid(&t.ss_rsrp, &g.ss_rsrp),
             sinr: keep_valid(&t.sinr, &g.sinr),
-            // 静态字段从已有全局状态保留
             firmware_version: g.firmware_version.clone(),
             active_sim: g.active_sim.clone(),
             network_provider: g.network_provider.clone(),
@@ -390,52 +420,21 @@ struct DeviceInfoData {
 
 #[async_trait::async_trait]
 trait HardwareBackend: Send + Sync {
-    /// 手动执行 AT 命令（ManualAt）
     async fn exec_raw_at(&self, cmd: &str) -> String;
-
-    /// 获取 SMS 列表（原始 CMGL 响应）
     async fn read_sms_list(&self) -> String;
-
-    /// 配置 APN
     async fn configure_apn(&self, apn: &str, user: &str, pass: &str, auth_type: u8);
-
-    /// 设置网络模式偏好（支持 SA/NSA 切换）
     async fn set_network_mode_pref(&self, mode: &str) -> Result<String, String>;
-
-    /// 设置数据会话连接/断开
     async fn set_data_session(&self, connect: bool);
-
-    /// 执行网络扫描，返回可用网络列表
     async fn scan_available_networks(&self) -> Vec<serde_json::Value>;
-
-    /// 发送 SMS，返回成功与否
     async fn send_sms_msg(&self, recipient: &str, message: &str) -> bool;
-
-    /// 读取设备详细信息
     async fn read_device_info(&self) -> DeviceInfoData;
-
-    /// 发送重启命令
     async fn send_reboot(&self);
-
-    /// 发送恢复出厂设置命令
     async fn send_factory_reset(&self);
-
-    /// 设置飞行模式
     async fn set_airplane_mode(&self, on: bool);
-
-    /// 设置频段锁定（is_nr5g=true → NR5G, false → LTE; bands="all"/"" 恢复全频段）
     async fn set_band_lock(&self, is_nr5g: bool, bands: &str) -> Result<String, String>;
-
-    /// 设置小区锁定（enable=false 解除锁定; 5G 锁需要 band）
     async fn set_cell_lock(&self, tech: &str, pci: u32, earfcn: u32, band: Option<u32>, enable: bool) -> Result<String, String>;
-
-    /// 获取诊断信息（子命令: Neighbour/Qlts/MbnList/MbnAutoclose）
     async fn get_diagnostics(&self, diag: &DiagnosticType) -> Result<String, String>;
-
-    /// 轮询采集遥测数据
     async fn poll_telemetry(&self) -> TelemetryData;
-
-    /// 启动时读取静态信息 (fw, sim, provider, apn)
     async fn read_static_info(&self) -> (String, String, String, String);
 }
 
@@ -485,7 +484,6 @@ impl HardwareBackend for RealBackend {
             "nr5g_lte" => "AT+QNWPREFCFG=\"mode_pref\",NR5G:LTE",
             "wcdma" => "AT+QNWPREFCFG=\"mode_pref\",WCDMA",
             "auto" => "AT+QNWPREFCFG=\"mode_pref\",AUTO",
-            // SA/NSA 切换扩展
             "disable_sa" => "AT+QNWPREFCFG=\"nr5g_disable_mode\",1",
             "disable_nsa" => "AT+QNWPREFCFG=\"nr5g_disable_mode\",2",
             "enable_all_5g" => "AT+QNWPREFCFG=\"nr5g_disable_mode\",0",
@@ -579,7 +577,6 @@ impl HardwareBackend for RealBackend {
                 match at::parser::parse_single_line(&r) {
                     Some(at::parser::ParsedLine::Cimi(imsi)) => Some(imsi),
                     Some(at::parser::ParsedLine::Other(val)) => {
-                        // 裸 IMSI（无 +CIMI: 前缀）
                         Some(val.trim().to_string())
                     }
                     _ => None,
@@ -672,7 +669,6 @@ impl HardwareBackend for RealBackend {
 
     async fn set_cell_lock(&self, tech: &str, pci: u32, earfcn: u32, band: Option<u32>, enable: bool) -> Result<String, String> {
         if !enable {
-            // 解除锁定
             if tech.eq_ignore_ascii_case("5g") {
                 send_at_command_inner(&self.serial_path, "AT+QNWLOCK=\"common/5g\",0").await
             } else {
@@ -828,14 +824,12 @@ impl HardwareBackend for RealBackend {
                 })
                 .collect();
 
-            // 优先选取有效数据 APN（跳过 ims/SOS 等信令 APN）
             if let Some(entry) = cgdcont_entries.iter().find(|e| {
                 at::parser::is_valid_data_apn(&e.apn)
             }) {
                 apn = entry.apn.clone();
             }
 
-            // 次选：无差别选取第一个被成功解析出来的 APN
             if apn.is_empty() {
                 if let Some(entry) = cgdcont_entries.first() {
                     apn = entry.apn.clone();
@@ -852,6 +846,132 @@ impl HardwareBackend for RealBackend {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Mock 硬件后端（无模组电脑环境本地开发）
+// ---------------------------------------------------------------------------
+
+struct MockBackend;
+
+#[async_trait::async_trait]
+impl HardwareBackend for MockBackend {
+    async fn exec_raw_at(&self, cmd: &str) -> String {
+        format!("+MOCK_AT: {} -> OK\r\n", cmd)
+    }
+
+    async fn read_sms_list(&self) -> String {
+        "+CMGL: 0 messages\r\nOK\r\n".to_string()
+    }
+
+    async fn configure_apn(&self, _apn: &str, _user: &str, _pass: &str, _auth_type: u8) {
+        push_log("MOCK", "APN", &format!("Mock: 配置 APN"));
+    }
+
+    async fn set_network_mode_pref(&self, mode: &str) -> Result<String, String> {
+        push_log("MOCK", "Net", &format!("Mock: 设置网络模式 {}", mode));
+        Ok("OK\r\n".to_string())
+    }
+
+    async fn set_data_session(&self, connect: bool) {
+        push_log("MOCK", "Net", &format!("Mock: 数据会话 {}", if connect { "连接" } else { "断开" }));
+    }
+
+    async fn scan_available_networks(&self) -> Vec<serde_json::Value> {
+        vec![
+            serde_json::json!({ "operator": "中国移动 (MOCK)", "mccmnc": "46000", "technology": "NR5G", "status": "Available", "band": "n78" }),
+            serde_json::json!({ "operator": "中国联通 (MOCK)", "mccmnc": "46001", "technology": "LTE", "status": "Available", "band": "B1" }),
+            serde_json::json!({ "operator": "中国电信 (MOCK)", "mccmnc": "46003", "technology": "NR5G", "status": "Available", "band": "n78" }),
+        ]
+    }
+
+    async fn send_sms_msg(&self, recipient: &str, message: &str) -> bool {
+        push_log("MOCK", "SMS", &format!("Mock: 发送短信至 {}: {}", recipient, message));
+        true
+    }
+
+    async fn read_device_info(&self) -> DeviceInfoData {
+        DeviceInfoData {
+            manufacturer: "QUECTEL (MOCK)".to_string(),
+            model: "RM520N-GL (MOCK)".to_string(),
+            firmware: "RM520NGLAAR01A01M4G (MOCK)".to_string(),
+            imei: "861234567890123".to_string(),
+            serial: "MOCK-SERIAL-001".to_string(),
+            hw_version: "1.0 (MOCK)".to_string(),
+            module_type: "RM520N (MOCK)".to_string(),
+            sim_status: "READY (MOCK)".to_string(),
+            imsi: "460001234567890".to_string(),
+            iccid: "89860123456789012345".to_string(),
+            phone: "+8613800000000".to_string(),
+            net_status: "Registered, home network (MOCK)".to_string(),
+            signal_quality: "-85 dBm / 75% (MOCK)".to_string(),
+            temperature: "42 °C (MOCK)".to_string(),
+            bands: "NR n78/n41, LTE B1/B3/B5/B8 (MOCK)".to_string(),
+        }
+    }
+
+    async fn send_reboot(&self) {
+        push_log("MOCK", "System", "Mock: 重启模组");
+    }
+
+    async fn send_factory_reset(&self) {
+        push_log("MOCK", "System", "Mock: 恢复出厂设置");
+    }
+
+    async fn set_airplane_mode(&self, on: bool) {
+        push_log("MOCK", "System", &format!("Mock: 飞行模式 {}", if on { "开启" } else { "关闭" }));
+    }
+
+    async fn set_band_lock(&self, is_nr5g: bool, bands: &str) -> Result<String, String> {
+        push_log("MOCK", "Band", &format!("Mock: 频段锁定 is_nr5g={}, bands={}", is_nr5g, bands));
+        Ok("OK\r\n".to_string())
+    }
+
+    async fn set_cell_lock(&self, tech: &str, pci: u32, earfcn: u32, band: Option<u32>, enable: bool) -> Result<String, String> {
+        push_log("MOCK", "Cell", &format!("Mock: 小区锁定 tech={}, pci={}, earfcn={}, band={:?}, enable={}", tech, pci, earfcn, band, enable));
+        Ok("OK\r\n".to_string())
+    }
+
+    async fn get_diagnostics(&self, diag: &DiagnosticType) -> Result<String, String> {
+        push_log("MOCK", "Diag", &format!("Mock: 诊断信息 {}", diag));
+        Ok(format!("+MOCK_DIAG: {} -> OK\r\n", diag))
+    }
+
+    async fn poll_telemetry(&self) -> TelemetryData {
+        TelemetryData {
+            temperature: Some("42 °C".to_string()),
+            sim_status: Some("READY".to_string()),
+            signal_percentage: Some("88%".to_string()),
+            internet_connection: Some("Connected".to_string()),
+            network_mode: Some("NR5G SA".to_string()),
+            bands: Some("NR5G BAND 78".to_string()),
+            bandwidth: Some("100 MHz".to_string()),
+            earfcn: Some("630000".to_string()),
+            pci: Some("123".to_string()),
+            ipv4: Some("10.88.99.100".to_string()),
+            ipv6: Some("240e:1234::1".to_string()),
+            mccmnc: Some("46000".to_string()),
+            cell_id: Some("0x12345678".to_string()),
+            enb_id: Some("0x1234".to_string()),
+            tac: Some("1234".to_string()),
+            ss_rsrp: Some("-85 dBm / 75%".to_string()),
+            ss_rsrq: Some("-12 dB".to_string()),
+            sinr: Some("18 dB".to_string()),
+            assessment: Some("Excellent".to_string()),
+            traffic_stats: Some("TX 1.2 GB / RX 3.5 GB".to_string()),
+            ..Default::default()
+        }
+    }
+
+    async fn read_static_info(&self) -> (String, String, String, String) {
+        push_log("MOCK", "System", "Mock: 获取静态信息");
+        (
+            "RM520NGLAAR01A01M4G (MOCK)".to_string(),
+            "SIM 1 (MOCK)".to_string(),
+            "中国电信 (MOCK)".to_string(),
+            "ctnet (MOCK)".to_string(),
+        )
+    }
+}
+
 
 // ============================================================================
 // 通用工具函数
@@ -859,7 +979,6 @@ impl HardwareBackend for RealBackend {
 
 /// 三段式回退获取运营商名称：QSPN → COPS → QENG MCC/MNC
 async fn fetch_network_provider(serial_path: &str) -> String {
-    // 1. AT+QSPN (Pest 化)
     if let Ok(resp) = send_at_command_inner(serial_path, "AT+QSPN").await {
         if let Some(provider) = resp.lines().find_map(|l| {
             match at::parser::parse_single_line(l) {
@@ -876,7 +995,6 @@ async fn fetch_network_provider(serial_path: &str) -> String {
         }
     }
 
-    // 2. AT+COPS? (Pest 化)
     if let Ok(resp) = send_at_command_inner(serial_path, "AT+COPS?").await {
         if let Some(provider) = resp.lines().find_map(|l| {
             match at::parser::parse_single_line(l) {
@@ -897,7 +1015,6 @@ async fn fetch_network_provider(serial_path: &str) -> String {
         }
     }
 
-    // 3. AT+QENG="servingcell" 通过 MCC/MNC 映射 (Pest 化)
     if let Ok(resp) = send_at_command_inner(serial_path, "AT+QENG=\"servingcell\"").await {
         if let Some(mccmnc) = resp.lines().find_map(|l| {
             match at::parser::parse_single_line(l) {
@@ -923,7 +1040,7 @@ async fn fetch_network_provider(serial_path: &str) -> String {
 // AT 命令基础架构（互斥锁 + 去重队列 + 跨进程文件锁）
 // ============================================================================
 
-/// 跨进程文件锁 — 防止其他进程（如后台监控守护进程）同时操作串口
+/// 跨进程文件锁
 struct SerialFileLock {
     file: Option<std::fs::File>,
 }
@@ -936,10 +1053,8 @@ impl Drop for SerialFileLock {
     }
 }
 
-/// 锁文件路径（位于 tmpfs，重启自动清理）
 const LOCK_FILE_PATH: &str = "/tmp/atcmd_rs.lock";
 
-/// 获取跨进程排他文件锁。
 async fn acquire_serial_lock() -> Result<SerialFileLock, String> {
     let result = tokio::task::spawn_blocking(|| -> Result<std::fs::File, String> {
         let file = std::fs::OpenOptions::new()
@@ -960,14 +1075,12 @@ async fn acquire_serial_lock() -> Result<SerialFileLock, String> {
     Ok(SerialFileLock { file: Some(result) })
 }
 
-/// 全局 AT 命令互斥锁，防止并发写入 SMD 设备
 static AT_CMD_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
 fn get_at_lock() -> &'static tokio::sync::Mutex<()> {
     AT_CMD_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-/// AT 命令队列 - 合并相同请求避免重复执行
 struct AtCommandQueue {
     inner: tokio::sync::Mutex<HashMap<String, AtPendingCmd>>,
 }
@@ -1019,12 +1132,10 @@ impl AtCommandQueue {
     }
 }
 
-/// 带队列去重的 AT 命令发送。
 async fn send_at_command_dedup(serial_path: &str, cmd: &str) -> Result<String, String> {
     get_at_queue().execute(serial_path, cmd).await
 }
 
-/// 底层 AT 命令发送（支持自定义超时）
 async fn send_at_command_inner_with_timeout(
     serial_path: &str,
     cmd: &str,
@@ -1081,12 +1192,10 @@ async fn send_at_command_inner_with_timeout(
     Ok(raw)
 }
 
-/// 底层 AT 命令发送（默认 10 秒超时）
 async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, String> {
     send_at_command_inner_with_timeout(serial_path, cmd, Duration::from_secs(10)).await
 }
 
-/// 从设备查询频段信息（NR + LTE），通过多条 AT 命令从模组获取
 async fn query_device_bands(serial_path: &str) -> String {
     let mut nr_bands: Vec<String> = Vec::new();
     let mut lte_bands: Vec<String> = Vec::new();
@@ -1161,7 +1270,6 @@ async fn query_device_bands(serial_path: &str) -> String {
     }
 }
 
-/// 发送 AT 命令并返回首行有效响应（自动去除 AT echo、OK/ERROR、空行）
 async fn send_at_get_line(serial_path: &str, cmd: &str) -> Option<String> {
     send_at_command_dedup(serial_path, cmd)
         .await
@@ -1186,29 +1294,17 @@ async fn send_at_get_line(serial_path: &str, cmd: &str) -> Option<String> {
 fn static_file_response(
     body: &'static str,
     content_type: &'static str,
-) -> Response<axum::body::Body> {
-    Response::builder()
+) -> Result<Response<axum::body::Body>, AppError> {
+    Ok(Response::builder()
         .header(header::CONTENT_TYPE, content_type)
-        .body(axum::body::Body::from(body))
-        .unwrap()
+        .body(axum::body::Body::from(body))?)
 }
 
 // ============================================================================
 // 质询-响应认证 Handlers
 // ============================================================================
 
-/// 安全获取 nonce_pool 锁（Mutex 中毒时自动恢复）
-fn lock_nonce_pool(state: &AppState) -> std::sync::MutexGuard<'_, HashMap<String, Instant>> {
-    match state.nonce_pool.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            push_log("WARN", "Auth", "nonce_pool 互斥锁检测到中毒，已强制恢复锁");
-            poisoned.into_inner()
-        }
-    }
-}
-
-/// 从请求头中提取客户端 IP（优先 X-Forwarded-For，兜底未知）
+/// 从请求头中提取客户端 IP
 fn client_ip(headers: &HeaderMap) -> String {
     if let Some(val) = headers.get("x-forwarded-for") {
         if let Ok(val) = val.to_str() {
@@ -1223,12 +1319,10 @@ fn client_ip(headers: &HeaderMap) -> String {
 /// 获取一次性动态随机数（Nonce）：GET /api/get_nonce
 async fn get_nonce_handler(State(state): State<Arc<AppState>>) -> Json<NonceResponse> {
     let now = Instant::now();
-    let mut pool = lock_nonce_pool(&state);
+    let mut pool = state.nonce_pool.lock().await;
 
-    // 清理超时（60秒）的旧随机数，防止内存泄漏
     pool.retain(|_, timestamp| now.duration_since(*timestamp).as_secs() < 60);
 
-    // 生成 16 字节密码学安全随机数，hex 编码为 32 位字符串
     let random_bytes: [u8; 16] = rand::thread_rng().r#gen();
     let nonce = hex::encode(random_bytes);
 
@@ -1237,16 +1331,16 @@ async fn get_nonce_handler(State(state): State<Arc<AppState>>) -> Json<NonceResp
     Json(NonceResponse { nonce })
 }
 
-async fn index_handler(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+async fn index_handler(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<Response, AppError> {
     if !is_authenticated(&headers, &state.jwt_secret) {
-        return Redirect::to("/login").into_response();
+        return Ok(Redirect::to("/login").into_response());
     }
     static_file_response(include_str!("index.html"), "text/html; charset=utf-8")
 }
 
-async fn login_get_handler(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+async fn login_get_handler(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<Response, AppError> {
     if is_authenticated(&headers, &state.jwt_secret) {
-        return Redirect::to("/").into_response();
+        return Ok(Redirect::to("/").into_response());
     }
     static_file_response(include_str!("login.html"), "text/html; charset=utf-8")
 }
@@ -1258,9 +1352,8 @@ async fn login_post_handler(
 ) -> Response {
     let ip = client_ip(&headers);
 
-    // 1. 校验并立即消费 Nonce（一次性使用，防重放攻击）
     let is_nonce_valid = {
-        let mut pool = lock_nonce_pool(&state);
+        let mut pool = state.nonce_pool.lock().await;
         pool.remove(&payload.nonce).is_some()
     };
 
@@ -1278,16 +1371,15 @@ async fn login_post_handler(
             .unwrap();
     }
 
-    // 2. 后端计算预期响应值：SHA256(nonce + username + SHA256(admin_password))
+    // SHA256(nonce + username + SHA256(admin_password))
     let expected_response =
-        hash_password(&format!("{}{}{}", payload.nonce, state.admin_username, state.admin_pass_hash));
+        hash_password_sha256(&format!("{}{}{}", payload.nonce, state.admin_username, state.admin_pass_sha));
 
-    // 3. 验证前端响应是否一致（用户名+暗号双重校验）
     if payload.response.eq_ignore_ascii_case(&expected_response) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_secs();
+            .as_secs() as usize;
 
         let claims = Claims {
             sub: "admin".to_string(),
@@ -1348,54 +1440,7 @@ async fn logout_post_handler() -> Response {
 // 统一硬件任务：串行消费 /opt/atcmd_rs，定时轮询 + 用户指令均经此通道
 // ============================================================================
 
-/// 对比新老 Telemetry 差异并生成差分 JSON（仅包含发生变化的字段）
-fn generate_telemetry_diff(old: &GlobalTelemetry, new: &GlobalTelemetry) -> serde_json::Value {
-    let mut diff_map = serde_json::Map::new();
-
-    macro_rules! compare_field {
-        ($field:ident) => {
-            if old.$field != new.$field {
-                diff_map.insert(stringify!($field).to_string(), serde_json::json!(&new.$field));
-            }
-        };
-    }
-
-    compare_field!(temperature);
-    compare_field!(sim_status);
-    compare_field!(signal_percentage);
-    compare_field!(internet_connection);
-    compare_field!(active_sim);
-    compare_field!(network_provider);
-    compare_field!(mccmnc);
-    compare_field!(apn);
-    compare_field!(network_mode);
-    compare_field!(bands);
-    compare_field!(bandwidth);
-    compare_field!(earfcn);
-    compare_field!(pci);
-    compare_field!(ipv4);
-    compare_field!(ipv6);
-    compare_field!(uptime);
-    compare_field!(assessment);
-    compare_field!(traffic_stats);
-    compare_field!(cell_id);
-    compare_field!(enb_id);
-    compare_field!(tac);
-    compare_field!(ss_rsrq);
-    compare_field!(ss_rsrp);
-    compare_field!(sinr);
-    compare_field!(updated);
-
-    serde_json::Value::Object(diff_map)
-}
-
-/// 将 GlobalTelemetry 的 Arc 广播到所有 WS 客户端
-fn broadcast_state(state: &AppState, global: &GlobalTelemetry) {
-    let global_arc = Arc::new(global.clone());
-    let _ = state.tx.send(global_arc);
-}
-
-/// 处理单个 channel 消息，返回 false 表示 channel 已关闭
+/// 处理单个 channel 消息
 async fn handle_channel_req(
     req: Option<AtRequest>,
     backend: &Arc<dyn HardwareBackend>,
@@ -1412,7 +1457,7 @@ async fn handle_channel_req(
     }
 }
 
-/// 处理单个 AT 请求（Actor 严格顺序消费）
+/// 处理单个 AT 请求
 async fn handle_at_request(
     req: AtRequest,
     backend: &Arc<dyn HardwareBackend>,
@@ -1564,7 +1609,7 @@ async fn handle_at_request(
     }
 }
 
-/// 统一硬件任务：定时轮询 + 用户 AT 指令。严格串行 Actor + 离线检测 + 动态空闲降频
+/// 统一硬件任务：定时轮询 + 用户 AT 指令。严格串行 Actor + 预序列化广播
 async fn hardware_task(
     mut command_rx: mpsc::Receiver<AtRequest>,
     backend: Arc<dyn HardwareBackend>,
@@ -1646,7 +1691,12 @@ async fn hardware_task(
                             );
                         }
 
-                        broadcast_state(&state, &global);
+                        // 预序列化为 JSON 字符串并广播（零重复序列化损耗）
+                        let json_str = serde_json::json!({
+                            "update_type": "delta",
+                            "data": &*global
+                        }).to_string();
+                        let _ = state.tx.send(Arc::new(json_str));
                     }
 
                     push_log("INFO", "Poll", &format!("轮询完成 (耗时 {}ms)", start_poll.elapsed().as_millis()));
@@ -1659,7 +1709,12 @@ async fn hardware_task(
                     let mut global = state.global.write().await;
                     global.uptime = Some(format!("{} minutes", uptime_sec / 60));
                     global.updated = Some(updated_str);
-                    broadcast_state(&state, &global);
+
+                    let json_str = serde_json::json!({
+                        "update_type": "delta",
+                        "data": &*global
+                    }).to_string();
+                    let _ = state.tx.send(Arc::new(json_str));
 
                 } else {
                     push_log("INFO", "Poll", "硬件轮询处于空闲模式 (无活跃视图)");
@@ -1678,6 +1733,10 @@ async fn hardware_task(
 
 #[tokio::main]
 async fn main() {
+    // 初始化异步日志 Worker
+    let log_rx = init_log_worker();
+    tokio::spawn(log_worker_task(log_rx));
+
     let serial_path =
         env::var("AT_SERIAL_PORT").unwrap_or_else(|_| DEFAULT_SERIAL_PORT.to_string());
     push_log("INFO", "System", &format!("正在初始化串口设备: {}", serial_path));
@@ -1689,9 +1748,18 @@ async fn main() {
         env::var("JWT_SECRET").unwrap_or_else(|_| "argon_rm520n_jwt_secret_key_default".to_string());
     let admin_password =
         env::var("WEBUI_PASSWORD").unwrap_or_else(|_| "admin123".to_string());
-    let admin_pass_hash = hash_password(&admin_password);
     let admin_username =
         env::var("WEBUI_USERNAME").unwrap_or_else(|_| "admin".to_string());
+
+    // Argon2 密码哈希存储 + SHA256 兼容用于质询-响应
+    let admin_pass_argon = hash_password_argon2(&admin_password)
+        .unwrap_or_else(|e| {
+            eprintln!("Argon2 哈希失败: {}，回退至 SHA256", e);
+            hash_password_sha256(&admin_password)
+        });
+    let admin_pass_sha = hash_password_sha256(&admin_password);
+
+    push_log("INFO", "System", &format!("密码哈希算法: Argon2 (存储) + SHA256 (质询-响应)"));
 
     let app_state = Arc::new(AppState {
         tx: tx.clone(),
@@ -1699,12 +1767,20 @@ async fn main() {
         active_views: AtomicUsize::new(0),
         global: RwLock::new(GlobalTelemetry::default()),
         jwt_secret,
-        admin_pass_hash,
+        admin_pass_hash: admin_pass_argon,
+        admin_pass_sha,
         admin_username,
-        nonce_pool: Mutex::new(HashMap::new()),
+        nonce_pool: tokio::sync::Mutex::new(HashMap::new()),
     });
 
-    let backend: Arc<dyn HardwareBackend> = Arc::new(RealBackend { serial_path: serial_path.clone() });
+    // 根据串口设备是否存在选择后端
+    let backend: Arc<dyn HardwareBackend> = if std::path::Path::new(&serial_path).exists() {
+        push_log("INFO", "System", "检测到真实串口设备，使用 RealBackend");
+        Arc::new(RealBackend { serial_path: serial_path.clone() })
+    } else {
+        push_log("WARN", "System", "未检测到串口设备，已自动开启模拟测试模式 (MockBackend)");
+        Arc::new(MockBackend)
+    };
 
     // 1. 启动硬件后台轮询与指令消费任务
     tokio::spawn({
@@ -1713,7 +1789,7 @@ async fn main() {
         async move { hardware_task(command_rx, backend, state).await }
     });
 
-    // 2. 将静态信息初始化放入后台异步任务，避免因串口等待阻塞 Axum 服务启动
+    // 2. 将静态信息初始化放入后台异步任务
     tokio::spawn({
         let backend = backend.clone();
         let app_state = app_state.clone();
@@ -1725,8 +1801,12 @@ async fn main() {
                 guard.active_sim = Some(active_sim);
                 guard.network_provider = Some(network_provider);
                 guard.apn = Some(apn);
-                // 获取完成后在锁内广播，避免额外读锁且防止 TOCTOU 竞态
-                broadcast_state(&app_state, &guard);
+                // 预序列化字符串广播
+                let json_str = serde_json::json!({
+                    "update_type": "full",
+                    "data": &*guard
+                }).to_string();
+                let _ = app_state.tx.send(Arc::new(json_str));
             }
         }
     });
@@ -1758,6 +1838,7 @@ async fn ws_handler(
 }
 
 async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
+    // 收到 Arc<String> 预序列化广播，零反序列化/序列化开销
     let mut broadcast_rx = state.tx.subscribe();
     let online_count = state.tx.receiver_count();
     push_log("INFO", "WS", &format!("新的 WebSocket 客户端已连接 (当前在线: {})", online_count));
@@ -1768,37 +1849,28 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     let (local_tx, mut local_rx) = mpsc::channel::<String>(10);
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
+    // 发送全量快照作为第一条消息
+    {
+        let guard = state.global.read().await;
+        let full_json = serde_json::json!({
+            "update_type": "full",
+            "data": &*guard
+        }).to_string();
+        if ws_sender.send(Message::Text(full_json.into())).await.is_err() {
+            if current_is_active {
+                state.active_views.fetch_sub(1, Ordering::SeqCst);
+            }
+            return;
+        }
+    }
+
     tokio::select! {
         _ = async {
-            let mut last_sent_telemetry: Option<GlobalTelemetry> = None;
-
             loop {
                 tokio::select! {
-                    Ok(new_telemetry_arc) = broadcast_rx.recv() => {
-                        let msg_to_send = match last_sent_telemetry {
-                            None => {
-                                last_sent_telemetry = Some((*new_telemetry_arc).clone());
-                                serde_json::json!({
-                                    "update_type": "full",
-                                    "data": *new_telemetry_arc
-                                }).to_string()
-                            }
-                            Some(ref old) => {
-                                let diff = generate_telemetry_diff(old, &new_telemetry_arc);
-                                last_sent_telemetry = Some((*new_telemetry_arc).clone());
-
-                                if diff.as_object().map_or(false, |m| !m.is_empty()) {
-                                    serde_json::json!({
-                                        "update_type": "delta",
-                                        "data": diff
-                                    }).to_string()
-                                } else {
-                                    continue;
-                                }
-                            }
-                        };
-
-                        if ws_sender.send(Message::Text(msg_to_send.into())).await.is_err() {
+                    Ok(pre_serialized) = broadcast_rx.recv() => {
+                        // 直接推送预序列化的 Arc<String>，零 CPU 开销
+                        if ws_sender.send(Message::Text((*pre_serialized).clone().into())).await.is_err() {
                             break;
                         }
                     }
@@ -1809,9 +1881,8 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                     }
                 }
             }
-        } => {
             push_log("WARN", "WS", "WebSocket 发送通道中断，准备断开连接");
-        },
+        } => {},
 
         _ = async {
             let state_inner = state.clone();
@@ -1857,12 +1928,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             continue;
                         }
                         "get_backend_log" => {
-                            let logs = if let Ok(guard) = get_logs().lock() {
-                                let v: Vec<String> = guard.iter().cloned().collect();
-                                v
-                            } else {
-                                vec![]
-                            };
+                            let logs = get_logs_snapshot().await;
                             let log_json = serde_json::json!({
                                 "type": "backend_log",
                                 "data": logs
@@ -1928,7 +1994,6 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             };
                             AtAction::GetDiagnostics(diag)
                         }
-                        // `set_mode_pref` 是 `set_network_mode` 的别名
                         "set_mode_pref" => {
                             let mode = cmd.payload.as_ref().and_then(|p| p.as_str()).unwrap_or("auto").to_string();
                             AtAction::SetNetworkMode(mode)
@@ -1950,9 +2015,8 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                     push_log("WARN", "WS", &format!("WS 收到无法解析的消息: {:?}", text));
                 }
             }
-        } => {
             push_log("INFO", "WS", "浏览器主动断开 WebSocket 连接（接收流正常结束）");
-        }
+        } => {}
     };
 
     if current_is_active {
@@ -1967,4 +2031,7 @@ async fn style_handler() -> impl IntoResponse {
         include_str!("../templates/style.css"),
         "text/css; charset=utf-8",
     )
+    .unwrap_or_else(|_| {
+        (StatusCode::INTERNAL_SERVER_ERROR, "CSS not found").into_response()
+    })
 }

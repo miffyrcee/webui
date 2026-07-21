@@ -12,6 +12,15 @@
 
 <body class="bg-slate-150/40 dark:bg-[#0c0f16] text-slate-800 dark:text-slate-200 font-sans min-h-screen flex overflow-hidden transition-colors duration-300">
 
+    <!-- ========================== 全局操作加载状态 Banner ========================== -->
+    <div id="global_loading_banner" class="hidden fixed top-3 left-1/2 -translate-x-1/2 z-50 bg-indigo-600/90 text-white px-5 py-2 rounded-full shadow-lg backdrop-blur flex items-center space-x-2.5 text-xs font-semibold animate-pulse">
+        <svg class="animate-spin h-3.5 w-3.5 text-white shrink-0" viewBox="0 0 24 24" fill="none">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span id="loading_banner_text">操作执行中，请耐心等待...</span>
+    </div>
+
     <!-- ========================== 1. 左侧固定侧边栏 (Sidebar) ========================== -->
     <aside id="sidebar" class="fixed md:static inset-y-0 left-0 w-64 h-screen bg-white dark:bg-[#111622] border-r border-slate-200 dark:border-slate-800/60 flex flex-col justify-between shrink-0 z-30 -translate-x-full md:translate-x-0 transition-transform duration-300">
         <div>
@@ -959,8 +968,10 @@
 
             const output = getDomElement('console_output');
             if (!output) return;
-            const escaped = escapeHtml(raw).replace(/\n/g, '<br>');
-            output.innerHTML += `<div class="text-indigo-600 dark:text-indigo-400 mt-1">${escaped}</div>`;
+            const lineNode = document.createElement('div');
+            lineNode.className = 'text-indigo-600 dark:text-indigo-400 mt-1';
+            lineNode.textContent = raw;
+            output.appendChild(lineNode);
             output.scrollTop = output.scrollHeight;
         }
 
@@ -1039,6 +1050,7 @@
             const scanBtn = getDomElement('scan_start_btn');
             if (btnText) btnText.innerText = '触发搜网扫描 (15s+)';
             if (scanBtn) scanBtn.disabled = false;
+            setGlobalLoading(false);
         }
 
         function handleSmsList(data) {
@@ -1119,6 +1131,18 @@
                 .replace(/>/g, "&gt;")
                 .replace(/"/g, "&quot;")
                 .replace(/'/g, "&#039;");
+        }
+
+        function setGlobalLoading(isLoading, text) {
+            const banner = getDomElement('global_loading_banner');
+            const label = getDomElement('loading_banner_text');
+            if (!banner) return;
+            if (isLoading) {
+                if (label && text) label.textContent = text;
+                banner.classList.remove('hidden');
+            } else {
+                banner.classList.add('hidden');
+            }
         }
 
         let telemetryCache = {};
@@ -1297,7 +1321,10 @@
             if (!cmd || !cmd.trim()) return;
             const output = getDomElement('console_output');
             if (output) {
-                output.innerHTML += `<div class="text-indigo-600 dark:text-indigo-400 mt-2">▶ ${cmd}</div>`;
+                const lineNode = document.createElement('div');
+                lineNode.className = 'text-indigo-600 dark:text-indigo-400 mt-2';
+                lineNode.textContent = '\u25b6 ' + cmd;
+                output.appendChild(lineNode);
                 output.scrollTop = output.scrollHeight;
             }
             sendWsCommand('manual_at', cmd);
@@ -1406,6 +1433,7 @@
                     if (btnText) btnText.innerText = '正在后台扫描中...';
                     if (status) status.innerText = '命令已下发，底层正在扫描全网运营商公开基站频点（宽带将暂时中断，请耐心等待）...';
                     scanBtn.disabled = true;
+                    setGlobalLoading(true, '正在深度扫频搜网中（预计耗时 15~30 秒，期间模组通信挂起）...');
                     sendWsCommand('network_scan');
                 });
             }

@@ -17,12 +17,11 @@ use base64::Engine;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use rand::Rng;
 
 type HmacSha256 = Hmac<Sha256>;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::fs;
 use std::collections::{HashMap, VecDeque};
 use std::sync::OnceLock;
@@ -266,26 +265,7 @@ fn is_authenticated(headers: &HeaderMap, jwt_secret: &str) -> bool {
     }
 }
 
-// ============================================================================
-// 使用 Argon2 密码哈希 + SHA256 质询响应兼容
-// ============================================================================
-
-use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
-    Argon2,
-};
-
-/// 使用 Argon2 生成密码哈希（用于存储，抵抗 GPU/彩虹表暴力破解）
-fn hash_password_argon2(password: &str) -> Result<String, String> {
-    let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::default();
-    argon2
-        .hash_password(password.as_bytes(), &salt)
-        .map(|hash| hash.to_string())
-        .map_err(|e| format!("Argon2 哈希失败: {}", e))
-}
-
-/// 对密码进行 SHA256 哈希（用于质询-响应协议，非存储）
+/// 对密码进行 SHA256 哈希（用于质询-响应协议）
 fn hash_password_sha256(password: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(password.as_bytes());
@@ -387,15 +367,10 @@ struct AppState {
     global: RwLock<GlobalTelemetry>,
     /// JWT 签名密钥
     jwt_secret: String,
-    /// 管理员密码的 Argon2 哈希（用于存储安全，供未来扩展）
-    #[allow(dead_code)]
-    admin_pass_hash: String,
     /// 管理员密码的 SHA256 哈希（用于质询-响应协议）
     admin_pass_sha: String,
     /// 管理员用户名
     admin_username: String,
-    /// Nonce 防重放随机数池（一次性使用，60秒过期）
-    nonce_pool: tokio::sync::Mutex<HashMap<String, Instant>>,
 }
 
 #[derive(Clone, Serialize, Debug, Default)]
@@ -1458,18 +1433,44 @@ fn client_ip(headers: &HeaderMap) -> String {
     "unknown".to_string()
 }
 
+/// 生成无状态 HMAC Nonce（零内存开销）
+fn generate_stateless_nonce(secret: &str) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+    mac.update(now.to_string().as_bytes());
+    let sig = hex::encode(mac.finalize().into_bytes());
+    format!("{}.{}", now, sig)
+}
+
+/// 校验无状态 HMAC Nonce（签名校验 + 60秒过期，零内存开销）
+fn verify_stateless_nonce(nonce: &str, secret: &str) -> bool {
+    let parts: Vec<&str> = nonce.split('.').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+    let ts: u64 = match parts[0].parse() {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if now < ts || now - ts > 60 {
+        return false;
+    }
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+    mac.update(parts[0].as_bytes());
+    let expected_sig = hex::encode(mac.finalize().into_bytes());
+    parts[1].eq_ignore_ascii_case(&expected_sig)
+}
+
 /// 获取一次性动态随机数（Nonce）：GET /api/get_nonce
 async fn get_nonce_handler(State(state): State<Arc<AppState>>) -> Json<NonceResponse> {
-    let now = Instant::now();
-    let mut pool = state.nonce_pool.lock().await;
-
-    pool.retain(|_, timestamp| now.duration_since(*timestamp).as_secs() < 60);
-
-    let random_bytes: [u8; 16] = rand::thread_rng().r#gen();
-    let nonce = hex::encode(random_bytes);
-
-    pool.insert(nonce.clone(), now);
-
+    let nonce = generate_stateless_nonce(&state.jwt_secret);
     Json(NonceResponse { nonce })
 }
 
@@ -1494,21 +1495,17 @@ async fn login_post_handler(
 ) -> Response {
     let ip = client_ip(&headers);
 
-    let is_nonce_valid = {
-        let mut pool = state.nonce_pool.lock().await;
-        pool.remove(&payload.nonce).is_some()
-    };
-
-    if !is_nonce_valid {
+    // 无状态校验 Nonce（无需锁，无需 HashMap 查找）
+    if !verify_stateless_nonce(&payload.nonce, &state.jwt_secret) {
         push_log("WARN", "Auth", &format!(
-            "登录失败(随机数无效): 用户 '{}' 从 {} 尝试",
+            "登录失败(随机数无效或过期): 用户 '{}' 从 {}",
             payload.username, ip
         ));
         return Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .header(header::CONTENT_TYPE, "application/json")
             .body(axum::body::Body::from(
-                r#"{"success":false,"msg":"随机数无效或已过期，请刷新页面重试"}"#,
+                r#"{"success":false,"msg":"随机数失效，请刷新页面重试"}"#,
             ))
             .unwrap();
     }
@@ -1891,15 +1888,9 @@ async fn main() {
     let admin_username =
         env::var("WEBUI_USERNAME").unwrap_or_else(|_| "admin".to_string());
 
-    // Argon2 密码哈希存储 + SHA256 兼容用于质询-响应
-    let admin_pass_argon = hash_password_argon2(&admin_password)
-        .unwrap_or_else(|e| {
-            eprintln!("Argon2 哈希失败: {}，回退至 SHA256", e);
-            hash_password_sha256(&admin_password)
-        });
     let admin_pass_sha = hash_password_sha256(&admin_password);
 
-    push_log("INFO", "System", &format!("密码哈希算法: Argon2 (存储) + SHA256 (质询-响应)"));
+    push_log("INFO", "System", &format!("密码哈希算法: SHA256 (质询-响应)"));
 
     let app_state = Arc::new(AppState {
         tx: tx.clone(),
@@ -1907,10 +1898,8 @@ async fn main() {
         active_views: AtomicUsize::new(0),
         global: RwLock::new(GlobalTelemetry::default()),
         jwt_secret,
-        admin_pass_hash: admin_pass_argon,
         admin_pass_sha,
         admin_username,
-        nonce_pool: tokio::sync::Mutex::new(HashMap::new()),
     });
 
     // 根据串口设备是否存在选择后端

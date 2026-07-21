@@ -1442,7 +1442,7 @@
         function appendSettingsLog(msg) {
             const log = getDomElement('settings_log');
             if (log) {
-                log.insertAdjacentHTML('beforeend', `<div class="text-slate-400 dark:text-slate-500">${msg}</div>`);
+                log.insertAdjacentHTML('beforeend', `<div class="text-slate-400 dark:text-slate-500">${escapeHtml(msg)}</div>`);
                 log.scrollTop = log.scrollHeight;
             }
         }

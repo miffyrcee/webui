@@ -167,7 +167,7 @@ fn hash_password_sha256(password: &str) -> String {
 // 使用 mpsc 通道异步写入，消除 Mutex 竞争
 // ============================================================================
 
-static LOG_TX: OnceLock<mpsc::UnboundedSender<String>> = OnceLock::new();
+static LOG_TX: OnceLock<mpsc::Sender<String>> = OnceLock::new();
 static MEMORY_LOG_STORE: OnceLock<RwLock<VecDeque<String>>> = OnceLock::new();
 
 fn get_log_store() -> &'static RwLock<VecDeque<String>> {
@@ -175,8 +175,8 @@ fn get_log_store() -> &'static RwLock<VecDeque<String>> {
 }
 
 /// 初始化日志后台 Worker，返回 receiver 用于异步消费
-pub fn init_log_worker() -> mpsc::UnboundedReceiver<String> {
-    let (tx, rx) = mpsc::unbounded_channel();
+pub fn init_log_worker() -> mpsc::Receiver<String> {
+    let (tx, rx) = mpsc::channel(1024);
     LOG_TX.set(tx).ok();
     rx
 }
@@ -193,12 +193,12 @@ pub fn push_log(level: &str, module: &str, msg: &str) {
     }
 
     if let Some(tx) = LOG_TX.get() {
-        let _ = tx.send(formatted);
+        let _ = tx.try_send(formatted); // 非阻塞发送，满则丢弃（背压保护）
     }
 }
 
 /// 独立协程管理环形日志（无锁写入）
-async fn log_worker_task(mut rx: mpsc::UnboundedReceiver<String>) {
+async fn log_worker_task(mut rx: mpsc::Receiver<String>) {
     while let Some(log) = rx.recv().await {
         let store = get_log_store();
         let mut guard = store.write().await;
@@ -1304,6 +1304,14 @@ fn static_file_response(
 // 质询-响应认证 Handlers
 // ============================================================================
 
+/// 将 GlobalTelemetry 序列化为 JSON 字符串（预序列化广播辅助函数）
+fn serialize_global(global: &GlobalTelemetry, update_type: &str) -> String {
+    serde_json::json!({
+        "update_type": update_type,
+        "data": global
+    }).to_string()
+}
+
 /// 从请求头中提取客户端 IP
 fn client_ip(headers: &HeaderMap) -> String {
     if let Some(val) = headers.get("x-forwarded-for") {
@@ -1632,7 +1640,7 @@ async fn hardware_task(
                 }
             }
             _ = interval.tick() => {
-                let active = state.active_views.load(Ordering::Relaxed) > 0;
+                let active = state.active_views.load(Ordering::Acquire) > 0;
 
                 if active && get_at_lock().try_lock().is_ok() {
                     let start_poll = std::time::Instant::now();
@@ -1692,10 +1700,7 @@ async fn hardware_task(
                         }
 
                         // 预序列化为 JSON 字符串并广播（零重复序列化损耗）
-                        let json_str = serde_json::json!({
-                            "update_type": "delta",
-                            "data": &*global
-                        }).to_string();
+                        let json_str = serialize_global(&global, "delta");
                         let _ = state.tx.send(Arc::new(json_str));
                     }
 
@@ -1710,10 +1715,7 @@ async fn hardware_task(
                     global.uptime = Some(format!("{} minutes", uptime_sec / 60));
                     global.updated = Some(updated_str);
 
-                    let json_str = serde_json::json!({
-                        "update_type": "delta",
-                        "data": &*global
-                    }).to_string();
+                    let json_str = serialize_global(&global, "delta");
                     let _ = state.tx.send(Arc::new(json_str));
 
                 } else {
@@ -1801,11 +1803,7 @@ async fn main() {
                 guard.active_sim = Some(active_sim);
                 guard.network_provider = Some(network_provider);
                 guard.apn = Some(apn);
-                // 预序列化字符串广播
-                let json_str = serde_json::json!({
-                    "update_type": "full",
-                    "data": &*guard
-                }).to_string();
+                let json_str = serialize_global(&guard, "full");
                 let _ = app_state.tx.send(Arc::new(json_str));
             }
         }
@@ -1852,10 +1850,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     // 发送全量快照作为第一条消息
     {
         let guard = state.global.read().await;
-        let full_json = serde_json::json!({
-            "update_type": "full",
-            "data": &*guard
-        }).to_string();
+        let full_json = serialize_global(&guard, "full");
         if ws_sender.send(Message::Text(full_json.into())).await.is_err() {
             if current_is_active {
                 state.active_views.fetch_sub(1, Ordering::SeqCst);
@@ -1868,10 +1863,14 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
         _ = async {
             loop {
                 tokio::select! {
-                    Ok(pre_serialized) = broadcast_rx.recv() => {
-                        // 直接推送预序列化的 Arc<String>，零 CPU 开销
-                        if ws_sender.send(Message::Text((*pre_serialized).clone().into())).await.is_err() {
-                            break;
+                    result = broadcast_rx.recv() => {
+                        match result {
+                            Ok(pre_serialized) => {
+                                if ws_sender.send(Message::Text((*pre_serialized).clone().into())).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Err(_) => continue, // 通道满跳过旧消息或已关闭
                         }
                     }
                     Some(reply) = local_rx.recv() => {

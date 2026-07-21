@@ -23,10 +23,10 @@ type HmacSha256 = Hmac<Sha256>;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+use std::fs;
 use std::collections::{HashMap, VecDeque};
 use std::sync::OnceLock;
 use std::{env, sync::Arc};
-use sysinfo::{Components, System};
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 
 use at::{
@@ -39,6 +39,34 @@ use fs2::FileExt;
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 const IDLE_INTERVAL_SECS: u64 = 15;
+
+/// 直接读取 Linux /proc/uptime，零堆内存开销
+fn get_uptime_mins() -> u64 {
+    fs::read_to_string("/proc/uptime")
+        .ok()
+        .and_then(|content| {
+            content.split_whitespace().next()?.parse::<f64>().ok()
+        })
+        .map(|secs| (secs / 60.0) as u64)
+        .unwrap_or(0)
+}
+
+/// 直接读取高通 SoC thermal zone 温度，零堆内存开销
+fn get_soc_temperature() -> Option<String> {
+    let paths = [
+        "/sys/class/thermal/thermal_zone0/temp",
+        "/sys/class/thermal/thermal_zone1/temp",
+    ];
+    for path in &paths {
+        if let Ok(content) = fs::read_to_string(path) {
+            if let Ok(milli_c) = content.trim().parse::<f32>() {
+                let val = if milli_c > 1000.0 { milli_c / 1000.0 } else { milli_c };
+                return Some(format!("{:.0} °C", val));
+            }
+        }
+    }
+    None
+}
 
 // ============================================================================
 // 统一错误类型 AppError
@@ -1656,7 +1684,6 @@ async fn hardware_task(
     backend: Arc<dyn HardwareBackend>,
     state: Arc<AppState>,
 ) {
-    let mut components = Components::new_with_refreshed_list();
     let mut interval_secs = 5u64;
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
     interval.tick().await;
@@ -1686,16 +1713,7 @@ async fn hardware_task(
                     consecutive_failures = if telemetry_dead { consecutive_failures + 1 } else { 0 };
 
                     if telemetry.temperature.is_none() {
-                        components.refresh(true);
-                        if let Some(temp) = components.iter()
-                            .find(|c| {
-                                let lower = c.label().to_lowercase();
-                                lower.contains("cpu") || lower.contains("package")
-                            })
-                            .and_then(|c| c.temperature())
-                        {
-                            telemetry.temperature = Some(format!("{:.0} °C", temp));
-                        }
+                        telemetry.temperature = get_soc_temperature();
                     }
 
                     telemetry.internet_connection = Some(if telemetry.ipv4.is_some() {
@@ -1704,7 +1722,7 @@ async fn hardware_task(
                         "Disconnected".to_string()
                     });
 
-                    let uptime_sec = System::uptime();
+                    let uptime_mins = get_uptime_mins();
                     let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
                     {
@@ -1722,12 +1740,12 @@ async fn hardware_task(
                             global.network_provider = prov;
                             global.apn = apn;
                             global.internet_connection = Some("Disconnected".to_string());
-                            global.uptime = Some(format!("{} minutes", uptime_sec / 60));
+                            global.uptime = Some(format!("{} minutes", uptime_mins));
                             global.updated = Some(updated_str);
                         } else {
                             *global = GlobalTelemetry::from_telemetry_and_global(
                                 &telemetry, &global,
-                                Some(format!("{} minutes", uptime_sec / 60)),
+                                Some(format!("{} minutes", uptime_mins)),
                                 Some(updated_str),
                             );
                         }
@@ -1741,11 +1759,11 @@ async fn hardware_task(
 
                 } else if active {
                     push_log("WARN", "Poll", "串口忙或正在执行慢命令，跳过当次采集，复用缓存");
-                    let uptime_sec = System::uptime();
+                    let uptime_mins = get_uptime_mins();
                     let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
                     let mut global = state.global.write().await;
-                    global.uptime = Some(format!("{} minutes", uptime_sec / 60));
+                    global.uptime = Some(format!("{} minutes", uptime_mins));
                     global.updated = Some(updated_str);
 
                     let json_str = serialize_global(&global, "delta");

@@ -17,11 +17,12 @@ use base64::Engine;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use rand::Rng;
 
 type HmacSha256 = Hmac<Sha256>;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 use std::{env, sync::Arc};
@@ -52,8 +53,15 @@ struct Claims {
 
 #[derive(Deserialize)]
 struct LoginPayload {
+    #[allow(dead_code)]
     username: String,
-    password: String,
+    nonce: String,
+    response: String,
+}
+
+#[derive(Serialize)]
+struct NonceResponse {
+    nonce: String,
 }
 
 /// 从 Cookie 请求头解析 JWT Token
@@ -218,8 +226,12 @@ struct AppState {
     global: RwLock<GlobalTelemetry>,
     /// JWT 签名密钥
     jwt_secret: String,
-    /// 凭证 SHA256 哈希（username:password）
-    credit_hash: String,
+    /// 管理员密码的 SHA256 哈希
+    admin_pass_hash: String,
+    /// 管理员用户名
+    admin_username: String,
+    /// Nonce 防重放随机数池（一次性使用，60秒过期）
+    nonce_pool: Mutex<HashMap<String, Instant>>,
 }
 
 #[derive(Clone, Serialize, Debug, Default)]
@@ -1181,6 +1193,50 @@ fn static_file_response(
         .unwrap()
 }
 
+// ============================================================================
+// 质询-响应认证 Handlers
+// ============================================================================
+
+/// 安全获取 nonce_pool 锁（Mutex 中毒时自动恢复）
+fn lock_nonce_pool(state: &AppState) -> std::sync::MutexGuard<'_, HashMap<String, Instant>> {
+    match state.nonce_pool.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            push_log("WARN", "Auth", "nonce_pool 互斥锁检测到中毒，已强制恢复锁");
+            poisoned.into_inner()
+        }
+    }
+}
+
+/// 从请求头中提取客户端 IP（优先 X-Forwarded-For，兜底未知）
+fn client_ip(headers: &HeaderMap) -> String {
+    if let Some(val) = headers.get("x-forwarded-for") {
+        if let Ok(val) = val.to_str() {
+            if let Some(ip) = val.split(',').next() {
+                return ip.trim().to_string();
+            }
+        }
+    }
+    "unknown".to_string()
+}
+
+/// 获取一次性动态随机数（Nonce）：GET /api/get_nonce
+async fn get_nonce_handler(State(state): State<Arc<AppState>>) -> Json<NonceResponse> {
+    let now = Instant::now();
+    let mut pool = lock_nonce_pool(&state);
+
+    // 清理超时（60秒）的旧随机数，防止内存泄漏
+    pool.retain(|_, timestamp| now.duration_since(*timestamp).as_secs() < 60);
+
+    // 生成 16 字节密码学安全随机数，hex 编码为 32 位字符串
+    let random_bytes: [u8; 16] = rand::thread_rng().r#gen();
+    let nonce = hex::encode(random_bytes);
+
+    pool.insert(nonce.clone(), now);
+
+    Json(NonceResponse { nonce })
+}
+
 async fn index_handler(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     if !is_authenticated(&headers, &state.jwt_secret) {
         return Redirect::to("/login").into_response();
@@ -1197,9 +1253,37 @@ async fn login_get_handler(State(state): State<Arc<AppState>>, headers: HeaderMa
 
 async fn login_post_handler(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(payload): Json<LoginPayload>,
 ) -> Response {
-    if hash_password(&format!("{}:{}", payload.username, &payload.password)) == state.credit_hash {
+    let ip = client_ip(&headers);
+
+    // 1. 校验并立即消费 Nonce（一次性使用，防重放攻击）
+    let is_nonce_valid = {
+        let mut pool = lock_nonce_pool(&state);
+        pool.remove(&payload.nonce).is_some()
+    };
+
+    if !is_nonce_valid {
+        push_log("WARN", "Auth", &format!(
+            "登录失败(随机数无效): 用户 '{}' 从 {} 尝试",
+            payload.username, ip
+        ));
+        return Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::from(
+                r#"{"success":false,"msg":"随机数无效或已过期，请刷新页面重试"}"#,
+            ))
+            .unwrap();
+    }
+
+    // 2. 后端计算预期响应值：SHA256(nonce + username + SHA256(admin_password))
+    let expected_response =
+        hash_password(&format!("{}{}{}", payload.nonce, state.admin_username, state.admin_pass_hash));
+
+    // 3. 验证前端响应是否一致（用户名+暗号双重校验）
+    if payload.response.eq_ignore_ascii_case(&expected_response) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -1225,6 +1309,8 @@ async fn login_post_handler(
             }
         };
 
+        push_log("INFO", "Auth", &format!("管理员登录成功 (来源: {})", ip));
+
         let cookie = format!(
             "auth_token={}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800",
             token
@@ -1237,6 +1323,10 @@ async fn login_post_handler(
             .body(axum::body::Body::from(r#"{"success":true,"msg":"登录成功"}"#))
             .unwrap()
     } else {
+        push_log("WARN", "Auth", &format!(
+            "登录失败(密码错误): 用户 '{}' 从 {} 尝试",
+            payload.username, ip
+        ));
         Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .header(header::CONTENT_TYPE, "application/json")
@@ -1597,8 +1687,11 @@ async fn main() {
 
     let jwt_secret =
         env::var("JWT_SECRET").unwrap_or_else(|_| "argon_rm520n_jwt_secret_key_default".to_string());
-    let credit_hash =
-        env::var("CREDIT_HASH").unwrap_or_else(|_| "8da193366e1554c08b2870c50f737b9587c3372b656151c4a96028af26f51334".to_string());
+    let admin_password =
+        env::var("WEBUI_PASSWORD").unwrap_or_else(|_| "admin123".to_string());
+    let admin_pass_hash = hash_password(&admin_password);
+    let admin_username =
+        env::var("WEBUI_USERNAME").unwrap_or_else(|_| "admin".to_string());
 
     let app_state = Arc::new(AppState {
         tx: tx.clone(),
@@ -1606,7 +1699,9 @@ async fn main() {
         active_views: AtomicUsize::new(0),
         global: RwLock::new(GlobalTelemetry::default()),
         jwt_secret,
-        credit_hash,
+        admin_pass_hash,
+        admin_username,
+        nonce_pool: Mutex::new(HashMap::new()),
     });
 
     let backend: Arc<dyn HardwareBackend> = Arc::new(RealBackend { serial_path: serial_path.clone() });
@@ -1639,6 +1734,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(index_handler))
         .route("/login", get(login_get_handler))
+        .route("/api/get_nonce", get(get_nonce_handler))
         .route("/api/login", post(login_post_handler))
         .route("/api/logout", post(logout_post_handler))
         .route("/ws", get(ws_handler))

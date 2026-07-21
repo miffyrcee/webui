@@ -55,11 +55,19 @@
         </form>
 
         <div class="mt-8 text-center border-t border-slate-800/80 pt-4">
-            <span class="text-[11px] text-slate-500">凭证通过环境变量 <code class="text-indigo-400">CREDIT_HASH</code> 配置，值为 <code class="text-indigo-400">sha256(username:password)</code></span>
+            <span class="text-[11px] text-slate-500">凭证通过环境变量 <code class="text-indigo-400">WEBUI_USERNAME</code> / <code class="text-indigo-400">WEBUI_PASSWORD</code> 配置，用户名与密码均加密传输</span>
         </div>
     </div>
 
     <script>
+        // 浏览器原生 SHA-256 哈希（Web Crypto API）
+        async function sha256(message) {
+            const msgBuffer = new TextEncoder().encode(message);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
         async function handleLogin(e) {
             e.preventDefault();
             const usernameInput = document.getElementById('username');
@@ -76,10 +84,25 @@
             errorAlert.classList.add('hidden');
 
             try {
+                // 步骤 1: 向后端索要一次性动态随机数（Nonce）
+                const nonceRes = await fetch('/api/get_nonce');
+                if (!nonceRes.ok) throw new Error('获取随机数失败');
+                const { nonce } = await nonceRes.json();
+
+                // 步骤 2: 前端本地计算哈希响应
+                // 公式: response = SHA256( nonce + username + SHA256(password) )
+                const passHash = await sha256(password);
+                const clientResponse = await sha256(nonce + username + passHash);
+
+                // 步骤 3: 提交质询响应（密码永不上传）
                 const res = await fetch('/api/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
+                    body: JSON.stringify({
+                        username: username,
+                        nonce: nonce,
+                        response: clientResponse
+                    })
                 });
 
                 const data = await res.json();

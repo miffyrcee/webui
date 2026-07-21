@@ -6,13 +6,16 @@ use axum::{
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::header,
-    response::{IntoResponse, Response},
-    routing::get,
+    http::{header, HeaderMap, StatusCode},
+    response::{IntoResponse, Redirect, Response},
+    routing::{get, post},
+    Json,
 };
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use std::collections::{HashMap, VecDeque};
@@ -31,6 +34,64 @@ use fs2::FileExt;
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 const IDLE_INTERVAL_SECS: u64 = 15;
+
+// ============================================================================
+// JWT Authentication Definition
+// ============================================================================
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String,
+    exp: u64,
+    iat: u64,
+}
+
+#[derive(Deserialize)]
+struct LoginPayload {
+    username: String,
+    password: String,
+}
+
+/// 从 Cookie 请求头解析 JWT Token
+fn extract_token_from_headers(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(header::COOKIE)?
+        .to_str()
+        .ok()?
+        .split(';')
+        .find_map(|cookie| {
+            let mut parts = cookie.trim().splitn(2, '=');
+            let name = parts.next()?;
+            let value = parts.next()?;
+            if name == "auth_token" {
+                Some(value.to_string())
+            } else {
+                None
+            }
+        })
+}
+
+/// 验证 JWT Token 是否有效
+fn is_authenticated(headers: &HeaderMap, jwt_secret: &str) -> bool {
+    if let Some(token) = extract_token_from_headers(headers) {
+        let validation = Validation::new(Algorithm::HS256);
+        decode::<Claims>(
+            &token,
+            &DecodingKey::from_secret(jwt_secret.as_bytes()),
+            &validation,
+        )
+        .is_ok()
+    } else {
+        false
+    }
+}
+
+/// 对密码进行 SHA256 哈希（十六进制编码）
+fn hash_password(password: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(password.as_bytes());
+    hex::encode(hasher.finalize())
+}
 
 // ============================================================================
 // 模组闪存生命保护：内存环形滚动日志系统 (RAM Ring Buffer)
@@ -102,6 +163,10 @@ struct AppState {
     active_views: AtomicUsize,
     /// 全局状态 — fetch_static_info 和 hardware_polling_actor 获取的所有值均汇聚于此，ws.send 全部从此读取
     global: RwLock<GlobalTelemetry>,
+    /// JWT 签名密钥
+    jwt_secret: String,
+    /// 凭证 SHA256 哈希（username:password）
+    credit_hash: String,
 }
 
 #[derive(Clone, Serialize, Debug, Default)]
@@ -1063,8 +1128,81 @@ fn static_file_response(
         .unwrap()
 }
 
-async fn index_handler() -> impl IntoResponse {
+async fn index_handler(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if !is_authenticated(&headers, &state.jwt_secret) {
+        return Redirect::to("/login").into_response();
+    }
     static_file_response(include_str!("index.html"), "text/html; charset=utf-8")
+}
+
+async fn login_get_handler(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if is_authenticated(&headers, &state.jwt_secret) {
+        return Redirect::to("/").into_response();
+    }
+    static_file_response(include_str!("login.html"), "text/html; charset=utf-8")
+}
+
+async fn login_post_handler(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<LoginPayload>,
+) -> Response {
+    if hash_password(&format!("{}:{}", payload.username, &payload.password)) == state.credit_hash {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let claims = Claims {
+            sub: "admin".to_string(),
+            exp: now + 86400 * 7,
+            iat: now,
+        };
+
+        let token = match encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(state.jwt_secret.as_bytes()),
+        ) {
+            Ok(t) => t,
+            Err(e) => {
+                push_log("ERROR", "Auth", &format!("JWT 签名生成失败: {}", e));
+                return Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"success":false,"msg":"服务器内部错误，登录失败"}"#,
+                    ))
+                    .unwrap();
+            }
+        };
+
+        let cookie = format!(
+            "auth_token={}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800",
+            token
+        );
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(header::SET_COOKIE, cookie)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::from(r#"{"success":true,"msg":"登录成功"}"#))
+            .unwrap()
+    } else {
+        Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::from(r#"{"success":false,"msg":"密码错误，请重试"}"#))
+            .unwrap()
+    }
+}
+
+async fn logout_post_handler() -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::SET_COOKIE, "auth_token=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(r#"{"success":true}"#))
+        .unwrap()
 }
 
 // ============================================================================
@@ -1408,11 +1546,18 @@ async fn main() {
     let (tx, _) = broadcast::channel(100);
     let (command_tx, command_rx) = mpsc::channel(32);
 
+    let jwt_secret =
+        env::var("JWT_SECRET").unwrap_or_else(|_| "argon_rm520n_jwt_secret_key_default".to_string());
+    let credit_hash =
+        env::var("CREDIT_HASH").unwrap_or_else(|_| "8da193366e1554c08b2870c50f737b9587c3372b656151c4a96028af26f51334".to_string());
+
     let app_state = Arc::new(AppState {
         tx: tx.clone(),
         command_tx,
         active_views: AtomicUsize::new(0),
         global: RwLock::new(GlobalTelemetry::default()),
+        jwt_secret,
+        credit_hash,
     });
 
     let backend: Arc<dyn HardwareBackend> = Arc::new(RealBackend { serial_path: serial_path.clone() });
@@ -1444,6 +1589,9 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(index_handler))
+        .route("/login", get(login_get_handler))
+        .route("/api/login", post(login_post_handler))
+        .route("/api/logout", post(logout_post_handler))
         .route("/ws", get(ws_handler))
         .route("/style.css", get(style_handler))
         .with_state(app_state);
@@ -1453,8 +1601,15 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    ws.on_upgrade(|socket| handle_ws(socket, state))
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    if !is_authenticated(&headers, &state.jwt_secret) {
+        return (StatusCode::UNAUTHORIZED, "Unauthorized WebSocket Request").into_response();
+    }
+    ws.on_upgrade(|socket| handle_ws(socket, state)).into_response()
 }
 
 async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {

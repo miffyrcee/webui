@@ -34,7 +34,6 @@ use at::{
     parse_qeng, parse_qtemp_temperature, parse_signal_quality,
     decode_cmgl_body, decode_hex_ucs2, format_bytes, normalize_at_command,
 };
-use fs2::FileExt;
 
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
@@ -1146,43 +1145,8 @@ async fn fetch_network_provider(serial_path: &str) -> String {
 }
 
 // ============================================================================
-// AT 命令基础架构（互斥锁 + 去重队列 + 跨进程文件锁）
+// AT 命令基础架构（互斥锁 + 去重队列）
 // ============================================================================
-
-/// 跨进程文件锁
-struct SerialFileLock {
-    file: Option<std::fs::File>,
-}
-
-impl Drop for SerialFileLock {
-    fn drop(&mut self) {
-        if let Some(ref file) = self.file {
-            let _ = file.unlock();
-        }
-    }
-}
-
-const LOCK_FILE_PATH: &str = "/tmp/atcmd_rs.lock";
-
-async fn acquire_serial_lock() -> Result<SerialFileLock, String> {
-    let result = tokio::task::spawn_blocking(|| -> Result<std::fs::File, String> {
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .read(true)
-            .open(LOCK_FILE_PATH)
-            .map_err(|e| format!("无法打开锁文件 {}: {}", LOCK_FILE_PATH, e))?;
-
-        file.lock_exclusive()
-            .map_err(|e| format!("获取 {} 排他锁失败: {}", LOCK_FILE_PATH, e))?;
-
-        Ok(file)
-    })
-    .await
-    .map_err(|e| format!("文件锁任务被取消: {}", e))??;
-
-    Ok(SerialFileLock { file: Some(result) })
-}
 
 static AT_CMD_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
@@ -1253,7 +1217,6 @@ async fn send_at_command_inner_with_timeout(
     let start = std::time::Instant::now();
 
     let _lock = get_at_lock().lock().await;
-    let _file_lock = acquire_serial_lock().await?;
 
     let child = tokio::process::Command::new("atcmd_rs")
         .arg("-p")

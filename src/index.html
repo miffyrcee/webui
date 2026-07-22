@@ -21,6 +21,14 @@
         <span id="loading_banner_text">操作执行中，请耐心等待...</span>
     </div>
 
+    <!-- ========================== WebSocket 断连全屏遮罩 ========================== -->
+    <div id="ws_disconnect_modal" class="hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center">
+        <div class="bg-white dark:bg-[#111622] p-6 rounded-2xl shadow-xl text-center space-y-3">
+            <div class="animate-spin text-indigo-600 dark:text-indigo-400 w-8 h-8 mx-auto border-4 border-indigo-600 border-t-transparent rounded-full"></div>
+            <p class="text-sm font-semibold text-slate-700 dark:text-slate-200">与模组通信中断，正在尝试重连...</p>
+        </div>
+    </div>
+
     <!-- ========================== 1. 左侧固定侧边栏 (Sidebar) ========================== -->
     <aside id="sidebar" class="fixed md:static inset-y-0 left-0 w-64 h-screen bg-white dark:bg-[#111622] border-r border-slate-200 dark:border-slate-800/60 flex flex-col justify-between shrink-0 z-30 -translate-x-full md:translate-x-0 transition-transform duration-300">
         <div>
@@ -35,32 +43,32 @@
 
             <!-- 垂直导航菜单区 — Argon 风格左指示条 -->
             <nav role="tablist" class="py-2 space-y-0.5">
-                <button id="tab_dashboard" role="tab" aria-selected="true" onclick="switchTab('dashboard')"
+                <button id="tab_dashboard" role="tab" aria-selected="true" aria-controls="panel_dashboard" onclick="switchTab('dashboard')"
                     class="tab-btn w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer">
                     <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>
                     <span>仪表盘 Dashboard</span>
                 </button>
-                <button id="tab_network" role="tab" aria-selected="false" onclick="switchTab('network')"
+                <button id="tab_network" role="tab" aria-selected="false" aria-controls="panel_network" onclick="switchTab('network')"
                     class="tab-btn w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer">
                     <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                     <span>连接配置 Control</span>
                 </button>
-                <button id="tab_locks" role="tab" aria-selected="false" onclick="switchTab('locks')"
+                <button id="tab_locks" role="tab" aria-selected="false" aria-controls="panel_locks" onclick="switchTab('locks')"
                     class="tab-btn w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer">
                     <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
                     <span>高级锁频与诊断 Locks</span>
                 </button>
-                <button id="tab_sms" role="tab" aria-selected="false" onclick="switchTab('sms')"
+                <button id="tab_sms" role="tab" aria-selected="false" aria-controls="panel_sms" onclick="switchTab('sms')"
                     class="tab-btn w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer">
                     <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
                     <span>短信中心 SMS</span>
                 </button>
-                <button id="tab_usb" role="tab" aria-selected="false" onclick="switchTab('usb')"
+                <button id="tab_usb" role="tab" aria-selected="false" aria-controls="panel_usb" onclick="switchTab('usb')"
                     class="tab-btn w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer">
                     <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25"/></svg>
                     <span>USB 配置</span>
                 </button>
-                <button id="tab_logs" role="tab" aria-selected="false" onclick="switchTab('logs')"
+                <button id="tab_logs" role="tab" aria-selected="false" aria-controls="panel_logs" onclick="switchTab('logs')"
                     class="tab-btn w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer">
                     <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
                     <span>系统日志 Logs</span>
@@ -95,7 +103,7 @@
             <div class="flex items-center space-x-3">
                 <span class="hidden sm:inline-block text-[10px] bg-indigo-500/10 dark:bg-indigo-400/10 text-indigo-600 dark:text-indigo-400 px-2.5 py-1 rounded-full font-bold tracking-wider uppercase border border-indigo-500/20 dark:border-indigo-400/20">Auto Refresh On</span>
                 <!-- 主题日光/月光转换开关 -->
-                <button id="theme_toggle" class="p-2 rounded-lg bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 transition-all active:scale-95 text-slate-600 dark:text-slate-400 cursor-pointer" title="切换白天/夜晚模式">
+                <button id="theme_toggle" class="p-2 rounded-lg bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 transition-all active:scale-95 text-slate-600 dark:text-slate-400 cursor-pointer" title="切换白天/夜晚模式" aria-label="切换白天/夜晚模式">
                     <svg aria-hidden="true" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m12.728 12.728l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
                     </svg>
@@ -104,7 +112,7 @@
                     </svg>
                 </button>
                 <!-- 退出登录按钮 -->
-                <button onclick="logout()" class="p-2 rounded-lg bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 transition-all active:scale-95 text-slate-600 dark:text-slate-400 cursor-pointer" title="退出登录">
+                <button onclick="logout()" class="p-2 rounded-lg bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 transition-all active:scale-95 text-slate-600 dark:text-slate-400 cursor-pointer" title="退出登录" aria-label="退出登录">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                     </svg>
@@ -120,7 +128,7 @@
 
                 <!-- Argon 核心指标卡片 — 渐变图标容器 -->
                 <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
-                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 duration-300">
                         <div class="flex justify-between items-start">
                             <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">工作温度 Temp</span>
                             <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20">
@@ -130,7 +138,7 @@
                         <div class="mt-3"><span id="temp" class="text-2xl font-bold tracking-tight text-amber-500">-- °C</span></div>
                     </div>
 
-                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 duration-300">
                         <div class="flex justify-between items-start">
                             <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">SIM 卡状态 SIM</span>
                             <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
@@ -140,7 +148,7 @@
                         <div class="mt-3"><span id="sim_status" class="text-2xl font-bold tracking-tight text-indigo-600 dark:text-indigo-400">--</span></div>
                     </div>
 
-                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 duration-300">
                         <div class="flex justify-between items-start">
                             <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">信号质量 Signal</span>
                             <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-400 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
@@ -150,7 +158,7 @@
                         <div class="mt-3"><span id="signal_pct" class="text-2xl font-bold tracking-tight text-blue-600 dark:text-blue-400">--%</span></div>
                     </div>
 
-                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 duration-300">
                         <div class="flex justify-between items-start">
                             <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">因特网连接 Link</span>
                             <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-green-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
@@ -161,7 +169,7 @@
                     </div>
 
                     <!-- CPU 使用率卡片 -->
-                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 duration-300">
                         <div class="flex justify-between items-start">
                             <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">CPU 负载 Usage</span>
                             <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-orange-500 flex items-center justify-center shadow-lg shadow-rose-500/20">
@@ -177,7 +185,7 @@
                     </div>
 
                     <!-- 内存使用率卡片 -->
-                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 duration-300">
                         <div class="flex justify-between items-start">
                             <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">内存使用 Memory</span>
                             <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 to-teal-500 flex items-center justify-center shadow-lg shadow-cyan-500/20">
@@ -389,7 +397,7 @@
                         <div class="p-4 space-y-3">
                             <div class="flex flex-col gap-1">
                                 <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">APN 接入点 (例如: ims 或 3gnet)</label>
-                                <input id="net_apn_input" type="text" placeholder="e.g. ims"
+                                <input id="net_apn_input" type="text" placeholder="e.g. ims" maxlength="63"
                                     class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
                             </div>
                             <div class="flex flex-col gap-1">
@@ -483,35 +491,35 @@
                                 
                                 <!-- 5G Grid -->
                                 <div id="nr5g_bands_grid" class="grid grid-cols-4 sm:grid-cols-6 gap-2 pt-1">
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="1">n1</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="3">n3</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="5">n5</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="7">n7</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="8">n8</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="20">n20</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="28">n28</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="38">n38</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="41">n41</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="71">n71</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="77">n77</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="78">n78</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="79">n79</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="1">n1</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="3">n3</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="5">n5</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="7">n7</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="8">n8</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="20">n20</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="28">n28</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="38">n38</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="41">n41</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="71">n71</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="77">n77</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="78">n78</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="79">n79</button>
                                 </div>
 
                                 <!-- 4G Grid -->
                                 <div id="lte_bands_grid" class="grid grid-cols-4 sm:grid-cols-6 gap-2 pt-1 hidden">
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="1">B1</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="3">B3</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="5">B5</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="7">B7</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="8">B8</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="20">B20</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="28">B28</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="34">B34</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="38">B38</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="39">B39</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="40">B40</button>
-                                    <button type="button" class="band-pill px-2.5 py-1.5 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="41">B41</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="1">B1</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="3">B3</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="5">B5</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="7">B7</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="8">B8</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="20">B20</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="28">B28</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="34">B34</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="38">B38</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="39">B39</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="40">B40</button>
+                                    <button type="button" class="band-pill min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 text-slate-650 dark:text-slate-350 hover:bg-slate-100/60 dark:hover:bg-slate-800 transition-all duration-150 cursor-pointer text-center" data-band="41">B41</button>
                                 </div>
                             </div>
 
@@ -547,18 +555,18 @@
                             <div class="grid grid-cols-2 gap-2">
                                 <div class="flex flex-col gap-1">
                                     <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">目标 PCI</label>
-                                    <input id="cell_pci_input" type="number" placeholder="PCI"
+                                    <input id="cell_pci_input" type="number" placeholder="PCI" min="0" max="1007"
                                         class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
                                 </div>
                                 <div class="flex flex-col gap-1">
                                     <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">绝对频点号 EARFCN</label>
-                                    <input id="cell_earfcn_input" type="number" placeholder="EARFCN"
+                                    <input id="cell_earfcn_input" type="number" placeholder="EARFCN" min="0" max="262143"
                                         class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
                                 </div>
                             </div>
                             <div class="flex flex-col gap-1">
                                 <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">制式 Band 物理频段 (5G锁定必填)</label>
-                                <input id="cell_band_input" type="number" placeholder="41"
+                                <input id="cell_band_input" type="number" placeholder="41" min="1" max="255"
                                     class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
                             </div>
                             <div class="flex space-x-2">
@@ -715,7 +723,7 @@
                             <div class="p-4 space-y-3">
                                 <div class="flex flex-col gap-1">
                                     <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">发件目标号码 (Recipient)</label>
-                                    <input id="sms_recipient" type="tel" placeholder="+8613800138000"
+                                    <input id="sms_recipient" type="tel" placeholder="+8613800138000" maxlength="20" pattern="[+\d]{7,20}"
                                         class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
                                 </div>
                                 <div class="flex flex-col gap-1">
@@ -755,23 +763,23 @@
 
                             <!-- 模式选择磁贴按钮 -->
                             <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5" id="usb_mode_grid">
-                                <button type="button" class="usb-mode-btn px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="0">
+                                <button type="button" class="usb-mode-btn min-h-[36px] px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="0">
                                     <span class="block text-xs">RMNET</span>
                                     <span class="block text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5">Qualcomm QMI</span>
                                 </button>
-                                <button type="button" class="usb-mode-btn px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="1">
+                                <button type="button" class="usb-mode-btn min-h-[36px] px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="1">
                                     <span class="block text-xs">ECM</span>
                                     <span class="block text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5">Linux/Mac 免驱</span>
                                 </button>
-                                <button type="button" class="usb-mode-btn px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="2">
+                                <button type="button" class="usb-mode-btn min-h-[36px] px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="2">
                                     <span class="block text-xs">MBIM</span>
                                     <span class="block text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5">Win10/11 原生</span>
                                 </button>
-                                <button type="button" class="usb-mode-btn px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="3">
+                                <button type="button" class="usb-mode-btn min-h-[36px] px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="3">
                                     <span class="block text-xs">RNDIS</span>
                                     <span class="block text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5">Windows 免驱</span>
                                 </button>
-                                <button type="button" class="usb-mode-btn px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="5">
+                                <button type="button" class="usb-mode-btn min-h-[36px] px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="5">
                                     <span class="block text-xs">NCM</span>
                                     <span class="block text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5">高速网卡</span>
                                 </button>
@@ -880,6 +888,31 @@
         };
 
         const domElements = {};
+        // 全局常量
+        const PLACEHOLDER = "--";
+        const MAX_LOG_LINES = 200;
+        const WS_RECONNECT_BASE = 3000;    // 重连基础间隔 (ms)
+        const WS_RECONNECT_MAX = 60000;    // 重连最大间隔 (ms)
+        let wsReconnectAttempt = 0;          // 当前重连尝试次数
+        let wsReconnectTimer = null;         // 重连定时器句柄
+
+        // WebSocket 消息分发映射表
+        const WS_HANDLERS = {
+            'static_info': d => handleStaticInfo(d.data),
+            'at_res': d => handleAtResponse(d.data),
+            'network_status': d => handleNetworkStatus(d.data),
+            'scan_result': d => handleScanResult(d.data),
+            'sms_list': d => typeof d.data === 'string' ? handleAtResponse(d.data) : handleSmsList(d.data),
+            'backend_log': d => handleBackendLog(d.data),
+            'device_info': d => handleDeviceInfo(d.data),
+            'settings_info': d => handleSettingsInfo(d.data),
+            'band_lock_res': d => handleBandLockRes(d.data),
+            'cell_lock_res': d => handleCellLockRes(d.data),
+            'diagnostics_res': d => handleDiagnosticsRes(d.data),
+            'settings_log': d => { if (d.data && d.data.msg) appendSettingsLog(d.data.msg); },
+            'usb_config_info': d => handleUsbConfigInfo(d.data),
+            'usb_net_res': d => handleUsbNetRes(d.data),
+        };
         function getDomElement(id) {
             if (!domElements[id]) {
                 domElements[id] = document.getElementById(id);
@@ -890,9 +923,9 @@
         function updateText(id, value) {
             const el = getDomElement(id);
             if (!el) return;
-            const textValue = (value === null || value === undefined) ? "--" : value;
-            if (el.innerText !== textValue) {
-                el.innerText = textValue;
+            const textValue = (value === null || value === undefined) ? PLACEHOLDER : value;
+            if (el.textContent !== textValue) {
+                el.textContent = textValue;
             }
         }
 
@@ -902,8 +935,8 @@
             const headerTitle = getDomElement('current_page_title');
             if (headerTitle) {
                 const newTitle = TAB_TITLES[tab] || 'ARGON CONTROL';
-                if (headerTitle.innerText !== newTitle) {
-                    headerTitle.innerText = newTitle;
+                if (headerTitle.textContent !== newTitle) {
+                    headerTitle.textContent = newTitle;
                 }
             }
 
@@ -966,6 +999,7 @@
         function handleConnectionState(connected) {
             const dot = getDomElement("ws_status_dot");
             const container = getDomElement("main_container");
+            const modal = getDomElement("ws_disconnect_modal");
             if (connected) {
                 if (dot) {
                     dot.className = "w-2.5 h-2.5 bg-green-500 rounded-full shadow-lg shadow-green-500/50 animate-pulse";
@@ -973,12 +1007,18 @@
                 if (container) {
                     container.classList.remove("opacity-60", "pointer-events-none");
                 }
+                if (modal) {
+                    modal.classList.add("hidden");
+                }
             } else {
                 if (dot) {
                     dot.className = "w-2.5 h-2.5 bg-red-500 rounded-full shadow-lg shadow-red-500/50 animate-ping";
                 }
                 if (container) {
                     container.classList.add("opacity-60", "pointer-events-none");
+                }
+                if (modal) {
+                    modal.classList.remove("hidden");
                 }
             }
         }
@@ -988,6 +1028,7 @@
 
             socket.onopen = () => {
                 console.log("WebSocket connected.");
+                wsReconnectAttempt = 0;  // 重置重连计数
                 handleConnectionState(true);
                 socket.send(JSON.stringify({ action: "get_static_info" }));
             };
@@ -995,34 +1036,9 @@
             socket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    if (data.type === "static_info") {
-                        handleStaticInfo(data.data);
-                    } else if (data.type === "at_res") {
-                        handleAtResponse(data.data);
-                    } else if (data.type === "network_status") {
-                        handleNetworkStatus(data.data);
-                    } else if (data.type === "scan_result") {
-                        handleScanResult(data.data);
-                    } else if (data.type === "sms_list") {
-                        typeof data.data === 'string' ? handleAtResponse(data.data) : handleSmsList(data.data);
-                    } else if (data.type === "backend_log") {
-                        handleBackendLog(data.data);
-                    } else if (data.type === "device_info") {
-                        handleDeviceInfo(data.data);
-                    } else if (data.type === "settings_info") {
-                        handleSettingsInfo(data.data);
-                    } else if (data.type === "band_lock_res") {
-                        handleBandLockRes(data.data);
-                    } else if (data.type === "cell_lock_res") {
-                        handleCellLockRes(data.data);
-                    } else if (data.type === "diagnostics_res") {
-                        handleDiagnosticsRes(data.data);
-                    } else if (data.type === "settings_log") {
-                        if (data.data && data.data.msg) appendSettingsLog(data.data.msg);
-                    } else if (data.type === "usb_config_info") {
-                        handleUsbConfigInfo(data.data);
-                    } else if (data.type === "usb_net_res") {
-                        handleUsbNetRes(data.data);
+                    const handler = WS_HANDLERS[data.type];
+                    if (handler) {
+                        handler(data);
                     } else if (data.update_type === "full" || data.update_type === "delta") {
                         const payload = data.data || data;
                         if (data.update_type === "full" || !data.update_type) {
@@ -1038,9 +1054,13 @@
             };
 
             socket.onclose = () => {
-                console.warn("WebSocket disconnected. Retrying in 3 seconds...");
+                console.warn("WebSocket disconnected. Retrying...");
                 handleConnectionState(false);
-                setTimeout(connectWs, 3000);
+                // 指数退避：3s → 6s → 12s → 24s → 48s → 封顶 60s
+                const delay = Math.min(WS_RECONNECT_MAX, WS_RECONNECT_BASE * Math.pow(2, wsReconnectAttempt))
+                    + Math.floor(Math.random() * 1000); // 添加随机抖动
+                wsReconnectAttempt++;
+                wsReconnectTimer = setTimeout(connectWs, delay);
             };
 
             socket.onerror = () => {
@@ -1115,6 +1135,10 @@
             lineNode.textContent = raw;
             output.appendChild(lineNode);
             output.scrollTop = output.scrollHeight;
+            // 限制最大节点数，防止长时间运行后卡顿
+            while (output.children.length > MAX_LOG_LINES) {
+                output.removeChild(output.firstChild);
+            }
         }
 
         function handleNetworkStatus(data) {
@@ -1217,7 +1241,7 @@
             const applyBtn = getDomElement('usb_mode_apply_btn');
             if (applyBtn) {
                 applyBtn.disabled = false;
-                applyBtn.innerText = '应用 USB 模式并提示重启';
+                applyBtn.textContent = '应用 USB 模式并提示重启';
             }
         }
 
@@ -1246,7 +1270,7 @@
                     }
                     const mode = parseInt(activeBtn.dataset.mode, 10);
                     usbApplyBtn.disabled = true;
-                    usbApplyBtn.innerText = '正在下发指令...';
+                    usbApplyBtn.textContent = '正在下发指令...';
                     sendWsCommand('set_usb_net_mode', mode);
                 });
             }
@@ -1274,12 +1298,12 @@
             const status = getDomElement('scan_status');
             if (!tbody) return;
             if (data.status && status) {
-                status.innerText = data.status;
+                status.textContent = data.status;
             }
             if (data.networks && Array.isArray(data.networks)) {
                 if (data.networks.length === 0) {
                     tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-400">未扫描到活动基站。</td></tr>';
-                    if (status) status.innerText = '扫频搜网完成。未侦测到公开信号点。';
+                    if (status) status.textContent = '扫频搜网完成。未侦测到公开信号点。';
                 } else {
                     tbody.innerHTML = data.networks.map((net, i) => {
                         const tech = net.technology || '--';
@@ -1293,12 +1317,12 @@
                             <td class="p-3 text-slate-800 dark:text-slate-200">${escapeHtml(net.band || '--')}</td>
                         </tr>`;
                     }).join('');
-                    if (status) status.innerText = `基站扫频搜网完成。成功发现并匹配 ${data.networks.length} 个公开基站频点。`;
+                    if (status) status.textContent = `基站扫频搜网完成。成功发现并匹配 ${data.networks.length} 个公开基站频点。`;
                 }
             }
             const btnText = getDomElement('scan_btn_text');
             const scanBtn = getDomElement('scan_start_btn');
-            if (btnText) btnText.innerText = '触发搜网扫描 (15s+)';
+            if (btnText) btnText.textContent = '触发搜网扫描 (15s+)';
             if (scanBtn) scanBtn.disabled = false;
             setGlobalLoading(false);
         }
@@ -1456,7 +1480,7 @@
         }
 
         function copyToClipboard(text) {
-            if (!text || text === '--') return false;
+            if (!text || text === PLACEHOLDER) return false;
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(text).catch(() => {
                     fallbackCopy(text);
@@ -1529,9 +1553,9 @@
                 el.addEventListener('click', () => {
                     let text = '';
                     if (id.endsWith('_val')) {
-                        text = el.innerText.split('/')[0].trim();
+                        text = el.textContent.split('/')[0].trim();
                     } else {
-                        text = el.innerText;
+                        text = el.textContent;
                     }
                     if (copyToClipboard(text)) {
                         showCopyToast(text.length > 20 ? text.substring(0, 20) + '...' : text);
@@ -1551,7 +1575,7 @@
             if (!barElement || !valElement) return;
 
             if (!valueString) {
-                if (valElement.innerText !== "-- / --%") valElement.innerText = "-- / --%";
+                if (valElement.textContent !== "-- / --%") valElement.textContent = "-- / --%";
                 if (barElement.style.width !== "0%") barElement.style.width = "0%";
                 barElement.classList.remove('bg-red-600', 'bg-yellow-500', 'bg-indigo-600');
                 return;
@@ -1561,7 +1585,7 @@
             const rawPercent = parts[1] ? parseFloat(parts[1].replace('%', '')) : 0;
             const percentWidth = `${rawPercent}%`;
             if (barElement.style.width !== percentWidth) barElement.style.width = percentWidth;
-            if (valElement.innerText !== valueString) valElement.innerText = valueString;
+            if (valElement.textContent !== valueString) valElement.textContent = valueString;
 
             let targetClass = 'bg-indigo-600';
             if (rawPercent < 30) targetClass = 'bg-red-600';
@@ -1702,8 +1726,8 @@
                 scanBtn.addEventListener('click', () => {
                     const btnText = getDomElement('scan_btn_text');
                     const status = getDomElement('scan_status');
-                    if (btnText) btnText.innerText = '正在后台扫描中...';
-                    if (status) status.innerText = '命令已下发，底层正在扫描全网运营商公开基站频点（宽带将暂时中断，请耐心等待）...';
+                    if (btnText) btnText.textContent = '正在后台扫描中...';
+                    if (status) status.textContent = '命令已下发，底层正在扫描全网运营商公开基站频点（宽带将暂时中断，请耐心等待）...';
                     scanBtn.disabled = true;
                     setGlobalLoading(true, '正在深度扫频搜网中（预计耗时 15~30 秒，期间模组通信挂起）...');
                     sendWsCommand('network_scan');
@@ -1716,6 +1740,10 @@
             if (log) {
                 log.insertAdjacentHTML('beforeend', `<div class="text-slate-400 dark:text-slate-500">${escapeHtml(msg)}</div>`);
                 log.scrollTop = log.scrollHeight;
+                // 限制最大节点数，防止长时间运行后卡顿
+                while (log.children.length > MAX_LOG_LINES) {
+                    log.removeChild(log.firstChild);
+                }
             }
         }
 
@@ -1800,7 +1828,7 @@
                 const { nr5g, bands } = getSelectedBandNumbers();
                 const preview = getDomElement('band_lock_preview');
                 if (preview) {
-                    preview.innerText = bands.length > 0 ? bands.map(b => (nr5g ? 'n' : 'B') + b).join(':') : 'all (默认出厂全频段)';
+                    preview.textContent = bands.length > 0 ? bands.map(b => (nr5g ? 'n' : 'B') + b).join(':') : 'all (默认出厂全频段)';
                 }
             }
 
@@ -1862,7 +1890,7 @@
                     const earfcn = parseInt(getDomElement('cell_earfcn_input')?.value, 10) || 0;
                     const bandStr = (getDomElement('cell_band_input')?.value || '').trim();
                     const band = bandStr ? parseInt(bandStr, 10) : undefined;
-                    if (!pci || !earfcn) {
+                    if ((!pci && pci !== 0) || !earfcn) {
                         const status = getDomElement('cell_lock_status');
                         if (status) status.innerHTML = '<span class="text-red-500 font-semibold">✗ 请填写 PCI 和绝对频点号 EARFCN</span>';
                         return;
@@ -1919,7 +1947,7 @@
                     const msgInput = getDomElement('sms_message');
                     if (msgInput) msgInput.value = '';
                     const counter = getDomElement('sms_char_count');
-                    if (counter) counter.innerText = '0';
+                    if (counter) counter.textContent = '0';
                 });
             }
 
@@ -1928,7 +1956,7 @@
                 msgTextarea.addEventListener('input', () => {
                     const len = msgTextarea.value.length;
                     const counter = getDomElement('sms_char_count');
-                    if (counter) counter.innerText = len;
+                    if (counter) counter.textContent = len;
                 });
             }
 
@@ -1963,7 +1991,7 @@
             const replyBtn = getDomElement('sms_reader_reply');
             if (replyBtn) {
                 replyBtn.addEventListener('click', () => {
-                    const senderNum = getDomElement('sms_reader_sender')?.innerText;
+                    const senderNum = getDomElement('sms_reader_sender')?.textContent;
                     const recipientInput = getDomElement('sms_recipient');
                     const messageInput = getDomElement('sms_message');
                     if (senderNum && recipientInput) {
@@ -1978,14 +2006,14 @@
             const copyBtn = getDomElement('sms_reader_copy');
             if (copyBtn) {
                 copyBtn.addEventListener('click', () => {
-                    const bodyText = getDomElement('sms_reader_body')?.innerText;
+                    const bodyText = getDomElement('sms_reader_body')?.textContent;
                     if (bodyText) {
                         navigator.clipboard.writeText(bodyText).then(() => {
-                            const originalText = copyBtn.innerText;
-                            copyBtn.innerText = '成功复制 Copied!';
+                            const originalText = copyBtn.textContent;
+                            copyBtn.textContent = '成功复制 Copied!';
                             copyBtn.classList.add('text-[#744df0]', 'font-semibold');
                             setTimeout(() => {
-                                copyBtn.innerText = originalText;
+                                copyBtn.textContent = originalText;
                                 copyBtn.classList.remove('text-[#744df0]', 'font-semibold');
                             }, 2000);
                         }).catch(err => {
@@ -2004,9 +2032,9 @@
 
             if (!card || !sender || !time || !body) return;
 
-            sender.innerText = msg.sender || 'Unknown';
-            time.innerText = msg.timestamp || '';
-            body.innerText = msg.text || '';
+            sender.textContent = msg.sender || 'Unknown';
+            time.textContent = msg.timestamp || '';
+            body.textContent = msg.text || '';
 
             card.classList.remove('hidden');
             card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -2094,7 +2122,19 @@
         initCopyToastDismiss();
 
         function logout() {
+            // 清理 WebSocket 和重连定时器
+            if (wsReconnectTimer) {
+                clearTimeout(wsReconnectTimer);
+                wsReconnectTimer = null;
+            }
+            if (socket) {
+                socket.onclose = null;  // 防止触发重连
+                socket.close();
+                socket = null;
+            }
             fetch('/api/logout', { method: 'POST' }).then(() => {
+                window.location.href = '/login';
+            }).catch(() => {
                 window.location.href = '/login';
             });
         }

@@ -36,6 +36,14 @@ use at::{
     decode_cmgl_body, decode_hex_ucs2, format_bytes, normalize_at_command,
 };
 
+/// AT 命令参数安全过滤（去除双引号、反斜杠与控制字符，防止 AT 注入）
+pub fn sanitize_at_param(input: &str) -> String {
+    input
+        .chars()
+        .filter(|&c| c != '"' && c != '\\' && c != '\r' && c != '\n')
+        .collect()
+}
+
 /// 安全递减活跃视图计数器（防止下溢翻转为 usize::MAX）
 fn safe_dec_active_views(atomic: &AtomicUsize) {
     let _ = atomic.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
@@ -613,6 +621,9 @@ impl HardwareBackend for RealBackend {
     }
 
     async fn configure_apn(&self, apn: &str, user: &str, pass: &str, auth_type: u8) {
+        let apn = sanitize_at_param(apn);
+        let user = sanitize_at_param(user);
+        let pass = sanitize_at_param(pass);
         let _ = send_at_command_inner(
             &self.serial_path,
             &format!("AT+CGDCONT=1,\"IPV4V6\",\"{}\"", apn),
@@ -673,6 +684,8 @@ impl HardwareBackend for RealBackend {
     }
 
     async fn send_sms_msg(&self, recipient: &str, message: &str) -> bool {
+        let recipient = sanitize_at_param(recipient);
+        let message = sanitize_at_param(message);
         let mut success = false;
         if send_at_command_inner(&self.serial_path, "AT+CMGF=1").await.is_ok() {
             if send_at_command_inner(
@@ -1389,7 +1402,7 @@ fn generate_stateless_nonce(secret: &str) -> String {
     format!("{}.{}", now, sig)
 }
 
-/// 校验无状态 HMAC Nonce（签名校验 + 60秒过期，零内存开销）
+/// 校验无状态 HMAC Nonce（签名校验 + 60秒过期，允许 5 秒向前时钟漂移容差）
 fn verify_stateless_nonce(nonce: &str, secret: &str) -> bool {
     let parts: Vec<&str> = nonce.split('.').collect();
     if parts.len() != 2 {
@@ -1403,7 +1416,9 @@ fn verify_stateless_nonce(nonce: &str, secret: &str) -> bool {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    if now < ts || now - ts > 60 {
+
+    // 容忍客户端时钟快 5 秒（向前漂移），最大有效期 60 秒
+    if ts > now + 5 || now.saturating_sub(ts) > 60 {
         return false;
     }
     let sig_bytes = match hex::decode(parts[1]) {
@@ -1546,7 +1561,7 @@ async fn handle_at_request(
             let _ = req.resp_tx.send(serde_json::json!({ "type": "at_res", "data": response }));
         }
         AtAction::SetInterval(secs) => {
-            let new_secs = secs.max(5);
+            let new_secs = secs.max(3);
             *interval_secs = new_secs;
             *current_interval_secs = new_secs;
             *interval = tokio::time::interval(Duration::from_secs(*interval_secs));
@@ -1676,7 +1691,7 @@ async fn handle_at_request(
             let res = backend.get_diagnostics(&diag).await;
             match diag {
                 DiagnosticType::Neighbour => {
-                    let raw = res.as_ref().ok().map(|r| r.clone()).unwrap_or_default();
+                    let raw = res.clone().unwrap_or_default();
                     let cells = parse_qeng_neighbour(&raw);
                     let _ = req.resp_tx.send(serde_json::json!({
                         "type": "diagnostics_res",
@@ -1926,9 +1941,11 @@ async fn ws_handler(
     let origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
 
     if let (Some(host_val), Some(origin_val)) = (host, origin) {
+        // 使用 :// 正确切割协议头，避免 trim_start_matches 链式调用的缺陷
         let origin_host = origin_val
-            .trim_start_matches("http://")
-            .trim_start_matches("https://");
+            .split("://")
+            .nth(1)
+            .unwrap_or(origin_val);
         // 仅对默认 HTTP/HTTPS 端口剥离，显式其他端口保留参与比对
         let origin_compare = origin_host
             .strip_suffix(":80")

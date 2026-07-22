@@ -403,6 +403,12 @@ enum AtAction {
     SetCellLock { tech: String, pci: u32, earfcn: u32, band: Option<u32>, enable: bool },
     /// 诊断子命令
     GetDiagnostics(DiagnosticType),
+    /// (mode_num) — 0:RMNET, 1:ECM, 2:MBIM, 3:RNDIS, 5:NCM
+    SetUsbNetMode(u8),
+    /// true=开启 ADB, false=关闭 ADB
+    SetAdbState(bool),
+    /// 获取当前 USB 模式与 ADB 开启状态
+    GetUsbConfig,
 }
 
 struct AtRequest {
@@ -602,6 +608,9 @@ trait HardwareBackend: Send + Sync {
     async fn set_band_lock(&self, is_nr5g: bool, bands: &str) -> Result<String, String>;
     async fn set_cell_lock(&self, tech: &str, pci: u32, earfcn: u32, band: Option<u32>, enable: bool) -> Result<String, String>;
     async fn get_diagnostics(&self, diag: &DiagnosticType) -> Result<String, String>;
+    async fn set_usb_net_mode(&self, mode: u8) -> Result<String, String>;
+    async fn set_adb_state(&self, enable: bool) -> Result<String, String>;
+    async fn get_usb_config(&self) -> Result<serde_json::Value, String>;
     async fn poll_telemetry(&self) -> TelemetryData;
     async fn read_static_info(&self) -> (String, String, String, String);
 }
@@ -1019,6 +1028,52 @@ impl HardwareBackend for RealBackend {
 
         (firmware_version, active_sim, network_provider, apn)
     }
+
+    async fn set_usb_net_mode(&self, mode: u8) -> Result<String, String> {
+        if !matches!(mode, 0 | 1 | 2 | 3 | 5) {
+            return Err("不支持的 USB 网络模式，有效值为 0(RMNET), 1(ECM), 2(MBIM), 3(RNDIS), 5(NCM)".to_string());
+        }
+        let cmd = format!("AT+QCFG=\"usbnet\",{}", mode);
+        send_at_command_inner(&self.serial_path, &cmd).await
+    }
+
+    async fn set_adb_state(&self, enable: bool) -> Result<String, String> {
+        let val = if enable { 1 } else { 0 };
+        let cmd = format!("AT+QADB={}", val);
+        send_at_command_inner(&self.serial_path, &cmd).await
+    }
+
+    async fn get_usb_config(&self) -> Result<serde_json::Value, String> {
+        let usbnet_resp = send_at_command_inner(&self.serial_path, "AT+QCFG=\"usbnet\"").await.unwrap_or_default();
+        let adb_resp = send_at_command_inner(&self.serial_path, "AT+QADB?").await.unwrap_or_default();
+
+        // 解析 usbnet
+        let usbnet_mode = usbnet_resp.lines().find_map(|l| {
+            if l.contains("+QCFG: \"usbnet\",") {
+                l.split(',').nth(1)?.trim().parse::<u8>().ok()
+            } else {
+                None
+            }
+        }).unwrap_or(0);
+
+        // 解析 ADB 状态
+        let adb_enabled = adb_resp.contains("+QADB: 1");
+
+        let mode_name = match usbnet_mode {
+            0 => "RMNET (QMI)",
+            1 => "ECM (Linux/Mac免驱)",
+            2 => "MBIM (Win10/11原生)",
+            3 => "RNDIS (Windows免驱)",
+            5 => "NCM (高速网卡)",
+            _ => "Unknown",
+        };
+
+        Ok(serde_json::json!({
+            "usbnet_mode": usbnet_mode,
+            "usbnet_name": mode_name,
+            "adb_enabled": adb_enabled
+        }))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1134,6 +1189,25 @@ impl HardwareBackend for MockBackend {
             traffic_stats: Some("TX 1.2 GB / RX 3.5 GB".to_string()),
             ..Default::default()
         }
+    }
+
+    async fn set_usb_net_mode(&self, mode: u8) -> Result<String, String> {
+        push_log("MOCK", "USB", &format!("Mock: 设置 USB 网络模式为 {}", mode));
+        Ok("OK\r\n".to_string())
+    }
+
+    async fn set_adb_state(&self, enable: bool) -> Result<String, String> {
+        push_log("MOCK", "USB", &format!("Mock: ADB 状态设置为 {}", enable));
+        Ok("OK\r\n".to_string())
+    }
+
+    async fn get_usb_config(&self) -> Result<serde_json::Value, String> {
+        push_log("MOCK", "USB", "Mock: 获取 USB 与 ADB 配置");
+        Ok(serde_json::json!({
+            "usbnet_mode": 1,
+            "usbnet_name": "ECM (Linux/Mac免驱) [MOCK]",
+            "adb_enabled": true
+        }))
     }
 
     async fn read_static_info(&self) -> (String, String, String, String) {
@@ -1724,6 +1798,47 @@ async fn handle_at_request(
                 }
             }
         }
+        AtAction::SetUsbNetMode(mode) => {
+            push_log("INFO", "Actor", &format!("设置 USB 网络模式为: {}", mode));
+            let res = backend.set_usb_net_mode(mode).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "usb_net_res",
+                "data": {
+                    "success": res.is_ok(),
+                    "msg": res.unwrap_or_else(|e| e),
+                    "note": "注意：USB 模式修改后通常需要重启模组方可生效！"
+                }
+            }));
+        }
+        AtAction::SetAdbState(enable) => {
+            push_log("INFO", "Actor", &format!("切换 ADB 调试状态: {}", if enable { "开启" } else { "关闭" }));
+            let res = backend.set_adb_state(enable).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "adb_state_res",
+                "data": {
+                    "success": res.is_ok(),
+                    "msg": res.unwrap_or_else(|e| e),
+                    "note": "注意：ADB 状态修改后建议重启模组生效！"
+                }
+            }));
+        }
+        AtAction::GetUsbConfig => {
+            push_log("INFO", "Actor", "获取 USB & ADB 配置信息...");
+            match backend.get_usb_config().await {
+                Ok(data) => {
+                    let _ = req.resp_tx.send(serde_json::json!({
+                        "type": "usb_config_info",
+                        "data": { "success": true, "config": data }
+                    }));
+                }
+                Err(e) => {
+                    let _ = req.resp_tx.send(serde_json::json!({
+                        "type": "usb_config_info",
+                        "data": { "success": false, "error": e }
+                    }));
+                }
+            }
+        }
     }
 }
 
@@ -2138,6 +2253,19 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             let mode = cmd.payload.as_ref().and_then(|p| p.as_str()).unwrap_or("auto").to_string();
                             AtAction::SetNetworkMode(mode)
                         }
+                        "set_usb_net_mode" => {
+                            let mode = cmd.payload.as_ref()
+                                .and_then(|p| p.as_u64().or_else(|| p.as_str().and_then(|s| s.parse::<u64>().ok())))
+                                .unwrap_or(0) as u8;
+                            AtAction::SetUsbNetMode(mode)
+                        }
+                        "set_adb_state" => {
+                            let enable = cmd.payload.as_ref()
+                                .and_then(|p| p.as_bool().or_else(|| p.as_str().map(|s| s == "1" || s == "true")))
+                                .unwrap_or(false);
+                            AtAction::SetAdbState(enable)
+                        }
+                        "get_usb_config" => AtAction::GetUsbConfig,
                         unknown_action => {
                             push_log("WARN", "WS", &format!("未知 WebSocket 动作: {:?}", unknown_action));
                             continue;

@@ -85,10 +85,11 @@ pub fn parse_combined_response(raw: &str) -> (String, String, String, String) {
             if qca.is_empty() {
                 qca = trimmed.to_string();
             }
-        } else if trimmed.starts_with("+CGPADDR:")
-            && gpad.is_empty() {
+        } else if trimmed.starts_with("+CGPADDR:") {
+            if gpad.is_empty() {
                 gpad = trimmed.to_string();
             }
+        }
     }
 
     (cpin, qeng, qca, gpad)
@@ -236,7 +237,7 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
                         Rule::qspn_resp => {
                             let values = extract_values(inner);
                             let mut resp = QspnResponse::default();
-                            if let Some(v) = values.first() {
+                            if let Some(v) = values.get(0) {
                                 let decoded = decode_hex_ucs2(v);
                                 resp.fnn = if decoded.is_empty() { v.clone() } else { decoded };
                             }
@@ -249,7 +250,7 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
                         Rule::cops_resp => {
                             let values = extract_values(inner);
                             ParsedLine::Cops(CopsResponse {
-                                mode: values.first().cloned().unwrap_or_default(),
+                                mode: values.get(0).cloned().unwrap_or_default(),
                                 format: values.get(1).cloned(),
                                 oper: values.get(2).cloned(),
                                 act: values.get(3).cloned(),
@@ -259,7 +260,7 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
                         Rule::cgdcont_resp => {
                             let values = extract_values(inner);
                             ParsedLine::Cgdcont(CgdcontEntry {
-                                cid: values.first().and_then(|s| s.parse().ok()).unwrap_or(0),
+                                cid: values.get(0).and_then(|s| s.parse().ok()).unwrap_or(0),
                                 pdp_type: values.get(1).cloned().unwrap_or_default(),
                                 apn: values.get(2).cloned().unwrap_or_default(),
                                 pdp_addr: values.get(3).cloned().unwrap_or_default(),
@@ -271,7 +272,7 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
                         Rule::qgdnrcnt_resp | Rule::qgdat_resp => {
                             let values = extract_values(inner);
                             ParsedLine::TrafficStats(TrafficStats {
-                                tx_bytes: values.first().and_then(|s| s.parse().ok()).unwrap_or(0),
+                                tx_bytes: values.get(0).and_then(|s| s.parse().ok()).unwrap_or(0),
                                 rx_bytes: values.get(1).and_then(|s| s.parse().ok()).unwrap_or(0),
                             })
                         }
@@ -279,7 +280,7 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
                         Rule::cgpaddr_resp => {
                             let values = extract_values(inner);
                             ParsedLine::Cgpaddr(CgpaddrEntry {
-                                cid: values.first().and_then(|s| s.parse().ok()).unwrap_or(0),
+                                cid: values.get(0).and_then(|s| s.parse().ok()).unwrap_or(0),
                                 ipv4: values.get(1).cloned().unwrap_or_default(),
                                 ipv6: values.get(2).cloned().unwrap_or_default(),
                             })
@@ -288,7 +289,7 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
                         Rule::qeng_servingcell => {
                             let values = extract_values(inner);
                             let mut cell = QengServingCell::default();
-                            if let Some(v) = values.first() { cell.connection_status = v.clone(); }
+                            if let Some(v) = values.get(0) { cell.connection_status = v.clone(); }
                             if let Some(v) = values.get(1) { cell.rat = v.clone(); }
                             if let Some(v) = values.get(2) { cell.opmode = v.clone(); }
                             if let Some(v) = values.get(3) { cell.mcc = v.clone(); }
@@ -310,7 +311,7 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
                         Rule::qeng_neighbourcell => {
                             let values = extract_values(inner);
                             ParsedLine::QengNeighbourCell(QengNeighbourCell {
-                                rat: values.first().cloned().unwrap_or_default(),
+                                rat: values.get(0).cloned().unwrap_or_default(),
                                 mcc: values.get(1).cloned().unwrap_or_default(),
                                 mnc: values.get(2).cloned().unwrap_or_default(),
                                 pci: values.get(3).cloned().unwrap_or_default(),
@@ -353,7 +354,7 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
                         Rule::qtemp_resp => {
                             let values = extract_values(inner);
                             ParsedLine::Qtemp(QtempResponse {
-                                sensor: values.first().cloned().unwrap_or_default(),
+                                sensor: values.get(0).cloned().unwrap_or_default(),
                                 temperature: values.get(1)
                                     .and_then(|v| v.parse::<f64>().ok()),
                             })
@@ -631,14 +632,15 @@ pub fn parse_signal_quality(csq_raw: &str) -> String {
     if let Ok(pairs) = AtParser::parse(Rule::csq_resp, csq_raw) {
         for pair in pairs {
             let values = extract_values(pair);
-            if let Some(rssi_str) = values.first()
-                && let Ok(rssi) = rssi_str.parse::<i32>() {
+            if let Some(rssi_str) = values.get(0) {
+                if let Ok(rssi) = rssi_str.parse::<i32>() {
                     if rssi == 99 {
                         return "Unknown".to_string();
                     }
                     let dbm = -113 + (rssi * 2);
                     return format!("{} dBm", dbm);
                 }
+            }
         }
     }
     "Unknown".to_string()

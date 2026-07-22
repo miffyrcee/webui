@@ -748,39 +748,39 @@
                                 USB 网络模式 / USB Net Mode
                             </h2>
                         </div>
-                        <div class="p-5 space-y-4">
+                        <div class="p-4 space-y-3">
                             <p class="text-xs text-slate-400 dark:text-slate-500 leading-relaxed">
                                 选择模组在 USB 总线上的网卡协议。修改后<strong class="text-amber-500">必须重启模组</strong>方可生效。
                             </p>
 
                             <!-- 模式选择磁贴按钮 -->
-                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2" id="usb_mode_grid">
-                                <button type="button" class="usb-mode-btn px-3 py-2.5 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="0">
-                                    <span class="block text-sm">RMNET</span>
+                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5" id="usb_mode_grid">
+                                <button type="button" class="usb-mode-btn px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="0">
+                                    <span class="block text-xs">RMNET</span>
                                     <span class="block text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5">Qualcomm QMI</span>
                                 </button>
-                                <button type="button" class="usb-mode-btn px-3 py-2.5 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="1">
-                                    <span class="block text-sm">ECM</span>
+                                <button type="button" class="usb-mode-btn px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="1">
+                                    <span class="block text-xs">ECM</span>
                                     <span class="block text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5">Linux/Mac 免驱</span>
                                 </button>
-                                <button type="button" class="usb-mode-btn px-3 py-2.5 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="2">
-                                    <span class="block text-sm">MBIM</span>
+                                <button type="button" class="usb-mode-btn px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="2">
+                                    <span class="block text-xs">MBIM</span>
                                     <span class="block text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5">Win10/11 原生</span>
                                 </button>
-                                <button type="button" class="usb-mode-btn px-3 py-2.5 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="3">
-                                    <span class="block text-sm">RNDIS</span>
+                                <button type="button" class="usb-mode-btn px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="3">
+                                    <span class="block text-xs">RNDIS</span>
                                     <span class="block text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5">Windows 免驱</span>
                                 </button>
-                                <button type="button" class="usb-mode-btn px-3 py-2.5 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="5">
-                                    <span class="block text-sm">NCM</span>
+                                <button type="button" class="usb-mode-btn px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="5">
+                                    <span class="block text-xs">NCM</span>
                                     <span class="block text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5">高速网卡</span>
                                 </button>
                             </div>
 
-                            <button id="usb_mode_apply_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2.5 text-sm rounded-xl transition-all active:scale-95 shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                            <button id="usb_mode_apply_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-xl transition-all active:scale-95 shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
                                 应用 USB 模式并提示重启
                             </button>
-                            <div id="usb_mode_status" class="text-xs font-mono text-slate-400 dark:text-slate-500 pt-1">等待操作反馈...</div>
+                            <div id="usb_mode_status" class="text-xs font-mono text-slate-400 dark:text-slate-500">等待操作反馈...</div>
                         </div>
                     </div>
 

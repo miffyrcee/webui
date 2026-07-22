@@ -1078,5 +1078,48 @@ OK\r\n";
         // 使用 PCC（首行）的信号值
         assert_eq!(telemetry.signal_percentage, Some("78%".to_string()));
     }
+
+    #[test]
+    fn test_parse_qeng_neighbour_lte_and_nr() {
+        // 混合 LTE + NR5G 邻区真实场景
+        let raw =
+            "+QENG: \"neighbourcell\",\"LTE\",460,01,123,6300,-95,-8,-9,27\n\
+             +QENG: \"neighbourcell\",\"LTE\",460,01,124,6299,-102,-10,-11,25\n\
+             +QENG: \"neighbourcell\",\"NR5G\",460,01,456,500000,-90,-6,-7,28\n\
+             OK\r\n";
+        let cells = parse_qeng_neighbour(raw);
+        assert_eq!(cells.len(), 3);
+
+        // LTE 邻区 1
+        assert_eq!(cells[0].rat, "LTE");
+        assert_eq!(cells[0].mcc, "460");
+        assert_eq!(cells[0].mnc, "01");
+        assert_eq!(cells[0].pci, "123");
+        assert_eq!(cells[0].earfcn, "6300");
+        assert_eq!(cells[0].rsrp, "-95");
+        assert_eq!(cells[0].rsrq, "-8");
+        assert_eq!(cells[0].sinr, "-9");
+        assert_eq!(cells[0].srxlev, "27");
+
+        // NR5G 邻区
+        assert_eq!(cells[2].rat, "NR5G");
+        assert_eq!(cells[2].pci, "456");
+        assert_eq!(cells[2].earfcn, "500000");
+        assert_eq!(cells[2].rsrp, "-90");
+    }
+
+    #[test]
+    fn test_parse_qeng_neighbour_empty() {
+        let cells = parse_qeng_neighbour("");
+        assert!(cells.is_empty());
+    }
+
+    #[test]
+    fn test_parse_qeng_neighbour_no_match() {
+        // servingcell 行不应被误解析为 neighbourcell
+        let raw = "+QENG: \"servingcell\",\"NOCONN\",\"NR5G-SA\",\"TDD\",460,00,39074C001,751,72002F,504990,41,12,-65,-11,19,1,-";
+        let cells = parse_qeng_neighbour(raw);
+        assert!(cells.is_empty());
+    }
 }
 

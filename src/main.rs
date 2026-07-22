@@ -1027,8 +1027,8 @@ impl HardwareBackend for RealBackend {
     }
 
     async fn set_usb_net_mode(&self, mode: u8) -> Result<String, String> {
-        if !matches!(mode, 0 | 1 | 2 | 3 | 5) {
-            return Err("不支持的 USB 网络模式，有效值为 0(RMNET), 1(ECM), 2(MBIM), 3(RNDIS), 5(NCM)".to_string());
+        if !matches!(mode, 0 | 1 | 2 | 3 | 4) {
+            return Err("不支持的 USB 网络模式，有效值为 0(RMNET), 1(ECM), 2(MBIM), 3(RNDIS), 4(NCM)".to_string());
         }
         let cmd = format!("AT+QCFG=\"usbnet\",{}", mode);
         send_at_command_inner(&self.serial_path, &cmd).await

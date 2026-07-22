@@ -23,11 +23,10 @@ type HmacSha256 = Hmac<Sha256>;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use std::fs;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::OnceLock;
-use std::sync::Mutex;
 use std::{env, sync::Arc};
-use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use at::{
     parse_cgpaddr, parse_cops_scan, parse_net_status, parse_qcainfo,
@@ -73,10 +72,9 @@ struct CpuSnapshot {
     idle: u64,
 }
 
-static PREV_CPU: Mutex<Option<CpuSnapshot>> = Mutex::new(None);
-
 /// 直接读取 /proc/stat 计算 CPU 使用率（%），零堆内存开销
-fn get_cpu_usage() -> Option<String> {
+/// prev 由调用者维护，消除全局锁
+fn get_cpu_usage(prev: &mut Option<CpuSnapshot>) -> Option<String> {
     let content = fs::read_to_string("/proc/stat").ok()?;
     let first_line = content.lines().next()?;
     if !first_line.starts_with("cpu ") {
@@ -93,7 +91,6 @@ fn get_cpu_usage() -> Option<String> {
     let total: u64 = nums.iter().sum();
     let idle = nums[3];
 
-    let mut prev = PREV_CPU.lock().ok()?;
     match prev.as_ref() {
         Some(prev_snap) => {
             let total_delta = total.wrapping_sub(prev_snap.total);
@@ -273,18 +270,18 @@ fn hash_password_sha256(password: &str) -> String {
 
 // ============================================================================
 // 模组闪存生命保护：内存环形滚动日志系统 (RAM Ring Buffer)
-// 使用 mpsc 通道异步写入，消除 Mutex 竞争
+// 使用 mpsc 通道异步写入 + 查询，消除 Mutex 竞争
 // ============================================================================
 
-static LOG_TX: OnceLock<mpsc::Sender<String>> = OnceLock::new();
-static MEMORY_LOG_STORE: OnceLock<RwLock<VecDeque<String>>> = OnceLock::new();
-
-fn get_log_store() -> &'static RwLock<VecDeque<String>> {
-    MEMORY_LOG_STORE.get_or_init(|| RwLock::new(VecDeque::with_capacity(100)))
+pub enum LogCommand {
+    Push(String),
+    GetSnapshot(oneshot::Sender<Vec<String>>),
 }
 
+static LOG_TX: OnceLock<mpsc::Sender<LogCommand>> = OnceLock::new();
+
 /// 初始化日志后台 Worker，返回 receiver 用于异步消费
-pub fn init_log_worker() -> mpsc::Receiver<String> {
+pub fn init_log_worker() -> mpsc::Receiver<LogCommand> {
     let (tx, rx) = mpsc::channel(1024);
     LOG_TX.set(tx).ok();
     rx
@@ -302,26 +299,37 @@ pub fn push_log(level: &str, module: &str, msg: &str) {
     }
 
     if let Some(tx) = LOG_TX.get() {
-        let _ = tx.try_send(formatted); // 非阻塞发送，满则丢弃（背压保护）
+        let _ = tx.try_send(LogCommand::Push(formatted)); // 非阻塞发送，满则丢弃（背压保护）
     }
 }
 
-/// 独立协程管理环形日志（无锁写入）
-async fn log_worker_task(mut rx: mpsc::Receiver<String>) {
-    while let Some(log) = rx.recv().await {
-        let store = get_log_store();
-        let mut guard = store.write().await;
-        if guard.len() >= 100 {
-            guard.pop_front();
+/// 独立协程管理环形日志（零锁，自有 VecDeque）
+async fn log_worker_task(mut rx: mpsc::Receiver<LogCommand>) {
+    let mut logs: VecDeque<String> = VecDeque::with_capacity(100);
+    while let Some(cmd) = rx.recv().await {
+        match cmd {
+            LogCommand::Push(msg) => {
+                if logs.len() >= 100 {
+                    logs.pop_front();
+                }
+                logs.push_back(msg);
+            }
+            LogCommand::GetSnapshot(tx) => {
+                let _ = tx.send(logs.iter().cloned().collect());
+            }
         }
-        guard.push_back(log);
     }
 }
 
-/// 获取日志快照（用于 WS 命令 get_backend_log）
+/// 获取日志快照（通过 oneshot 通道查询 log_worker_task，零锁）
 async fn get_logs_snapshot() -> Vec<String> {
-    let guard = get_log_store().read().await;
-    guard.iter().cloned().collect()
+    let tx = LOG_TX.get().expect("log worker not initialized");
+    let (resp_tx, resp_rx) = oneshot::channel();
+    if tx.send(LogCommand::GetSnapshot(resp_tx)).await.is_ok() {
+        resp_rx.await.unwrap_or_default()
+    } else {
+        Vec::new()
+    }
 }
 
 #[derive(Debug)]
@@ -362,8 +370,8 @@ struct AppState {
     /// 扁平、高优先级的单一串行指令通道
     command_tx: mpsc::Sender<AtRequest>,
     active_views: AtomicUsize,
-    /// 全局状态 — 所有遥测汇聚于此
-    global: RwLock<GlobalTelemetry>,
+    /// 全局遥测 watch 接收端 — 读取为 0 锁
+    telemetry_rx: watch::Receiver<Arc<GlobalTelemetry>>,
     /// JWT 签名密钥
     jwt_secret: String,
     /// 管理员密码的 SHA256 哈希（用于质询-响应协议）
@@ -557,7 +565,7 @@ struct RealBackend {
 #[async_trait::async_trait]
 impl HardwareBackend for RealBackend {
     async fn exec_raw_at(&self, cmd: &str) -> String {
-        match send_at_command_dedup(&self.serial_path, cmd).await {
+        match send_at_command_inner(&self.serial_path, cmd).await {
             Ok(resp) => resp,
             Err(e) => format!("ERROR: {}", e),
         }
@@ -808,22 +816,22 @@ impl HardwareBackend for RealBackend {
         let mut telemetry = TelemetryData::default();
 
         if let Ok(cgpaddr_resp) =
-            send_at_command_dedup(&self.serial_path, "AT+CGPADDR").await
+            send_at_command_inner(&self.serial_path, "AT+CGPADDR").await
         {
             parse_cgpaddr(&cgpaddr_resp, &mut telemetry);
         }
         if let Ok(qeng_resp) =
-            send_at_command_dedup(&self.serial_path, "AT+QENG=\"servingcell\"").await
+            send_at_command_inner(&self.serial_path, "AT+QENG=\"servingcell\"").await
         {
             parse_qeng(&qeng_resp, &mut telemetry);
         }
         if let Ok(qcainfo_resp) =
-            send_at_command_dedup(&self.serial_path, "AT+QCAINFO").await
+            send_at_command_inner(&self.serial_path, "AT+QCAINFO").await
         {
             parse_qcainfo(&qcainfo_resp, &mut telemetry);
         }
         if let Ok(cpin_resp) =
-            send_at_command_dedup(&self.serial_path, "AT+CPIN?").await
+            send_at_command_inner(&self.serial_path, "AT+CPIN?").await
         {
             if let Some(status) = cpin_resp.lines().find_map(|l| {
                 match at::parser::parse_single_line(l) {
@@ -838,13 +846,13 @@ impl HardwareBackend for RealBackend {
                 telemetry.sim_status = Some(status);
             }
         }
-        if let Ok(qtemp_resp) = send_at_command_dedup(&self.serial_path, "AT+QTEMP").await {
+        if let Ok(qtemp_resp) = send_at_command_inner(&self.serial_path, "AT+QTEMP").await {
             if let Some(temp) = parse_qtemp_temperature(&qtemp_resp) {
                 telemetry.temperature = Some(temp);
             }
         }
 
-        telemetry.traffic_stats = send_at_command_dedup(&self.serial_path, "AT+QGDNRCNT?")
+        telemetry.traffic_stats = send_at_command_inner(&self.serial_path, "AT+QGDNRCNT?")
             .await
             .ok()
             .and_then(|r| {
@@ -862,7 +870,7 @@ impl HardwareBackend for RealBackend {
                 })
             });
         if telemetry.traffic_stats.is_none() {
-            telemetry.traffic_stats = send_at_command_dedup(&self.serial_path, "AT+QGDAT?")
+            telemetry.traffic_stats = send_at_command_inner(&self.serial_path, "AT+QGDAT?")
                 .await
                 .ok()
                 .and_then(|r| {
@@ -1145,69 +1153,8 @@ async fn fetch_network_provider(serial_path: &str) -> String {
 }
 
 // ============================================================================
-// AT 命令基础架构（互斥锁 + 去重队列）
+// AT 命令基础架构（零锁 — Actor 串行化保证互斥）
 // ============================================================================
-
-static AT_CMD_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-
-fn get_at_lock() -> &'static tokio::sync::Mutex<()> {
-    AT_CMD_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-}
-
-struct AtCommandQueue {
-    inner: tokio::sync::Mutex<HashMap<String, AtPendingCmd>>,
-}
-
-struct AtPendingCmd {
-    waiters: Vec<oneshot::Sender<Result<String, String>>>,
-}
-
-static AT_CMD_QUEUE: OnceLock<AtCommandQueue> = OnceLock::new();
-
-fn get_at_queue() -> &'static AtCommandQueue {
-    AT_CMD_QUEUE.get_or_init(|| AtCommandQueue::new())
-}
-
-impl AtCommandQueue {
-    fn new() -> Self {
-        AtCommandQueue {
-            inner: tokio::sync::Mutex::new(HashMap::new()),
-        }
-    }
-
-    async fn execute(&self, serial_path: &str, cmd: &str) -> Result<String, String> {
-        use std::collections::hash_map::Entry;
-
-        let mut guard = self.inner.lock().await;
-
-        match guard.entry(cmd.to_string()) {
-            Entry::Occupied(mut entry) => {
-                let (tx, rx) = oneshot::channel();
-                entry.get_mut().waiters.push(tx);
-                drop(guard);
-                rx.await.unwrap_or_else(|_| Err("AT命令队列等待被取消".to_string()))
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(AtPendingCmd { waiters: vec![] });
-                drop(guard);
-
-                let result = send_at_command_inner(serial_path, cmd).await;
-
-                let mut guard = self.inner.lock().await;
-                if let Some(pending) = guard.remove(cmd) {
-                    for waiter in pending.waiters {
-                        let _ = waiter.send(result.clone());
-                    }
-                }
-                result
-            }
-        }
-    }
-}
-
-async fn send_at_command_dedup(serial_path: &str, cmd: &str) -> Result<String, String> {
-    get_at_queue().execute(serial_path, cmd).await
-}
 
 async fn send_at_command_inner_with_timeout(
     serial_path: &str,
@@ -1215,8 +1162,6 @@ async fn send_at_command_inner_with_timeout(
     timeout: Duration,
 ) -> Result<String, String> {
     let start = std::time::Instant::now();
-
-    let _lock = get_at_lock().lock().await;
 
     let child = tokio::process::Command::new("atcmd_rs")
         .arg("-p")
@@ -1272,7 +1217,7 @@ async fn query_device_bands(serial_path: &str) -> String {
     let mut nr_bands: Vec<String> = Vec::new();
     let mut lte_bands: Vec<String> = Vec::new();
 
-    if let Ok(resp) = send_at_command_dedup(serial_path, "AT+QENG=\"servingcell\"").await {
+    if let Ok(resp) = send_at_command_inner(serial_path, "AT+QENG=\"servingcell\"").await {
         for line in resp.lines() {
             let trimmed = line.trim();
             if let Some(at::parser::ParsedLine::QengServingCell(cell)) =
@@ -1294,7 +1239,7 @@ async fn query_device_bands(serial_path: &str) -> String {
         }
     }
 
-    if let Ok(resp) = send_at_command_dedup(serial_path, "AT+QCAINFO").await {
+    if let Ok(resp) = send_at_command_inner(serial_path, "AT+QCAINFO").await {
         for line in resp.lines() {
             let trimmed = line.trim();
             if let Some(at::parser::ParsedLine::Qcainfo(entry)) =
@@ -1343,7 +1288,7 @@ async fn query_device_bands(serial_path: &str) -> String {
 }
 
 async fn send_at_get_line(serial_path: &str, cmd: &str) -> Option<String> {
-    send_at_command_dedup(serial_path, cmd)
+    send_at_command_inner(serial_path, cmd)
         .await
         .ok()
         .and_then(|resp| {
@@ -1711,12 +1656,33 @@ async fn handle_at_request(
     }
 }
 
-/// 统一硬件任务：定时轮询 + 用户 AT 指令。严格串行 Actor + 预序列化广播
+/// 统一硬件任务：静态信息读取 + 定时轮询 + 用户 AT 指令。严格串行 Actor + 0 锁
 async fn hardware_task(
     mut command_rx: mpsc::Receiver<AtRequest>,
     backend: Arc<dyn HardwareBackend>,
+    telemetry_tx: watch::Sender<Arc<GlobalTelemetry>>,
     state: Arc<AppState>,
 ) {
+    // Phase 1: 启动时读取静态信息（FW 版本、SIM 槽、运营商、APN）
+    // 放在 hardware_task 开头以确保串口独占，无需任何锁
+    push_log("INFO", "Actor", "开始获取静态信息...");
+    let (firmware_version, active_sim, network_provider, apn) = backend.read_static_info().await;
+    {
+        let initial_global = Arc::new(GlobalTelemetry {
+            firmware_version: Some(firmware_version),
+            active_sim: Some(active_sim),
+            network_provider: Some(network_provider),
+            apn: Some(apn),
+            ..Default::default()
+        });
+        let _ = telemetry_tx.send(initial_global.clone());
+        let json_str = serialize_global(&initial_global, "full");
+        let _ = state.tx.send(Arc::new(json_str));
+    }
+    push_log("INFO", "Actor", "静态信息获取完成，进入轮询循环");
+
+    // Phase 2: 轮询循环
+    let mut prev_cpu: Option<CpuSnapshot> = None;
     let mut interval_secs = 5u64;
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
     interval.tick().await;
@@ -1735,7 +1701,7 @@ async fn hardware_task(
             _ = interval.tick() => {
                 let active = state.active_views.load(Ordering::Acquire) > 0;
 
-                if active && get_at_lock().try_lock().is_ok() {
+                if active {
                     let start_poll = std::time::Instant::now();
                     let mut telemetry = backend.poll_telemetry().await;
 
@@ -1756,65 +1722,55 @@ async fn hardware_task(
                     });
 
                     let uptime_mins = get_uptime_mins();
-                    let cpu_usage = get_cpu_usage();
+                    let cpu_usage = get_cpu_usage(&mut prev_cpu);
                     let memory_usage = get_memory_usage();
                     let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
 
-                    {
-                        let mut global = state.global.write().await;
-
-                        if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                            push_log("ERROR", "Poll", &format!("模组连续 {} 次无响应，标记为离线", MAX_CONSECUTIVE_FAILURES));
-                            let fw = global.firmware_version.clone();
-                            let sim = global.active_sim.clone();
-                            let prov = global.network_provider.clone();
-                            let apn = global.apn.clone();
-                            *global = GlobalTelemetry::default();
-                            global.firmware_version = fw;
-                            global.active_sim = sim;
-                            global.network_provider = prov;
-                            global.apn = apn;
-                            global.internet_connection = Some("Disconnected".to_string());
-                            global.uptime = Some(format!("{} minutes", uptime_mins));
-                            global.cpu_usage = cpu_usage;
-                            global.memory_usage = memory_usage;
-                            global.updated = Some(updated_str);
-                        } else {
-                            *global = GlobalTelemetry::from_telemetry_and_global(
-                                &telemetry, &global,
-                                Some(format!("{} minutes", uptime_mins)),
-                                Some(updated_str),
-                            );
-                            if global.cpu_usage.is_none() {
-                                global.cpu_usage = cpu_usage;
-                            }
-                            if global.memory_usage.is_none() {
-                                global.memory_usage = memory_usage;
-                            }
+                    // 构建新全局状态（零锁：从 watch 读取当前值，构建新 Arc 后发送）
+                    let new_global = if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                        push_log("ERROR", "Poll", &format!("模组连续 {} 次无响应，标记为离线", MAX_CONSECUTIVE_FAILURES));
+                        let current = state.telemetry_rx.borrow();
+                        let fw = current.firmware_version.clone();
+                        let sim = current.active_sim.clone();
+                        let prov = current.network_provider.clone();
+                        let apn_val = current.apn.clone();
+                        drop(current);
+                        let mut g = GlobalTelemetry::default();
+                        g.firmware_version = fw;
+                        g.active_sim = sim;
+                        g.network_provider = prov;
+                        g.apn = apn_val;
+                        g.internet_connection = Some("Disconnected".to_string());
+                        g.uptime = Some(format!("{} minutes", uptime_mins));
+                        g.cpu_usage = cpu_usage;
+                        g.memory_usage = memory_usage;
+                        g.updated = Some(updated_str);
+                        g
+                    } else {
+                        let current = state.telemetry_rx.borrow();
+                        let mut g = GlobalTelemetry::from_telemetry_and_global(
+                            &telemetry, &current,
+                            Some(format!("{} minutes", uptime_mins)),
+                            Some(updated_str),
+                        );
+                        drop(current);
+                        if g.cpu_usage.is_none() {
+                            g.cpu_usage = cpu_usage;
                         }
+                        if g.memory_usage.is_none() {
+                            g.memory_usage = memory_usage;
+                        }
+                        g
+                    };
 
-                        // 预序列化为 JSON 字符串并广播（零重复序列化损耗）
-                        let json_str = serialize_global(&global, "delta");
-                        let _ = state.tx.send(Arc::new(json_str));
-                    }
+                    let arc_global = Arc::new(new_global);
+                    let _ = telemetry_tx.send(arc_global.clone());
+
+                    // 预序列化为 JSON 字符串并广播（零重复序列化损耗）
+                    let json_str = serialize_global(&arc_global, "delta");
+                    let _ = state.tx.send(Arc::new(json_str));
 
                     push_log("INFO", "Poll", &format!("轮询完成 (耗时 {}ms)", start_poll.elapsed().as_millis()));
-
-                } else if active {
-                    push_log("WARN", "Poll", "串口忙或正在执行慢命令，跳过当次采集，复用缓存");
-                    let uptime_mins = get_uptime_mins();
-                    let cpu_usage = get_cpu_usage();
-                    let memory_usage = get_memory_usage();
-                    let updated_str = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
-
-                    let mut global = state.global.write().await;
-                    global.uptime = Some(format!("{} minutes", uptime_mins));
-                    global.cpu_usage = cpu_usage;
-                    global.memory_usage = memory_usage;
-                    global.updated = Some(updated_str);
-
-                    let json_str = serialize_global(&global, "delta");
-                    let _ = state.tx.send(Arc::new(json_str));
 
                 } else {
                     push_log("INFO", "Poll", "硬件轮询处于空闲模式 (无活跃视图)");
@@ -1843,6 +1799,7 @@ async fn main() {
 
     let (tx, _) = broadcast::channel(100);
     let (command_tx, command_rx) = mpsc::channel(32);
+    let (telemetry_tx, telemetry_rx) = watch::channel(Arc::new(GlobalTelemetry::default()));
 
     let jwt_secret =
         env::var("JWT_SECRET").unwrap_or_else(|_| "argon_rm520n_jwt_secret_key_default".to_string());
@@ -1859,7 +1816,7 @@ async fn main() {
         tx: tx.clone(),
         command_tx,
         active_views: AtomicUsize::new(0),
-        global: RwLock::new(GlobalTelemetry::default()),
+        telemetry_rx,
         jwt_secret,
         admin_pass_sha,
         admin_username,
@@ -1874,29 +1831,12 @@ async fn main() {
         Arc::new(MockBackend)
     };
 
-    // 1. 启动硬件后台轮询与指令消费任务
+    // 1. 启动硬件后台轮询与指令消费任务（内含静态信息初始化）
     tokio::spawn({
         let backend = backend.clone();
+        let telemetry_tx = telemetry_tx.clone();
         let state = app_state.clone();
-        async move { hardware_task(command_rx, backend, state).await }
-    });
-
-    // 2. 将静态信息初始化放入后台异步任务
-    tokio::spawn({
-        let backend = backend.clone();
-        let app_state = app_state.clone();
-        async move {
-            let (firmware_version, active_sim, network_provider, apn) = backend.read_static_info().await;
-            {
-                let mut guard = app_state.global.write().await;
-                guard.firmware_version = Some(firmware_version);
-                guard.active_sim = Some(active_sim);
-                guard.network_provider = Some(network_provider);
-                guard.apn = Some(apn);
-                let json_str = serialize_global(&guard, "full");
-                let _ = app_state.tx.send(Arc::new(json_str));
-            }
-        }
+        async move { hardware_task(command_rx, backend, telemetry_tx, state).await }
     });
 
     let app = Router::new()
@@ -1937,16 +1877,16 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     let (local_tx, mut local_rx) = mpsc::channel::<String>(10);
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
-    // 发送全量快照作为第一条消息
-    {
-        let guard = state.global.read().await;
-        let full_json = serialize_global(&guard, "full");
-        if ws_sender.send(Message::Text(full_json.into())).await.is_err() {
-            if current_is_active {
-                state.active_views.fetch_sub(1, Ordering::SeqCst);
-            }
-            return;
+    // 发送全量快照作为第一条消息（零锁读取 watch，borrow 不跨越 .await）
+    let full_json = {
+        let guard = state.telemetry_rx.borrow();
+        serialize_global(&guard, "full")
+    };
+    if ws_sender.send(Message::Text(full_json.into())).await.is_err() {
+        if current_is_active {
+            state.active_views.fetch_sub(1, Ordering::SeqCst);
         }
+        return;
     }
 
     tokio::select! {
@@ -2003,16 +1943,18 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             continue;
                         }
                         "get_static_info" => {
-                            let guard = state_inner.global.read().await;
-                            let info_json = serde_json::json!({
-                                "type": "static_info",
-                                "data": {
-                                    "firmware_version": guard.firmware_version,
-                                    "active_sim": guard.active_sim,
-                                    "network_provider": guard.network_provider,
-                                    "apn": guard.apn,
-                                }
-                            });
+                            let info_json = {
+                                let guard = state_inner.telemetry_rx.borrow();
+                                serde_json::json!({
+                                    "type": "static_info",
+                                    "data": {
+                                        "firmware_version": guard.firmware_version.clone(),
+                                        "active_sim": guard.active_sim.clone(),
+                                        "network_provider": guard.network_provider.clone(),
+                                        "apn": guard.apn.clone(),
+                                    }
+                                })
+                            };
                             let _ = local_tx.send(info_json.to_string()).await;
                             continue;
                         }

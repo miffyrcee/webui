@@ -713,13 +713,7 @@ impl HardwareBackend for RealBackend {
                 .is_ok()
                 {
                     success = true;
-                } else {
-                    // 第 3 步（Ctrl+Z 发送正文）失败，发 ESC 退出短信编辑模式
-                    let _ = send_at_command_inner(&self.serial_path, "\x1b").await;
                 }
-            } else {
-                // 第 2 步（AT+CMGS）失败，模组可能卡在 > 提示符，发 ESC 救场
-                let _ = send_at_command_inner(&self.serial_path, "\x1b").await;
             }
         }
         success

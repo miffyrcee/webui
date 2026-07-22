@@ -1862,6 +1862,23 @@ async fn ws_handler(
     if !is_authenticated(&headers, &state.jwt_secret) {
         return (StatusCode::UNAUTHORIZED, "Unauthorized WebSocket Request").into_response();
     }
+
+    // 跨站 WebSocket 劫持 (CSWSH) 防护：校验 Origin 必须与 Host 一致
+    let host = headers.get(header::HOST).and_then(|v| v.to_str().ok());
+    let origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
+
+    if let (Some(host_val), Some(origin_val)) = (host, origin) {
+        let origin_host = origin_val
+            .trim_start_matches("http://")
+            .trim_start_matches("https://");
+        let origin_host = origin_host.split(':').next().unwrap_or(origin_host);
+        let host_name = host_val.split(':').next().unwrap_or(host_val);
+        if origin_host != host_name {
+            push_log("WARN", "WS", &format!("拦截跨站 WebSocket 劫持: Origin {} != Host {}", origin_val, host_val));
+            return (StatusCode::FORBIDDEN, "Cross-Site WebSocket Request Denied").into_response();
+        }
+    }
+
     ws.on_upgrade(|socket| handle_ws(socket, state)).into_response()
 }
 

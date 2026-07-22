@@ -58,7 +58,7 @@
                 <button id="tab_usb" role="tab" aria-selected="false" onclick="switchTab('usb')"
                     class="tab-btn w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer">
                     <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25"/></svg>
-                    <span>USB 配置 USB/ADB</span>
+                    <span>USB 配置</span>
                 </button>
                 <button id="tab_logs" role="tab" aria-selected="false" onclick="switchTab('logs')"
                     class="tab-btn w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer">
@@ -734,11 +734,11 @@
                 </div>
             </div>
 
-            <!-- 2.5 USB 配置与 ADB 调试面板 -->
+            <!-- 2.5 USB 配置面板 -->
             <div id="panel_usb" role="tabpanel" class="hidden space-y-6">
 
-                <!-- USB 模式选择 + ADB 开关双栏 -->
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- USB 模式选择 -->
+                <div class="grid grid-cols-1 gap-6">
 
                     <!-- USB 网络模式控制卡 -->
                     <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
@@ -784,7 +784,7 @@
                         </div>
                     </div>
 
-                <!-- USB & ADB 状态摘要卡片 -->
+                <!-- USB 状态摘要卡片 -->
                 <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                     <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10 flex items-center justify-between">
                         <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase flex items-center gap-2">
@@ -819,19 +819,16 @@
                     </div>
                 </div>
 
-                <!-- USB & ADB 快捷 AT 指令 -->
+                <!-- USB 快捷 AT 指令板 -->
                 <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                     <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
                         <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">USB 快捷 AT 指令板</h2>
                     </div>
                     <div class="p-4 flex flex-wrap gap-2 text-xs">
                         <button class="usb-quick-at bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium" data-cmd='AT+QCFG="usbnet"'>查询 USB 模式</button>
-                        <button class="usb-quick-at bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium" data-cmd='AT+QADB?'>查询 ADB 状态</button>
                         <button class="usb-quick-at bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium" data-cmd='AT+QCFG="usbnet",1'>切换到 ECM</button>
                         <button class="usb-quick-at bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium" data-cmd='AT+QCFG="usbnet",2'>切换到 MBIM</button>
                         <button class="usb-quick-at bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium" data-cmd='AT+QCFG="usbnet",5'>切换到 NCM</button>
-                        <button class="usb-quick-at bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium" data-cmd='AT+QADB=1'>开启 ADB</button>
-                        <button class="usb-quick-at bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium" data-cmd='AT+QADB=0'>关闭 ADB</button>
                     </div>
                 </div>
             </div>
@@ -877,7 +874,7 @@
             'network': 'CONTROL / CONNECTION',
             'locks': 'ADVANCED LOCKS & DIAGNOSTICS',
             'sms': 'SMS / MESSAGE CENTER',
-            'usb': 'USB & ADB CONFIGURATION',
+            'usb': 'USB CONFIGURATION',
             'logs': 'SYSTEM MEMORY LOGS'
         };
 
@@ -1163,7 +1160,7 @@
             }
         }
 
-        /* ======== USB & ADB Handler Functions ======== */
+        /* ======== USB Handler Functions ======== */
 
         function handleUsbConfigInfo(data) {
             if (!data.success) {

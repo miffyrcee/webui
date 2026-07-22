@@ -405,9 +405,7 @@ enum AtAction {
     GetDiagnostics(DiagnosticType),
     /// (mode_num) — 0:RMNET, 1:ECM, 2:MBIM, 3:RNDIS, 5:NCM
     SetUsbNetMode(u8),
-    /// true=开启 ADB, false=关闭 ADB
-    SetAdbState(bool),
-    /// 获取当前 USB 模式与 ADB 开启状态
+    /// 获取当前 USB 模式
     GetUsbConfig,
 }
 
@@ -609,7 +607,6 @@ trait HardwareBackend: Send + Sync {
     async fn set_cell_lock(&self, tech: &str, pci: u32, earfcn: u32, band: Option<u32>, enable: bool) -> Result<String, String>;
     async fn get_diagnostics(&self, diag: &DiagnosticType) -> Result<String, String>;
     async fn set_usb_net_mode(&self, mode: u8) -> Result<String, String>;
-    async fn set_adb_state(&self, enable: bool) -> Result<String, String>;
     async fn get_usb_config(&self) -> Result<serde_json::Value, String>;
     async fn poll_telemetry(&self) -> TelemetryData;
     async fn read_static_info(&self) -> (String, String, String, String);
@@ -1037,15 +1034,8 @@ impl HardwareBackend for RealBackend {
         send_at_command_inner(&self.serial_path, &cmd).await
     }
 
-    async fn set_adb_state(&self, enable: bool) -> Result<String, String> {
-        let val = if enable { 1 } else { 0 };
-        let cmd = format!("AT+QADB={}", val);
-        send_at_command_inner(&self.serial_path, &cmd).await
-    }
-
     async fn get_usb_config(&self) -> Result<serde_json::Value, String> {
         let usbnet_resp = send_at_command_inner(&self.serial_path, "AT+QCFG=\"usbnet\"").await;
-        let adb_resp = send_at_command_inner(&self.serial_path, "AT+QADB?").await;
 
         // 解析 usbnet（指令失败时 usbnet_supported = false）
         let (usbnet_mode, usbnet_supported) = match &usbnet_resp {
@@ -1060,12 +1050,6 @@ impl HardwareBackend for RealBackend {
                 (mode, true)
             }
             Err(_) => (0, false),
-        };
-
-        // 解析 ADB 状态（指令失败时 adb_supported = false）
-        let (adb_enabled, adb_supported) = match &adb_resp {
-            Ok(resp) => (resp.contains("+QADB: 1"), true),
-            Err(_) => (false, false),
         };
 
         let mode_name = if usbnet_supported {
@@ -1084,9 +1068,7 @@ impl HardwareBackend for RealBackend {
         Ok(serde_json::json!({
             "usbnet_mode": usbnet_mode,
             "usbnet_name": mode_name,
-            "usbnet_supported": usbnet_supported,
-            "adb_enabled": if adb_supported { serde_json::Value::Bool(adb_enabled) } else { serde_json::Value::Null },
-            "adb_supported": adb_supported
+            "usbnet_supported": usbnet_supported
         }))
     }
 }
@@ -1211,19 +1193,12 @@ impl HardwareBackend for MockBackend {
         Ok("OK\r\n".to_string())
     }
 
-    async fn set_adb_state(&self, enable: bool) -> Result<String, String> {
-        push_log("MOCK", "USB", &format!("Mock: ADB 状态设置为 {}", enable));
-        Ok("OK\r\n".to_string())
-    }
-
     async fn get_usb_config(&self) -> Result<serde_json::Value, String> {
-        push_log("MOCK", "USB", "Mock: 获取 USB 与 ADB 配置");
+        push_log("MOCK", "USB", "Mock: 获取 USB 配置");
         Ok(serde_json::json!({
             "usbnet_mode": 1,
             "usbnet_name": "ECM (Linux/Mac免驱) [MOCK]",
-            "usbnet_supported": true,
-            "adb_enabled": true,
-            "adb_supported": true
+            "usbnet_supported": true
         }))
     }
 
@@ -1827,20 +1802,8 @@ async fn handle_at_request(
                 }
             }));
         }
-        AtAction::SetAdbState(enable) => {
-            push_log("INFO", "Actor", &format!("切换 ADB 调试状态: {}", if enable { "开启" } else { "关闭" }));
-            let res = backend.set_adb_state(enable).await;
-            let _ = req.resp_tx.send(serde_json::json!({
-                "type": "adb_state_res",
-                "data": {
-                    "success": res.is_ok(),
-                    "msg": res.unwrap_or_else(|e| e),
-                    "note": "注意：ADB 状态修改后建议重启模组生效！"
-                }
-            }));
-        }
         AtAction::GetUsbConfig => {
-            push_log("INFO", "Actor", "获取 USB & ADB 配置信息...");
+            push_log("INFO", "Actor", "获取 USB 配置信息...");
             match backend.get_usb_config().await {
                 Ok(data) => {
                     let _ = req.resp_tx.send(serde_json::json!({
@@ -2275,12 +2238,6 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                                 .and_then(|p| p.as_u64().or_else(|| p.as_str().and_then(|s| s.parse::<u64>().ok())))
                                 .unwrap_or(0) as u8;
                             AtAction::SetUsbNetMode(mode)
-                        }
-                        "set_adb_state" => {
-                            let enable = cmd.payload.as_ref()
-                                .and_then(|p| p.as_bool().or_else(|| p.as_str().map(|s| s == "1" || s == "true")))
-                                .unwrap_or(false);
-                            AtAction::SetAdbState(enable)
                         }
                         "get_usb_config" => AtAction::GetUsbConfig,
                         unknown_action => {

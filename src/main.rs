@@ -42,6 +42,31 @@ fn safe_dec_active_views(atomic: &AtomicUsize) {
     });
 }
 
+use std::sync::atomic::AtomicBool;
+
+/// RAII Guard：保证 handle_ws 退出时自动递减 active_views，防止 Panic/Cancel 计数泄露
+struct ActiveViewGuard {
+    state: Arc<AppState>,
+    is_active: Arc<AtomicBool>,
+}
+
+impl ActiveViewGuard {
+    /// 新建 Guard：active_views +1，返回 Guard 和共享的活跃标志
+    fn new(state: Arc<AppState>) -> (Self, Arc<AtomicBool>) {
+        state.active_views.fetch_add(1, Ordering::SeqCst);
+        let is_active = Arc::new(AtomicBool::new(true));
+        (Self { state: state.clone(), is_active: is_active.clone() }, is_active)
+    }
+}
+
+impl Drop for ActiveViewGuard {
+    fn drop(&mut self) {
+        if self.is_active.load(Ordering::SeqCst) {
+            safe_dec_active_views(&self.state.active_views);
+        }
+    }
+}
+
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 const IDLE_INTERVAL_SECS: u64 = 15;
@@ -105,7 +130,7 @@ fn get_cpu_usage(prev: &mut Option<CpuSnapshot>) -> Option<String> {
             let idle_delta = idle.wrapping_sub(prev_snap.idle);
             *prev = Some(CpuSnapshot { total, idle });
             if total_delta > 0 {
-                let usage = (total_delta - idle_delta) as f64 / total_delta as f64 * 100.0;
+                let usage = total_delta.saturating_sub(idle_delta) as f64 / total_delta as f64 * 100.0;
                 Some(format!("{:.1}%", usage))
             } else {
                 None
@@ -1378,10 +1403,16 @@ fn verify_stateless_nonce(nonce: &str, secret: &str) -> bool {
     if now < ts || now - ts > 60 {
         return false;
     }
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+    let sig_bytes = match hex::decode(parts[1]) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    let mut mac = match HmacSha256::new_from_slice(secret.as_bytes()) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
     mac.update(parts[0].as_bytes());
-    let expected_sig = hex::encode(mac.finalize().into_bytes());
-    parts[1].eq_ignore_ascii_case(&expected_sig)
+    mac.verify_slice(&sig_bytes).is_ok()
 }
 
 /// 获取一次性动态随机数（Nonce）：GET /api/get_nonce
@@ -1417,13 +1448,7 @@ async fn login_post_handler(
             "登录失败(随机数无效或过期): 用户 '{}' 从 {}",
             payload.username, ip
         ));
-        return Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(axum::body::Body::from(
-                r#"{"success":false,"msg":"随机数失效，请刷新页面重试"}"#,
-            ))
-            .unwrap();
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"success": false, "msg": "随机数失效，请刷新页面重试"}))).into_response();
     }
 
     // SHA256(nonce + username + SHA256(admin_password))
@@ -1446,13 +1471,7 @@ async fn login_post_handler(
             Ok(t) => t,
             Err(e) => {
                 push_log("ERROR", "Auth", &format!("JWT 签名生成失败: {}", e));
-                return Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(axum::body::Body::from(
-                        r#"{"success":false,"msg":"服务器内部错误，登录失败"}"#,
-                    ))
-                    .unwrap();
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "msg": "服务器内部错误，登录失败"}))).into_response();
             }
         };
 
@@ -1474,11 +1493,7 @@ async fn login_post_handler(
             "登录失败(密码错误): 用户 '{}' 从 {} 尝试",
             payload.username, ip
         ));
-        Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(axum::body::Body::from(r#"{"success":false,"msg":"密码错误，请重试"}"#))
-            .unwrap()
+        (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"success": false, "msg": "密码错误，请重试"}))).into_response()
     }
 }
 
@@ -1532,6 +1547,7 @@ async fn handle_at_request(
             *interval_secs = new_secs;
             *current_interval_secs = new_secs;
             *interval = tokio::time::interval(Duration::from_secs(*interval_secs));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             interval.tick().await;
             push_log("INFO", "Settings", &format!("轮询间隔已调整为 {} 秒", new_secs));
             let _ = req.resp_tx.send(serde_json::json!({
@@ -1655,7 +1671,7 @@ async fn handle_at_request(
         AtAction::GetDiagnostics(diag) => {
             push_log("INFO", "Actor", &format!("获取诊断信息: {}", diag));
             let res = backend.get_diagnostics(&diag).await;
-            let data = res.as_ref().ok().and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok()).unwrap_or_default();
+            let data = res.as_ref().ok().map(|r| serde_json::Value::String(r.clone())).unwrap_or(serde_json::Value::Null);
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "diagnostics_res",
                 "data": { "success": res.is_ok(), "msg": res.unwrap_or_else(|e| e), "data": data }
@@ -1693,6 +1709,7 @@ async fn hardware_task(
     let mut prev_cpu: Option<CpuSnapshot> = None;
     let mut interval_secs = 5u64;
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     interval.tick().await;
     let mut consecutive_failures = 0u32;
     let mut current_interval_secs = interval_secs;
@@ -1788,6 +1805,7 @@ async fn hardware_task(
                 if next_secs != current_interval_secs {
                     current_interval_secs = next_secs;
                     interval = tokio::time::interval(Duration::from_secs(next_secs));
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                     interval.tick().await;
                 }
             }
@@ -1889,9 +1907,16 @@ async fn ws_handler(
         let origin_host = origin_val
             .trim_start_matches("http://")
             .trim_start_matches("https://");
-        let origin_host = origin_host.split(':').next().unwrap_or(origin_host);
-        let host_name = host_val.split(':').next().unwrap_or(host_val);
-        if origin_host != host_name {
+        // 仅对默认 HTTP/HTTPS 端口剥离，显式其他端口保留参与比对
+        let origin_compare = origin_host
+            .strip_suffix(":80")
+            .or_else(|| origin_host.strip_suffix(":443"))
+            .unwrap_or(origin_host);
+        let host_compare = host_val
+            .strip_suffix(":80")
+            .or_else(|| host_val.strip_suffix(":443"))
+            .unwrap_or(host_val);
+        if origin_compare != host_compare {
             push_log("WARN", "WS", &format!("拦截跨站 WebSocket 劫持: Origin {} != Host {}", origin_val, host_val));
             return (StatusCode::FORBIDDEN, "Cross-Site WebSocket Request Denied").into_response();
         }
@@ -1906,7 +1931,8 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     let online_count = state.tx.receiver_count();
     push_log("INFO", "WS", &format!("新的 WebSocket 客户端已连接 (当前在线: {})", online_count));
 
-    state.active_views.fetch_add(1, Ordering::SeqCst);
+    // RAII Guard：离开作用域自动递减 active_views（Panic/Cancel 安全）
+    let (_guard, is_view_active) = ActiveViewGuard::new(state.clone());
     let mut current_is_active = true;
 
     let (local_tx, mut local_rx) = mpsc::channel::<String>(10);
@@ -1918,10 +1944,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
         serialize_global(&guard, "full")
     };
     if ws_sender.send(Message::Text(full_json.into())).await.is_err() {
-        if current_is_active {
-            safe_dec_active_views(&state.active_views);
-        }
-        return;
+        return; // _guard.drop() 自动递减
     }
 
     tokio::select! {
@@ -1974,6 +1997,8 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                                     safe_dec_active_views(&state_inner.active_views);
                                 }
                                 current_is_active = is_active;
+                                // 同步 RAII Guard 的活跃标志，保证 Drop 时正确递减
+                                is_view_active.store(is_active, Ordering::SeqCst);
                             }
                             continue;
                         }
@@ -2085,9 +2110,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
         } => {}
     };
 
-    if current_is_active {
-        safe_dec_active_views(&state.active_views);
-    }
+    // _guard.drop() 自动根据 is_view_active 标志决定是否递减
 
     push_log("INFO", "WS", &format!("WebSocket 客户端已断开 (当前在线: {})", state.tx.receiver_count()));
 }

@@ -131,7 +131,7 @@ fn get_cpu_usage(prev: &mut Option<CpuSnapshot>) -> Option<String> {
         return None;
     }
     let total: u64 = nums.iter().sum();
-    let idle = nums[3];
+    let idle = nums[3] + nums.get(4).copied().unwrap_or(0);
 
     match prev.as_ref() {
         Some(prev_snap) => {
@@ -159,9 +159,13 @@ fn get_memory_usage() -> Option<String> {
     let mut mem_avail = 0u64;
     for line in content.lines() {
         if line.starts_with("MemTotal:") {
-            mem_total = line.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+            if let Some(v) = line.split_whitespace().nth(1).and_then(|s| s.parse().ok()) {
+                mem_total = v;
+            }
         } else if line.starts_with("MemAvailable:") {
-            mem_avail = line.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+            if let Some(v) = line.split_whitespace().nth(1).and_then(|s| s.parse().ok()) {
+                mem_avail = v;
+            }
         }
     }
     if mem_total == 0 || mem_avail == 0 {
@@ -459,7 +463,13 @@ impl GlobalTelemetry {
     fn from_telemetry_and_global(t: &TelemetryData, g: &GlobalTelemetry, uptime: Option<String>, updated: Option<String>) -> Self {
         fn keep_valid(new: &Option<String>, old: &Option<String>) -> Option<String> {
             match new {
-                Some(val) if !val.is_empty() && val != "NA" && val != "N/A" && val != "--" => Some(val.clone()),
+                Some(val) if !val.is_empty() => {
+                    if val == "NA" || val == "N/A" || val == "--" {
+                        Some("--".to_string())
+                    } else {
+                        Some(val.clone())
+                    }
+                }
                 _ => old.clone(),
             }
         }

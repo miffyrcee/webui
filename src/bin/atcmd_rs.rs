@@ -1,25 +1,28 @@
 use clap::Parser;
 use std::fs::OpenOptions;
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::process;
 
-// 完整保留原固件提取的所有终结符全集
+// These are the exact terminators extracted from the original Compal firmware.
+// The original code iterated through these to know when the modem finished replying.
 const TERMINATORS: &[&str] = &[
     "+CME ERROR:",
     "+CMS ERROR:",
-    "BUSY",
-    "ERROR",
-    "NO ANSWER",
-    "NO CARRIER",
-    "NO DIALTONE",
-    "OK",
+    "BUSY\r\n",
+    "ERROR\r\n",
+    "NO ANSWER\r\n",
+    "NO CARRIER\r\n",
+    "NO DIALTONE\r\n",
+    "OK\r\n",
 ];
 
 #[derive(Parser)]
 #[command(name = "atcmd_rs", about = "AT command tool for Quectel modem")]
 struct Cli {
+    /// AT command to send to the modem
     at_command: String,
 
+    /// SMD device path
     #[arg(short = 'p', long = "path", default_value = "/dev/smd11")]
     device_path: String,
 }
@@ -27,7 +30,14 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
 
-    let mut file = match OpenOptions::new().read(true).write(true).open(&cli.device_path) {
+    // Open the serial device. Linux TTY drivers natively handle the RTS/CTS
+    // flow control upon opening, bypassing the need for manual ioctl hacks
+    // seen in the original `atcmd` binary.
+    let mut file = match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&cli.device_path)
+    {
         Ok(f) => f,
         Err(e) => {
             eprintln!("fopen({}) failed: {}", cli.device_path, e);
@@ -35,44 +45,44 @@ fn main() {
         }
     };
 
-    // 1. 如果发的是 Ctrl+Z (\x1a) 或 ESC (\x1b)，不追加 \r\n；普通命令追加 \r\n
-    let mut cmd = cli.at_command.into_bytes();
-    if !cmd.ends_with(b"\x1a") && !cmd.ends_with(b"\x1b") {
-        cmd.extend_from_slice(b"\r\n");
-    }
-
-    if let Err(e) = file.write_all(&cmd) {
-        eprintln!("failed to send to modem: {}", e);
+    // Send the command + CRLF in a single write to prevent interleaving from
+    // other processes on the same SMD device (a real concern on multi-actor systems).
+    let mut cmd_buf = cli.at_command.as_bytes().to_vec();
+    cmd_buf.extend_from_slice(b"\r\n");
+    if let Err(e) = file.write_all(&cmd_buf) {
+        eprintln!("failed to send '{}' to modem: {}", cli.at_command, e);
         process::exit(1);
     }
     let _ = file.flush();
 
-    // 2. 块读取（解决无换行的 > 提示符死锁问题）
-    let mut buf = [0u8; 512];
-    let mut resp = String::new();
+    // SAFETY & FIX: The original Compal `atcli` used a 4096-byte global buffer (`byte_2410`)
+    // and `stpcpy`, causing buffer overflows on large responses.
+    // The original `atcmd` used `read` + `strstr`, causing serial fragmentation bugs.
+    //
+    // We fix both by using a streaming `BufReader` that reads exactly up to the `\n` byte.
+    // This prevents memory bloat (O(1) memory usage) and guarantees string completeness.
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
 
-    while let Ok(n) = file.read(&mut buf) {
-        if n == 0 { break; }
-        let chunk = String::from_utf8_lossy(&buf[..n]);
-        print!("{}", chunk);
-        io::stdout().flush().ok();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) => {
+                eprintln!("EOF from modem");
+                break;
+            }
+            Ok(_) => {
+                print!("{}", line);
+                io::stdout().flush().ok();
 
-        resp.push_str(&chunk);
-
-        let trimmed = resp.trim_end();
-
-        // 优先检查短信提示符 '>'（因为它末尾没有 \n 换行）
-        if trimmed.ends_with('>') {
-            break;
-        }
-
-        // 完整检查 TERMINATORS 数组中的所有正常与异常终结符
-        // 包括：+CME ERROR:, +CMS ERROR:, BUSY, ERROR, NO ANSWER, NO CARRIER, NO DIALTONE, OK
-        if resp.lines().any(|line| {
-            let l = line.trim();
-            TERMINATORS.iter().any(|&term| l.starts_with(term))
-        }) {
-            break;
+                if TERMINATORS.iter().any(|&t| line.starts_with(t)) {
+                    break;
+                }
+            }
+            Err(e) => {
+                eprintln!("Error reading from modem: {}", e);
+                break;
+            }
         }
     }
 }

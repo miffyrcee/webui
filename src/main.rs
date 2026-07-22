@@ -25,6 +25,7 @@ use std::time::Duration;
 use std::fs;
 use std::collections::VecDeque;
 use std::sync::OnceLock;
+
 use std::{env, sync::Arc};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
@@ -33,6 +34,13 @@ use at::{
     parse_qeng, parse_qtemp_temperature, parse_signal_quality,
     decode_cmgl_body, decode_hex_ucs2, format_bytes, normalize_at_command,
 };
+
+/// 安全递减活跃视图计数器（防止下溢翻转为 usize::MAX）
+fn safe_dec_active_views(atomic: &AtomicUsize) {
+    let _ = atomic.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+        Some(val.saturating_sub(1))
+    });
+}
 
 const DEFAULT_SERIAL_PORT: &str = "/dev/smd11";
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
@@ -1911,7 +1919,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     };
     if ws_sender.send(Message::Text(full_json.into())).await.is_err() {
         if current_is_active {
-            state.active_views.fetch_sub(1, Ordering::SeqCst);
+            safe_dec_active_views(&state.active_views);
         }
         return;
     }
@@ -1963,7 +1971,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                                 if is_active {
                                     state_inner.active_views.fetch_add(1, Ordering::SeqCst);
                                 } else {
-                                    state_inner.active_views.fetch_sub(1, Ordering::SeqCst);
+                                    safe_dec_active_views(&state_inner.active_views);
                                 }
                                 current_is_active = is_active;
                             }
@@ -2078,7 +2086,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     };
 
     if current_is_active {
-        state.active_views.fetch_sub(1, Ordering::SeqCst);
+        safe_dec_active_views(&state.active_views);
     }
 
     push_log("INFO", "WS", &format!("WebSocket 客户端已断开 (当前在线: {})", state.tx.receiver_count()));

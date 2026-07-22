@@ -1801,8 +1801,18 @@ async fn main() {
     let (command_tx, command_rx) = mpsc::channel(32);
     let (telemetry_tx, telemetry_rx) = watch::channel(Arc::new(GlobalTelemetry::default()));
 
-    let jwt_secret =
-        env::var("JWT_SECRET").unwrap_or_else(|_| "argon_rm520n_jwt_secret_key_default".to_string());
+    let jwt_secret = env::var("JWT_SECRET").unwrap_or_else(|_| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let pid = std::process::id();
+        let mut hasher = Sha256::new();
+        hasher.update(format!("jwt_rand_{}_{}", nanos, pid));
+        let key = hex::encode(hasher.finalize());
+        push_log("WARN", "Auth", "未检测到 JWT_SECRET 环境变量，已在内存中生成随机密钥（零文件落盘）");
+        key
+    });
     let admin_password =
         env::var("WEBUI_PASSWORD").unwrap_or_else(|_| "admin123".to_string());
     let admin_username =

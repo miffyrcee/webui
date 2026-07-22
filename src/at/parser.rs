@@ -214,7 +214,7 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
         Ok(pairs) => {
             for pair in pairs {
                 // 通过子节点提取匹配各 AT 响应行
-                for inner in pair.into_inner() {
+                if let Some(inner) = pair.into_inner().next() {
                     return Some(match inner.as_rule() {
                         Rule::at_ok => ParsedLine::Ok,
                         Rule::at_error | Rule::at_cme_error => ParsedLine::Error,

@@ -743,7 +743,7 @@
                     <!-- USB 网络模式控制卡 -->
                     <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                         <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
-                            <h2 class="text-xs font-bold tracking-wider text-cyan-600 dark:text-cyan-400 uppercase flex items-center gap-2">
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase flex items-center gap-2">
                                 <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.75 9.75a3.375 3.375 0 010-4.5 3.375 3.375 0 014.5 0L9.75 6M6 12L9.75 9.75m-3.75 0L9 6.75M9.75 9.75L18 18m-6-6l3-3m-3 3l3 3"/></svg>
                                 USB 网络模式 / USB Net Mode
                             </h2>
@@ -777,14 +777,14 @@
                                 </button>
                             </div>
 
-                            <button id="usb_mode_apply_btn" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-4 py-2.5 text-sm rounded-xl transition-all active:scale-95 shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                            <button id="usb_mode_apply_btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2.5 text-sm rounded-xl transition-all active:scale-95 shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
                                 应用 USB 模式并提示重启
                             </button>
                             <div id="usb_mode_status" class="text-xs font-mono text-slate-400 dark:text-slate-500 pt-1">等待操作反馈...</div>
                         </div>
                     </div>
 
- & ADB 状态摘要卡片 -->
+                <!-- USB & ADB 状态摘要卡片 -->
                 <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                     <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10 flex items-center justify-between">
                         <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase flex items-center gap-2">
@@ -800,7 +800,7 @@
                         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                             <div class="p-4 bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 rounded-xl text-center">
                                 <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">当前 USB 模式</span>
-                                <span id="usb_current_mode" class="block text-lg font-bold text-cyan-600 dark:text-cyan-400">--</span>
+                                <span id="usb_current_mode" class="block text-lg font-bold text-indigo-600 dark:text-indigo-400">--</span>
                                 <span id="usb_current_mode_name" class="block text-xs text-slate-400 dark:text-slate-500 mt-1">未知</span>
                             </div>
                             <div class="p-4 bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 rounded-xl text-center">
@@ -1194,10 +1194,10 @@
                 btn.classList.toggle('active', isActive);
                 if (isActive) {
                     btn.classList.remove('bg-slate-50', 'dark:bg-[#161d2b]/60', 'border-slate-100', 'dark:border-slate-800/40', 'text-slate-600', 'dark:text-slate-300');
-                    btn.classList.add('bg-cyan-50', 'dark:bg-cyan-950/30', 'border-cyan-400', 'dark:border-cyan-500', 'text-cyan-700', 'dark:text-cyan-300', 'font-bold');
+                    btn.classList.add('bg-indigo-50', 'dark:bg-indigo-950/30', 'border-indigo-400', 'dark:border-indigo-500', 'text-indigo-700', 'dark:text-indigo-300', 'font-bold');
                 } else {
                     btn.classList.add('bg-slate-50', 'dark:bg-[#161d2b]/60', 'border-slate-100', 'dark:border-slate-800/40', 'text-slate-600', 'dark:text-slate-300');
-                    btn.classList.remove('bg-cyan-50', 'dark:bg-cyan-950/30', 'border-cyan-400', 'dark:border-cyan-500', 'text-cyan-700', 'dark:text-cyan-300', 'font-bold');
+                    btn.classList.remove('bg-indigo-50', 'dark:bg-indigo-950/30', 'border-indigo-400', 'dark:border-indigo-500', 'text-indigo-700', 'dark:text-indigo-300', 'font-bold');
                 }
             });
 
@@ -1207,7 +1207,7 @@
             const el = getDomElement('usb_mode_status');
             if (!el) return;
             if (data.success) {
-                el.innerHTML = '<span class="text-cyan-600 dark:text-cyan-400 font-semibold">✓ ' + escapeHtml(data.msg || 'OK') + '</span>';
+                el.innerHTML = '<span class="text-indigo-600 dark:text-indigo-400 font-semibold">✓ ' + escapeHtml(data.msg || 'OK') + '</span>';
                 // 刷新配置摘要
                 setTimeout(() => sendWsCommand('get_usb_config'), 1500);
             } else {
@@ -1228,11 +1228,11 @@
             document.querySelectorAll('.usb-mode-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     document.querySelectorAll('.usb-mode-btn').forEach(b => {
-                        b.classList.remove('active', 'bg-cyan-50', 'dark:bg-cyan-950/30', 'border-cyan-400', 'dark:border-cyan-500', 'text-cyan-700', 'dark:text-cyan-300', 'font-bold');
+                        b.classList.remove('active', 'bg-indigo-50', 'dark:bg-indigo-950/30', 'border-indigo-400', 'dark:border-indigo-500', 'text-indigo-700', 'dark:text-indigo-300', 'font-bold');
                         b.classList.add('bg-slate-50', 'dark:bg-[#161d2b]/60', 'border-slate-100', 'dark:border-slate-800/40', 'text-slate-600', 'dark:text-slate-300');
                     });
                     btn.classList.remove('bg-slate-50', 'dark:bg-[#161d2b]/60', 'border-slate-100', 'dark:border-slate-800/40', 'text-slate-600', 'dark:text-slate-300');
-                    btn.classList.add('active', 'bg-cyan-50', 'dark:bg-cyan-950/30', 'border-cyan-400', 'dark:border-cyan-500', 'text-cyan-700', 'dark:text-cyan-300', 'font-bold');
+                    btn.classList.add('active', 'bg-indigo-50', 'dark:bg-indigo-950/30', 'border-indigo-400', 'dark:border-indigo-500', 'text-indigo-700', 'dark:text-indigo-300', 'font-bold');
                 });
             });
 

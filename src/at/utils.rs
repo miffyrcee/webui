@@ -1,8 +1,8 @@
-/// Utility functions for AT response processing
+//! Utility functions for AT response processing
 
 /// Decode UCS2 hex-encoded string (e.g. "4E2D56FD79FB52A8" -> "中国联通")
 pub fn decode_hex_ucs2(hex: &str) -> String {
-    if hex.len() % 4 != 0 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+    if !hex.len().is_multiple_of(4) || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
         return String::new();
     }
     let mut bytes = Vec::new();

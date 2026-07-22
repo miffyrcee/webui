@@ -1044,34 +1044,49 @@ impl HardwareBackend for RealBackend {
     }
 
     async fn get_usb_config(&self) -> Result<serde_json::Value, String> {
-        let usbnet_resp = send_at_command_inner(&self.serial_path, "AT+QCFG=\"usbnet\"").await.unwrap_or_default();
-        let adb_resp = send_at_command_inner(&self.serial_path, "AT+QADB?").await.unwrap_or_default();
+        let usbnet_resp = send_at_command_inner(&self.serial_path, "AT+QCFG=\"usbnet\"").await;
+        let adb_resp = send_at_command_inner(&self.serial_path, "AT+QADB?").await;
 
-        // 解析 usbnet
-        let usbnet_mode = usbnet_resp.lines().find_map(|l| {
-            if l.contains("+QCFG: \"usbnet\",") {
-                l.split(',').nth(1)?.trim().parse::<u8>().ok()
-            } else {
-                None
+        // 解析 usbnet（指令失败时 usbnet_supported = false）
+        let (usbnet_mode, usbnet_supported) = match &usbnet_resp {
+            Ok(resp) => {
+                let mode = resp.lines().find_map(|l| {
+                    if l.contains("+QCFG: \"usbnet\",") {
+                        l.split(',').nth(1)?.trim().parse::<u8>().ok()
+                    } else {
+                        None
+                    }
+                }).unwrap_or(0);
+                (mode, true)
             }
-        }).unwrap_or(0);
+            Err(_) => (0, false),
+        };
 
-        // 解析 ADB 状态
-        let adb_enabled = adb_resp.contains("+QADB: 1");
+        // 解析 ADB 状态（指令失败时 adb_supported = false）
+        let (adb_enabled, adb_supported) = match &adb_resp {
+            Ok(resp) => (resp.contains("+QADB: 1"), true),
+            Err(_) => (false, false),
+        };
 
-        let mode_name = match usbnet_mode {
-            0 => "RMNET (QMI)",
-            1 => "ECM (Linux/Mac免驱)",
-            2 => "MBIM (Win10/11原生)",
-            3 => "RNDIS (Windows免驱)",
-            5 => "NCM (高速网卡)",
-            _ => "Unknown",
+        let mode_name = if usbnet_supported {
+            match usbnet_mode {
+                0 => "RMNET (QMI)",
+                1 => "ECM (Linux/Mac免驱)",
+                2 => "MBIM (Win10/11原生)",
+                3 => "RNDIS (Windows免驱)",
+                5 => "NCM (高速网卡)",
+                _ => "Unknown",
+            }
+        } else {
+            "N/A (指令不支持)"
         };
 
         Ok(serde_json::json!({
             "usbnet_mode": usbnet_mode,
             "usbnet_name": mode_name,
-            "adb_enabled": adb_enabled
+            "usbnet_supported": usbnet_supported,
+            "adb_enabled": if adb_supported { serde_json::Value::Bool(adb_enabled) } else { serde_json::Value::Null },
+            "adb_supported": adb_supported
         }))
     }
 }
@@ -1206,7 +1221,9 @@ impl HardwareBackend for MockBackend {
         Ok(serde_json::json!({
             "usbnet_mode": 1,
             "usbnet_name": "ECM (Linux/Mac免驱) [MOCK]",
-            "adb_enabled": true
+            "usbnet_supported": true,
+            "adb_enabled": true,
+            "adb_supported": true
         }))
     }
 

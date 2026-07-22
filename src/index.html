@@ -1219,17 +1219,35 @@
                 3: 'RNDIS (Windows 免驱)',
                 5: 'NCM (高速网卡)'
             };
-            const modeName = modeNames[cfg.usbnet_mode] || ('未知 (' + cfg.usbnet_mode + ')');
+            const modeName = cfg.usbnet_supported ? (modeNames[cfg.usbnet_mode] || ('未知 (' + cfg.usbnet_mode + ')')) : 'N/A (指令不支持)';
             updateText("usb_current_mode", modeName);
             updateText("usb_current_mode_name", cfg.usbnet_name || modeName);
-            updateText("usb_current_mode_num", String(cfg.usbnet_mode));
-            updateText("usb_current_adb", cfg.adb_enabled ? '已开启 ✓' : '已关闭 ✗');
+            updateText("usb_current_mode_num", cfg.usbnet_supported ? String(cfg.usbnet_mode) : '--');
+
+            // ADB 状态：null 表示指令不支持
+            let adbText, adbClass;
+            if (cfg.adb_supported === false) {
+                adbText = '指令不支持';
+                adbClass = 'text-slate-400';
+            } else if (cfg.adb_enabled === true) {
+                adbText = '已开启 ✓';
+                adbClass = 'text-amber-500';
+            } else {
+                adbText = '已关闭 ✗';
+                adbClass = 'text-slate-400';
+            }
+            const adbStatusEl = getDomElement('usb_current_adb');
+            if (adbStatusEl) {
+                adbStatusEl.innerText = adbText;
+                adbStatusEl.className = 'block text-lg font-bold font-mono ' + adbClass;
+            }
+
             updateText("usb_config_updated", new Date().toLocaleString('zh-CN', { hour12: false }));
 
-            // 高亮对应 mode 按钮
+            // 高亮对应 mode 按钮（仅指令支持时）
             document.querySelectorAll('.usb-mode-btn').forEach(btn => {
                 const mode = parseInt(btn.dataset.mode, 10);
-                const isActive = mode === cfg.usbnet_mode;
+                const isActive = cfg.usbnet_supported && mode === cfg.usbnet_mode;
                 btn.classList.toggle('active', isActive);
                 if (isActive) {
                     btn.classList.remove('bg-slate-50', 'dark:bg-[#161d2b]/60', 'border-slate-100', 'dark:border-slate-800/40', 'text-slate-600', 'dark:text-slate-300');
@@ -1240,18 +1258,46 @@
                 }
             });
 
-            // 同步 ADB toggle
+            // 同步 ADB toggle（仅指令支持时）
             const adbToggle = getDomElement('adb_toggle');
             if (adbToggle) {
-                const shouldCheck = cfg.adb_enabled === true;
-                if (adbToggle.checked !== shouldCheck) {
-                    adbToggle.checked = shouldCheck;
+                if (cfg.adb_supported === false) {
+                    adbToggle.checked = false;
+                    adbToggle.disabled = true;
+                } else {
+                    adbToggle.disabled = false;
+                    const shouldCheck = cfg.adb_enabled === true;
+                    if (adbToggle.checked !== shouldCheck) {
+                        adbToggle.checked = shouldCheck;
+                    }
                 }
+            }
+            // 指令不支持时禁用应用按钮
+            const usbApplyBtn = getDomElement('usb_mode_apply_btn');
+            if (usbApplyBtn && cfg.usbnet_supported === false) {
+                usbApplyBtn.disabled = true;
+                usbApplyBtn.title = '模组不支持该指令';
+            } else if (usbApplyBtn) {
+                usbApplyBtn.disabled = false;
+                usbApplyBtn.title = '';
+            }
+            const adbApplyBtn = getDomElement('adb_apply_btn');
+            if (adbApplyBtn && cfg.adb_supported === false) {
+                adbApplyBtn.disabled = true;
+                adbApplyBtn.title = '模组不支持该指令';
+            } else if (adbApplyBtn) {
+                adbApplyBtn.disabled = false;
+                adbApplyBtn.title = '';
             }
             const adbLabel = getDomElement('adb_status_label');
             if (adbLabel) {
-                adbLabel.innerText = cfg.adb_enabled ? '状态: 已开启 ✓' : '状态: 已关闭 ✗';
-                adbLabel.className = 'block text-xs mt-0.5 ' + (cfg.adb_enabled ? 'text-amber-500 font-semibold' : 'text-slate-400 dark:text-slate-500');
+                if (cfg.adb_supported === false) {
+                    adbLabel.innerText = '状态: 指令不支持';
+                    adbLabel.className = 'block text-xs mt-0.5 text-slate-400';
+                } else {
+                    adbLabel.innerText = cfg.adb_enabled ? '状态: 已开启 ✓' : '状态: 已关闭 ✗';
+                    adbLabel.className = 'block text-xs mt-0.5 ' + (cfg.adb_enabled ? 'text-amber-500 font-semibold' : 'text-slate-400 dark:text-slate-500');
+                }
             }
         }
 

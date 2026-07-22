@@ -31,7 +31,8 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use at::{
     parse_cgpaddr, parse_cops_scan, parse_net_status, parse_qcainfo,
-    parse_qeng, parse_qtemp_temperature, parse_signal_quality,
+    parse_qeng, parse_qeng_neighbour, parse_qtemp_temperature,
+    parse_signal_quality,
     decode_cmgl_body, decode_hex_ucs2, format_bytes, normalize_at_command,
 };
 
@@ -825,7 +826,9 @@ impl HardwareBackend for RealBackend {
             }
         } else if tech.eq_ignore_ascii_case("5g") {
             let b = band.ok_or_else(|| "5G 锁小区必须提供 Band".to_string())?;
-            send_at_command_inner(&self.serial_path, &format!("AT+QNWLOCK=\"common/5g\",{},{},30,{}", pci, earfcn, b)).await
+            // 低频段 FDD (<=28) 常用 15kHz，高频段 TDD 常用 30kHz
+            let scs = if b <= 28 { 15 } else { 30 };
+            send_at_command_inner(&self.serial_path, &format!("AT+QNWLOCK=\"common/5g\",{},{},{},{}", pci, earfcn, scs, b)).await
         } else {
             send_at_command_inner(&self.serial_path, &format!("AT+QNWLOCK=\"common/lte\",1,{},{}", earfcn, pci)).await
         }
@@ -1671,11 +1674,30 @@ async fn handle_at_request(
         AtAction::GetDiagnostics(diag) => {
             push_log("INFO", "Actor", &format!("获取诊断信息: {}", diag));
             let res = backend.get_diagnostics(&diag).await;
-            let data = res.as_ref().ok().map(|r| serde_json::Value::String(r.clone())).unwrap_or(serde_json::Value::Null);
-            let _ = req.resp_tx.send(serde_json::json!({
-                "type": "diagnostics_res",
-                "data": { "success": res.is_ok(), "msg": res.unwrap_or_else(|e| e), "data": data }
-            }));
+            match diag {
+                DiagnosticType::Neighbour => {
+                    let raw = res.as_ref().ok().map(|r| r.clone()).unwrap_or_default();
+                    let cells = parse_qeng_neighbour(&raw);
+                    let _ = req.resp_tx.send(serde_json::json!({
+                        "type": "diagnostics_res",
+                        "data": {
+                            "success": res.is_ok(),
+                            "msg": res.unwrap_or_else(|e| e),
+                            "data": {
+                                "raw": raw,
+                                "cells": cells,
+                            }
+                        }
+                    }));
+                }
+                _ => {
+                    let data = res.as_ref().ok().map(|r| serde_json::Value::String(r.clone())).unwrap_or(serde_json::Value::Null);
+                    let _ = req.resp_tx.send(serde_json::json!({
+                        "type": "diagnostics_res",
+                        "data": { "success": res.is_ok(), "msg": res.unwrap_or_else(|e| e), "data": data }
+                    }));
+                }
+            }
         }
     }
 }

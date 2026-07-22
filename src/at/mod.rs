@@ -10,6 +10,7 @@ pub use parser::{
     parse_net_status,
     parse_qcainfo,
     parse_qeng,
+    parse_qeng_neighbour,
     parse_qtemp_temperature,
     parse_signal_quality,
 };

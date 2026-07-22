@@ -67,6 +67,10 @@ cgpaddr_ip  = { quoted_value }
 // ─── QENG "servingcell" ───
 // +QENG: "servingcell","<conn>","<act>","<opmode>",<MCC>,<MNC>,<CellID>,<PCI>,<TAC>,<EARFCN>,<band>,<bandwidth>,<RSRP>,<RSRQ>,<SINR>,<srxlev>,<rssi>
 qeng_servingcell = { "+QENG: \"servingcell\"" ~ COMMA ~ qeng_fields }
+
+// ─── QENG "neighbourcell" ───
+// +QENG: "neighbourcell","<rat>",<MCC>,<MNC>,<PCI>,<EARFCN>,<RSRP>,<RSRQ>,<SINR>,<srxlev>
+qeng_neighbourcell = { "+QENG: \"neighbourcell\"" ~ COMMA ~ qeng_fields }
 qeng_fields = { generic_value ~ (COMMA ~ generic_value)* }
 
 // ─── QCAINFO (结构化) ───
@@ -126,7 +130,7 @@ at_echo_line = { "AT" ~ (!CRLF ~ ANY)* }
 
 // ─── Combined AT command response (cleaned, no echo) ───
 // A response can contain multiple AT result lines interspersed
-at_response_line = { (cpin_resp | quimslot_resp | qspn_resp | cops_resp | cgdcont_resp | qgdnrcnt_resp | qgdat_resp | cgpaddr_resp | qeng_servingcell | qcainfo_resp | cnum_resp | cgcontrdp_resp | qccid_resp | cimi_resp | qtemp_resp | creg_resp | csq_resp | status_line | cgmr_line) }
+at_response_line = { (cpin_resp | quimslot_resp | qspn_resp | cops_resp | cgdcont_resp | qgdnrcnt_resp | qgdat_resp | cgpaddr_resp | qeng_servingcell | qeng_neighbourcell | qcainfo_resp | cnum_resp | cgcontrdp_resp | qccid_resp | cimi_resp | qtemp_resp | creg_resp | csq_resp | status_line | cgmr_line) }
 
 at_response = { SOI ~ (at_response_line ~ (CRLF ~ at_response_line)*)? ~ EOI }
 

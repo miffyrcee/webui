@@ -107,6 +107,7 @@ pub enum ParsedLine {
     TrafficStats(TrafficStats),
     Cgpaddr(CgpaddrEntry),
     QengServingCell(QengServingCell),
+    QengNeighbourCell(QengNeighbourCell),
     Qcainfo(QcainfoEntry),
     Cgcontrdp(CgcontrdpResponse),
     Cnum(CnumResponse),
@@ -305,6 +306,21 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
                             if let Some(v) = values.get(14) { cell.srxlev = v.clone(); }
                             if let Some(v) = values.get(15) { cell.rssi = v.clone(); }
                             ParsedLine::QengServingCell(cell)
+                        }
+
+                        Rule::qeng_neighbourcell => {
+                            let values = extract_values(inner);
+                            ParsedLine::QengNeighbourCell(QengNeighbourCell {
+                                rat: values.get(0).cloned().unwrap_or_default(),
+                                mcc: values.get(1).cloned().unwrap_or_default(),
+                                mnc: values.get(2).cloned().unwrap_or_default(),
+                                pci: values.get(3).cloned().unwrap_or_default(),
+                                earfcn: values.get(4).cloned().unwrap_or_default(),
+                                rsrp: values.get(5).cloned().unwrap_or_default(),
+                                rsrq: values.get(6).cloned().unwrap_or_default(),
+                                sinr: values.get(7).cloned().unwrap_or_default(),
+                                srxlev: values.get(8).cloned().unwrap_or_default(),
+                            })
                         }
 
                         Rule::qcainfo_resp => {
@@ -684,6 +700,19 @@ pub fn parse_cops_scan(resp: &str) -> Vec<serde_json::Value> {
         }
     }
     networks
+}
+
+/// Parse +QENG: "neighbourcell" response and return a list of neighbour cells
+pub fn parse_qeng_neighbour(raw: &str) -> Vec<QengNeighbourCell> {
+    raw.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            match parse_single_line(trimmed) {
+                Some(ParsedLine::QengNeighbourCell(cell)) => Some(cell),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

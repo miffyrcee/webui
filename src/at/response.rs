@@ -112,3 +112,17 @@ pub struct CnumResponse {
     pub number: String,
 }
 
+/// Parsed +QENG: "neighbourcell" line
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct QengNeighbourCell {
+    pub rat: String,     // e.g. "LTE" or "NR5G"
+    pub mcc: String,
+    pub mnc: String,
+    pub pci: String,
+    pub earfcn: String,
+    pub rsrp: String,
+    pub rsrq: String,
+    pub sinr: String,
+    pub srxlev: String,
+}
+

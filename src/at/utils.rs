@@ -146,21 +146,10 @@ pub fn decode_cmgl_body(response: &str) -> String {
     for line in response.lines() {
         if line.starts_with("+CMGL:") {
             in_body = true;
-            // 尝试解码发件人号码（UCS2 Hex 容错）
-            let fields: Vec<&str> = line.splitn(6, ',').collect();
-            if fields.len() >= 3 {
-                let sender_quoted = fields[2].trim();
-                let sender = sender_quoted.trim_matches('"');
-                let decoded = decode_hex_ucs2(sender);
-                if !decoded.is_empty() {
-                    let new_line = line.replacen(sender_quoted, &format!("\"{}\"", decoded), 1);
-                    result.push_str(&new_line);
-                } else {
-                    result.push_str(line);
-                }
-            } else {
-                result.push_str(line);
-            }
+            // 发件人号码：read_sms_list 已设置 AT+CSCS="GSM"，号码始终为 ASCII 格式
+            // 无需（也不应）尝试 UCS2 Hex 解码，否则纯数字号码（如 1065896652051001）
+            // 可能被误判为 UCS2 而产生乱码
+            result.push_str(line);
             result.push('\n');
         } else if in_body {
             let trimmed = line.trim();

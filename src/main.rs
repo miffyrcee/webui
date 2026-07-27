@@ -746,7 +746,7 @@ impl HardwareBackend for RealBackend {
             let ucs2_recipient = encode_ucs2_hex(&recipient);
             let ucs2_hex_msg = encode_ucs2_hex(&message);
 
-            let result = send_ucs2_sms_command_inner(
+            let result = send_sms_command_inner(
                 &self.serial_path,
                 &format!("AT+CMGS=\"{}\"", ucs2_recipient),
                 &ucs2_hex_msg,
@@ -1325,15 +1325,11 @@ fn spawn_atcmd_rs(
     serial_path: &str,
     cmd: &str,
     sms_message: Option<&str>,
-    hex_message: Option<&str>,
 ) -> Result<tokio::process::Child, String> {
     let mut command = tokio::process::Command::new("atcmd_rs");
     command.arg("-p").arg(serial_path);
     if let Some(message) = sms_message {
         command.arg("--message").arg(message);
-    }
-    if let Some(hex) = hex_message {
-        command.arg("--hex-body").arg(hex);
     }
     command
         .arg(cmd)
@@ -1364,11 +1360,10 @@ async fn send_at_command_inner_with_options(
     cmd: &str,
     timeout: Duration,
     sms_message: Option<&str>,
-    hex_message: Option<&str>,
 ) -> Result<String, String> {
     let start = std::time::Instant::now();
 
-    let child = spawn_atcmd_rs(serial_path, cmd, sms_message, hex_message)?;
+    let child = spawn_atcmd_rs(serial_path, cmd, sms_message)?;
 
     let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
         Ok(Ok(output)) => output,
@@ -1404,7 +1399,7 @@ async fn send_at_command_inner_with_timeout(
     cmd: &str,
     timeout: Duration,
 ) -> Result<String, String> {
-    send_at_command_inner_with_options(serial_path, cmd, timeout, None, None).await
+    send_at_command_inner_with_options(serial_path, cmd, timeout, None).await
 }
 
 async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, String> {
@@ -1412,11 +1407,7 @@ async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, S
 }
 
 async fn send_sms_command_inner(serial_path: &str, cmd: &str, message: &str) -> Result<String, String> {
-    send_at_command_inner_with_options(serial_path, cmd, Duration::from_secs(30), Some(message), None).await
-}
-
-async fn send_ucs2_sms_command_inner(serial_path: &str, cmd: &str, hex_message: &str) -> Result<String, String> {
-    send_at_command_inner_with_options(serial_path, cmd, Duration::from_secs(30), None, Some(hex_message)).await
+    send_at_command_inner_with_options(serial_path, cmd, Duration::from_secs(30), Some(message)).await
 }
 
 async fn query_device_bands(serial_path: &str) -> String {

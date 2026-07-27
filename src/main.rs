@@ -646,6 +646,7 @@ impl HardwareBackend for RealBackend {
 
     async fn read_sms_list(&self) -> String {
         let _ = send_at_command_inner(&self.serial_path, "AT+CMGF=1").await;
+        let _ = send_at_command_inner(&self.serial_path, "AT+CSCS=\"GSM\"").await;
         send_at_command_inner(&self.serial_path, "AT+CMGL=\"ALL\"")
             .await
             .unwrap_or_else(|_| "+CMGL: 0 messages\r\nOK\r\n".to_string())
@@ -754,10 +755,10 @@ impl HardwareBackend for RealBackend {
             .await
             .is_ok();
 
-            // 恢复 GSM 字符集（UCS2 模式下字符串参数需用 UCS2 十六进制编码）
+            // 发送完毕后强制复位字符集为 GSM
             let _ = send_at_command_inner(
                 &self.serial_path,
-                "AT+CSCS=\"00470053004D\"",  // "GSM" 的 UCS2 十六进制
+                "AT+CSCS=\"GSM\"",
             )
             .await;
 

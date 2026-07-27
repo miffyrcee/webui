@@ -94,7 +94,7 @@ fn build_sms_submit_tpdu(recipient: &str, message: &str) -> Vec<u8> {
 
     // TPDU: 参考头 + 地址 + 协议标识 + DCS + 有效期 + 用户数据
     let mut pdu = Vec::with_capacity(4 + 1 + addr_octets + 3 + 1 + udl);
-    pdu.push(0x21); // SMS-SUBMIT (MTI=01, VPF=10=相对有效期, RD=0, RP=0)
+    pdu.push(0x29); // SMS-SUBMIT (MTI=01, VPF=10=相对有效期, RD=0, RP=0)
     pdu.push(0x00); // TP-Message-Reference
     pdu.push(address_length_u8); // TP-Destination-Address 长度（十进制位数）
     pdu.push(toa); // TP-Destination-Address 类型

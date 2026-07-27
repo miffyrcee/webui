@@ -21,7 +21,7 @@
 - 设备不存在时所有 AT 命令执行失败返回 NA
 
 ### AT Parser
-- `src/at/` 目录下有 PEG parser (`grammar.pest`) 和 Rust 解析代码
+- `src/at/` 目录下有 Rust 解析代码，使用前缀匹配 + CSV 字段切割解析 AT 响应
 - `parse_combined_response()` 解析复合 AT 命令返回（分号分隔）
 - `parse_qeng()`, `parse_qcainfo()`, `parse_cgpaddr()` 解析具体模块响应
 

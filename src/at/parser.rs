@@ -1,39 +1,33 @@
-//! pest-based parsers for AT command responses
-//!
-//! This module replaces the previous nom-based parsers with pest-based grammars.
+//! Parsers for AT command responses.
 
 use crate::at::{
     response::*,
     utils::decode_hex_ucs2,
 };
-use pest::Parser;
 
-/// The pest parser generated from grammar.pest
-#[derive(pest_derive::Parser)]
-#[grammar = "at/grammar.pest"]
 #[allow(dead_code)]
-pub struct AtParser;
+fn split_at_fields(body: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
 
-/// Recursively extract all non-COMMA field values from a pest match pair,
-/// trimming quotes from quoted values.
-fn extract_values(pair: pest::iterators::Pair<'_, Rule>) -> Vec<String> {
-    let mut result = Vec::new();
-    for inner in pair.into_inner() {
-        if inner.as_rule() == Rule::COMMA {
-            continue;
-        }
-        // Capture string value before moving `inner` into the recursive call
-        let str_val = inner.as_str().trim_matches('"').to_string();
-        let inner_values = extract_values(inner);
-        if inner_values.is_empty() {
-            if !str_val.is_empty() {
-                result.push(str_val);
+    for ch in body.chars() {
+        match ch {
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => {
+                fields.push(current.trim().to_string());
+                current.clear();
             }
-        } else {
-            result.extend(inner_values);
+            _ => current.push(ch),
         }
     }
-    result
+    fields.push(current.trim().to_string());
+
+    fields
+}
+
+fn fields_after_prefix(line: &str, prefix: &str) -> Option<Vec<String>> {
+    line.strip_prefix(prefix).map(|body| split_at_fields(body.trim()))
 }
 
 /// 判断 APN 是否为可用的数据 APN（跳过 ims 等信令 APN）
@@ -156,219 +150,139 @@ fn decode_lte_bandwidth(code: i32) -> f64 {
     }
 }
 
-/// 使用结构化 AST 匹配构建 QcainfoEntry，彻底弃用扁平 extract_values 的位置索引
-fn build_qcainfo_entry(pair: pest::iterators::Pair<'_, Rule>) -> QcainfoEntry {
-    // 如果收到的是 qcainfo_resp，查找内部实际的 pcc/scc 子规则
-    if pair.as_rule() == Rule::qcainfo_resp {
-        for child in pair.into_inner() {
-            if child.as_rule() == Rule::qcainfo_pcc || child.as_rule() == Rule::qcainfo_scc {
-                return build_qcainfo_entry(child);
-            }
-        }
-        return QcainfoEntry::default();
-    }
-
-    let mut entry = QcainfoEntry::default();
-    match pair.as_rule() {
-        Rule::qcainfo_pcc => {
-            entry.component = "PCC".to_string();
-            for field in pair.into_inner() {
-                match field.as_rule() {
-                    Rule::earfcn => entry.earfcn = field.as_str().to_string(),
-                    Rule::bandwidth => entry.bandwidth = field.as_str().to_string(),
-                    Rule::band => entry.band = field.as_str().trim_matches('"').to_string(),
-                    Rule::pci => entry.pci = field.as_str().to_string(),
-                    _ => {}
-                }
-            }
-        }
-        Rule::qcainfo_scc => {
-            entry.component = "SCC".to_string();
-            for field in pair.into_inner() {
-                match field.as_rule() {
-                    Rule::earfcn => entry.earfcn = field.as_str().to_string(),
-                    Rule::bandwidth => entry.bandwidth = field.as_str().to_string(),
-                    Rule::band => entry.band = field.as_str().trim_matches('"').to_string(),
-                    Rule::pci => entry.pci = field.as_str().to_string(),
-                    Rule::scc_idx => entry.scc_idx = Some(field.as_str().to_string()),
-                    Rule::scc_pci => entry.pci = field.as_str().to_string(),
-                    Rule::scc_rsrp => entry.rsrp = Some(field.as_str().to_string()),
-                    Rule::scc_rsrq => entry.rsrq = Some(field.as_str().to_string()),
-                    Rule::scc_sinr => entry.sinr = Some(field.as_str().to_string()),
-                    _ => {}
-                }
-            }
-        }
-        _ => {}
-    }
-    entry
-}
-
-/// Parse a single line of AT response using pest-based grammar
+/// Parse a single line of AT response using prefix matching + AT CSV field split.
 pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return None;
     }
-
-    match AtParser::parse(Rule::at_response_line, trimmed) {
-        Ok(pairs) => {
-            for pair in pairs {
-                // 通过子节点提取匹配各 AT 响应行
-                if let Some(inner) = pair.into_inner().next() {
-                    return Some(match inner.as_rule() {
-                        Rule::at_ok => ParsedLine::Ok,
-                        Rule::at_error | Rule::at_cme_error => ParsedLine::Error,
-
-                        Rule::cpin_resp => {
-                            let values = extract_values(inner);
-                            ParsedLine::Cpin(CpinResponse {
-                                status: values.into_iter().next().unwrap_or_default(),
-                            })
-                        }
-
-                        Rule::quimslot_resp => {
-                            let values = extract_values(inner);
-                            ParsedLine::Quimslot(QuimslotResponse {
-                                slot: values.first().and_then(|s| s.parse().ok()).unwrap_or(1),
-                            })
-                        }
-
-                        Rule::qspn_resp => {
-                            let values = extract_values(inner);
-                            let mut resp = QspnResponse::default();
-                            if let Some(v) = values.get(0) {
-                                let decoded = decode_hex_ucs2(v);
-                                resp.fnn = if decoded.is_empty() { v.clone() } else { decoded };
-                            }
-                            if let Some(v) = values.get(1) { resp.snn = v.clone(); }
-                            if let Some(v) = values.get(2) { resp.spn = v.clone(); }
-                            if let Some(v) = values.get(3) { resp.alphabet = v.clone(); }
-                            ParsedLine::Qspn(resp)
-                        }
-
-                        Rule::cops_resp => {
-                            let values = extract_values(inner);
-                            ParsedLine::Cops(CopsResponse {
-                                mode: values.get(0).cloned().unwrap_or_default(),
-                                format: values.get(1).cloned(),
-                                oper: values.get(2).cloned(),
-                                act: values.get(3).cloned(),
-                            })
-                        }
-
-                        Rule::cgdcont_resp => {
-                            let values = extract_values(inner);
-                            ParsedLine::Cgdcont(CgdcontEntry {
-                                cid: values.get(0).and_then(|s| s.parse().ok()).unwrap_or(0),
-                                pdp_type: values.get(1).cloned().unwrap_or_default(),
-                                apn: values.get(2).cloned().unwrap_or_default(),
-                                pdp_addr: values.get(3).cloned().unwrap_or_default(),
-                                d_comp: values.get(4).cloned().unwrap_or_default(),
-                                h_comp: values.get(5).cloned().unwrap_or_default(),
-                            })
-                        }
-
-                        Rule::qgdnrcnt_resp | Rule::qgdat_resp => {
-                            let values = extract_values(inner);
-                            ParsedLine::TrafficStats(TrafficStats {
-                                tx_bytes: values.get(0).and_then(|s| s.parse().ok()).unwrap_or(0),
-                                rx_bytes: values.get(1).and_then(|s| s.parse().ok()).unwrap_or(0),
-                            })
-                        }
-
-                        Rule::cgpaddr_resp => {
-                            let values = extract_values(inner);
-                            ParsedLine::Cgpaddr(CgpaddrEntry {
-                                cid: values.get(0).and_then(|s| s.parse().ok()).unwrap_or(0),
-                                ipv4: values.get(1).cloned().unwrap_or_default(),
-                                ipv6: values.get(2).cloned().unwrap_or_default(),
-                            })
-                        }
-
-                        Rule::qeng_servingcell => {
-                            let values = extract_values(inner);
-                            let mut cell = QengServingCell::default();
-                            if let Some(v) = values.get(0) { cell.connection_status = v.clone(); }
-                            if let Some(v) = values.get(1) { cell.rat = v.clone(); }
-                            if let Some(v) = values.get(2) { cell.opmode = v.clone(); }
-                            if let Some(v) = values.get(3) { cell.mcc = v.clone(); }
-                            if let Some(v) = values.get(4) { cell.mnc = v.clone(); }
-                            if let Some(v) = values.get(5) { cell.cell_id = v.clone(); }
-                            if let Some(v) = values.get(6) { cell.pci = v.clone(); }
-                            if let Some(v) = values.get(7) { cell.tac = v.clone(); }
-                            if let Some(v) = values.get(8) { cell.earfcn = v.clone(); }
-                            if let Some(v) = values.get(9) { cell.band = v.clone(); }
-                            if let Some(v) = values.get(10) { cell.bandwidth = v.clone(); }
-                            if let Some(v) = values.get(11) { cell.rsrp = v.clone(); }
-                            if let Some(v) = values.get(12) { cell.rsrq = v.clone(); }
-                            if let Some(v) = values.get(13) { cell.sinr = v.clone(); }
-                            if let Some(v) = values.get(14) { cell.srxlev = v.clone(); }
-                            if let Some(v) = values.get(15) { cell.rssi = v.clone(); }
-                            ParsedLine::QengServingCell(cell)
-                        }
-
-                        Rule::qeng_neighbourcell => {
-                            let values = extract_values(inner);
-                            ParsedLine::QengNeighbourCell(QengNeighbourCell {
-                                rat: values.get(0).cloned().unwrap_or_default(),
-                                mcc: values.get(1).cloned().unwrap_or_default(),
-                                mnc: values.get(2).cloned().unwrap_or_default(),
-                                pci: values.get(3).cloned().unwrap_or_default(),
-                                earfcn: values.get(4).cloned().unwrap_or_default(),
-                                rsrp: values.get(5).cloned().unwrap_or_default(),
-                                rsrq: values.get(6).cloned().unwrap_or_default(),
-                                sinr: values.get(7).cloned().unwrap_or_default(),
-                                srxlev: values.get(8).cloned().unwrap_or_default(),
-                            })
-                        }
-
-                        Rule::qcainfo_resp => {
-                            ParsedLine::Qcainfo(build_qcainfo_entry(inner))
-                        }
-
-                        Rule::cgcontrdp_resp => {
-                            let values = extract_values(inner);
-                            ParsedLine::Cgcontrdp(CgcontrdpResponse {
-                                apn: values.get(2).cloned().unwrap_or_default(),
-                            })
-                        }
-
-                        Rule::cnum_resp => {
-                            let values = extract_values(inner);
-                            ParsedLine::Cnum(CnumResponse {
-                                number: values.get(1).cloned().unwrap_or_default(),
-                            })
-                        }
-
-                        Rule::qccid_resp => {
-                            let values = extract_values(inner);
-                            ParsedLine::Qccid(values.into_iter().next().unwrap_or_default())
-                        }
-
-                        Rule::cimi_resp => {
-                            let values = extract_values(inner);
-                            ParsedLine::Cimi(values.into_iter().next().unwrap_or_default())
-                        }
-
-                        Rule::qtemp_resp => {
-                            let values = extract_values(inner);
-                            ParsedLine::Qtemp(QtempResponse {
-                                sensor: values.get(0).cloned().unwrap_or_default(),
-                                temperature: values.get(1)
-                                    .and_then(|v| v.parse::<f64>().ok()),
-                            })
-                        }
-
-                        Rule::cgmr_line => ParsedLine::Other(trimmed.to_string()),
-                        _ => ParsedLine::Other(trimmed.to_string()),
-                    });
-                }
-            }
-            None
-        }
-        Err(_) => Some(ParsedLine::Other(trimmed.to_string())),
+    if trimmed == "OK" {
+        return Some(ParsedLine::Ok);
     }
+    if trimmed == "ERROR" || trimmed.starts_with("+CME ERROR:") || trimmed.starts_with("+CMS ERROR:") {
+        return Some(ParsedLine::Error);
+    }
+
+    if let Some(values) = fields_after_prefix(trimmed, "+CPIN:") {
+        return Some(ParsedLine::Cpin(CpinResponse { status: values.into_iter().next().unwrap_or_default() }));
+    }
+    if let Some(values) = fields_after_prefix(trimmed, "+QUIMSLOT:") {
+        return Some(ParsedLine::Quimslot(QuimslotResponse { slot: values.first().and_then(|s| s.parse().ok()).unwrap_or(1) }));
+    }
+    if let Some(values) = fields_after_prefix(trimmed, "+QSPN:") {
+        let mut resp = QspnResponse::default();
+        if let Some(v) = values.first() {
+            let decoded = decode_hex_ucs2(v);
+            resp.fnn = if decoded.is_empty() { v.clone() } else { decoded };
+        }
+        if let Some(v) = values.get(1) { resp.snn = v.clone(); }
+        if let Some(v) = values.get(2) { resp.spn = v.clone(); }
+        if let Some(v) = values.get(3) { resp.alphabet = v.clone(); }
+        return Some(ParsedLine::Qspn(resp));
+    }
+    if let Some(values) = fields_after_prefix(trimmed, "+COPS:") {
+        return Some(ParsedLine::Cops(CopsResponse {
+            mode: values.first().cloned().unwrap_or_default(),
+            format: values.get(1).cloned(),
+            oper: values.get(2).cloned(),
+            act: values.get(3).cloned(),
+        }));
+    }
+    if let Some(values) = fields_after_prefix(trimmed, "+CGDCONT:") {
+        return Some(ParsedLine::Cgdcont(CgdcontEntry {
+            cid: values.first().and_then(|s| s.parse().ok()).unwrap_or(0),
+            pdp_type: values.get(1).cloned().unwrap_or_default(),
+            apn: values.get(2).cloned().unwrap_or_default(),
+            pdp_addr: values.get(3).cloned().unwrap_or_default(),
+            d_comp: values.get(4).cloned().unwrap_or_default(),
+            h_comp: values.get(5).cloned().unwrap_or_default(),
+        }));
+    }
+    if let Some(values) = fields_after_prefix(trimmed, "+QGDNRCNT:").or_else(|| fields_after_prefix(trimmed, "+QGDAT:")) {
+        return Some(ParsedLine::TrafficStats(TrafficStats {
+            tx_bytes: values.first().and_then(|s| s.parse().ok()).unwrap_or(0),
+            rx_bytes: values.get(1).and_then(|s| s.parse().ok()).unwrap_or(0),
+        }));
+    }
+    if let Some(values) = fields_after_prefix(trimmed, "+CGPADDR:") {
+        return Some(ParsedLine::Cgpaddr(CgpaddrEntry {
+            cid: values.first().and_then(|s| s.parse().ok()).unwrap_or(0),
+            ipv4: values.get(1).cloned().unwrap_or_default(),
+            ipv6: values.get(2).cloned().unwrap_or_default(),
+        }));
+    }
+    if let Some(values) = fields_after_prefix(trimmed, "+QENG:") {
+        if values.first().map(String::as_str) == Some("servingcell") {
+            let mut cell = QengServingCell::default();
+            if let Some(v) = values.get(1) { cell.connection_status = v.clone(); }
+            if let Some(v) = values.get(2) { cell.rat = v.clone(); }
+            if let Some(v) = values.get(3) { cell.opmode = v.clone(); }
+            if let Some(v) = values.get(4) { cell.mcc = v.clone(); }
+            if let Some(v) = values.get(5) { cell.mnc = v.clone(); }
+            if let Some(v) = values.get(6) { cell.cell_id = v.clone(); }
+            if let Some(v) = values.get(7) { cell.pci = v.clone(); }
+            if let Some(v) = values.get(8) { cell.tac = v.clone(); }
+            if let Some(v) = values.get(9) { cell.earfcn = v.clone(); }
+            if let Some(v) = values.get(10) { cell.band = v.clone(); }
+            if let Some(v) = values.get(11) { cell.bandwidth = v.clone(); }
+            if let Some(v) = values.get(12) { cell.rsrp = v.clone(); }
+            if let Some(v) = values.get(13) { cell.rsrq = v.clone(); }
+            if let Some(v) = values.get(14) { cell.sinr = v.clone(); }
+            if let Some(v) = values.get(15) { cell.srxlev = v.clone(); }
+            if let Some(v) = values.get(16) { cell.rssi = v.clone(); }
+            return Some(ParsedLine::QengServingCell(cell));
+        }
+        if values.first().map(String::as_str) == Some("neighbourcell") {
+            return Some(ParsedLine::QengNeighbourCell(QengNeighbourCell {
+                rat: values.get(1).cloned().unwrap_or_default(),
+                mcc: values.get(2).cloned().unwrap_or_default(),
+                mnc: values.get(3).cloned().unwrap_or_default(),
+                pci: values.get(4).cloned().unwrap_or_default(),
+                earfcn: values.get(5).cloned().unwrap_or_default(),
+                rsrp: values.get(6).cloned().unwrap_or_default(),
+                rsrq: values.get(7).cloned().unwrap_or_default(),
+                sinr: values.get(8).cloned().unwrap_or_default(),
+                srxlev: values.get(9).cloned().unwrap_or_default(),
+            }));
+        }
+    }
+    if let Some(values) = fields_after_prefix(trimmed, "+QCAINFO:") {
+        let mut entry = QcainfoEntry::default();
+        entry.component = values.first().cloned().unwrap_or_default();
+        entry.earfcn = values.get(1).cloned().unwrap_or_default();
+        entry.bandwidth = values.get(2).cloned().unwrap_or_default();
+        entry.band = values.get(3).cloned().unwrap_or_default();
+        if entry.component == "SCC" {
+            entry.scc_idx = values.get(4).cloned();
+            entry.pci = values.get(5).cloned().unwrap_or_default();
+            entry.rsrp = values.get(6).cloned();
+            entry.rsrq = values.get(7).cloned();
+            entry.sinr = values.get(8).cloned();
+        } else {
+            entry.pci = values.get(4).cloned().unwrap_or_default();
+        }
+        return Some(ParsedLine::Qcainfo(entry));
+    }
+    if let Some(values) = fields_after_prefix(trimmed, "+CGCONTRDP:") {
+        return Some(ParsedLine::Cgcontrdp(CgcontrdpResponse { apn: values.get(2).cloned().unwrap_or_default() }));
+    }
+    if let Some(values) = fields_after_prefix(trimmed, "+CNUM:") {
+        return Some(ParsedLine::Cnum(CnumResponse { number: values.get(1).cloned().unwrap_or_default() }));
+    }
+    if let Some(values) = fields_after_prefix(trimmed, "+QCCID:") {
+        return Some(ParsedLine::Qccid(values.into_iter().next().unwrap_or_default()));
+    }
+    if let Some(values) = fields_after_prefix(trimmed, "+CIMI:") {
+        return Some(ParsedLine::Cimi(values.into_iter().next().unwrap_or_default()));
+    }
+    if let Some(values) = fields_after_prefix(trimmed, "+QTEMP:") {
+        return Some(ParsedLine::Qtemp(QtempResponse {
+            sensor: values.first().cloned().unwrap_or_default(),
+            temperature: values.get(1).and_then(|v| v.parse::<f64>().ok()),
+        }));
+    }
+
+    Some(ParsedLine::Other(trimmed.to_string()))
 }
 
 /// Extract sections from a combined AT response
@@ -610,9 +524,8 @@ pub fn parse_qtemp_temperature(qtemp_res: &str) -> Option<String> {
 
 /// Parse +CREG response to get network registration status
 pub fn parse_net_status(creg_raw: &str) -> String {
-    if let Ok(pairs) = AtParser::parse(Rule::creg_resp, creg_raw) {
-        for pair in pairs {
-            let values = extract_values(pair);
+    for line in creg_raw.lines() {
+        if let Some(values) = fields_after_prefix(line.trim(), "+CREG:") {
             if let Some(stat) = values.get(1) {
                 return match stat.as_str() {
                     "1" => "Registered (home)",
@@ -629,10 +542,9 @@ pub fn parse_net_status(creg_raw: &str) -> String {
 
 /// Parse +CSQ response to get signal quality in dBm
 pub fn parse_signal_quality(csq_raw: &str) -> String {
-    if let Ok(pairs) = AtParser::parse(Rule::csq_resp, csq_raw) {
-        for pair in pairs {
-            let values = extract_values(pair);
-            if let Some(rssi_str) = values.get(0) {
+    for line in csq_raw.lines() {
+        if let Some(values) = fields_after_prefix(line.trim(), "+CSQ:") {
+            if let Some(rssi_str) = values.first() {
                 if let Ok(rssi) = rssi_str.parse::<i32>() {
                     if rssi == 99 {
                         return "Unknown".to_string();

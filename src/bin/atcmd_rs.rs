@@ -57,8 +57,7 @@ fn main() {
         }
     };
 
-    // Send the command + CRLF in a single write to prevent interleaving from
-    // other processes on the same SMD device (a real concern on multi-actor systems).
+    // Send the command + CRLF in a single write.
     let mut cmd_buf = cli.at_command.as_bytes().to_vec();
     cmd_buf.extend_from_slice(b"\r\n");
     if let Err(e) = file.write_all(&cmd_buf) {
@@ -67,62 +66,56 @@ fn main() {
     }
     let _ = file.flush();
 
+    if let Err(e) = run_io(&mut file, cli.sms_message.as_deref()) {
+        eprintln!("I/O error: {}", e);
+        process::exit(1);
+    }
+}
+
+/// Core read/write loop. Reads modem output byte-by-chunk, echoes to stdout,
+/// writes SMS body on detecting `\r\n>` prompt, and breaks on terminator.
+fn run_io(device: &mut (impl Read + Write), sms_message: Option<&str>) -> io::Result<()> {
     let mut read_buf = [0_u8; 256];
     let mut line = Vec::with_capacity(256);
     let mut sms_written = false;
     let mut prompt_buf = Vec::with_capacity(4);
 
     loop {
-        match file.read(&mut read_buf) {
-            Ok(0) => {
-                eprintln!("EOF from modem");
-                break;
-            }
-            Ok(n) => {
-                let chunk = &read_buf[..n];
-                if let Err(e) = io::stdout().write_all(chunk) {
-                    eprintln!("Error writing stdout: {}", e);
-                    break;
-                }
-                io::stdout().flush().ok();
+        let n = device.read(&mut read_buf)?;
+        if n == 0 {
+            eprintln!("EOF from modem");
+            return Ok(());
+        }
 
-                for &b in chunk {
-                    if let Some(message) = &cli.sms_message {
-                        if !sms_written {
-                            prompt_buf.push(b);
-                            if prompt_buf.len() > 4 {
-                                prompt_buf.remove(0);
-                            }
-                            if prompt_buf.ends_with(b"\r\n> ") || prompt_buf.ends_with(b"\r\n>") {
-                                if let Err(e) = file.write_all(message.as_bytes()) {
-                                    eprintln!("failed to send SMS body to modem: {}", e);
-                                    process::exit(1);
-                                }
-                                if let Err(e) = file.write_all(&[0x1A]) {
-                                    eprintln!("failed to send SMS terminator to modem: {}", e);
-                                    process::exit(1);
-                                }
-                                let _ = file.flush();
-                                sms_written = true;
-                            }
-                        }
+        let chunk = &read_buf[..n];
+        io::stdout().write_all(chunk)?;
+        io::stdout().flush()?;
+
+        for &b in chunk {
+            if let Some(message) = sms_message {
+                if !sms_written {
+                    prompt_buf.push(b);
+                    if prompt_buf.len() > 4 {
+                        prompt_buf.remove(0);
                     }
-
-                    line.push(b);
-                    if b == b'\n' {
-                        let line_text = String::from_utf8_lossy(&line);
-                        if line_is_terminator(&line_text) {
-                            return;
-                        }
-                        line.clear();
-                    } else if line.len() >= 4096 {
-                        line.clear();
+                    if prompt_buf.ends_with(b"\r\n> ") || prompt_buf.ends_with(b"\r\n>") {
+                        device.write_all(message.as_bytes())?;
+                        device.write_all(&[0x1A])?;
+                        device.flush()?;
+                        sms_written = true;
                     }
                 }
             }
-            Err(e) => {
-                eprintln!("Error reading from modem: {}", e);
-                break;
+
+            line.push(b);
+            if b == b'\n' {
+                let line_text = String::from_utf8_lossy(&line);
+                if line_is_terminator(&line_text) {
+                    return Ok(());
+                }
+                line.clear();
+            } else if line.len() >= 4096 {
+                line.clear();
             }
         }
     }
@@ -313,5 +306,120 @@ mod tests {
         assert_eq!(lines[0], "AT+CPIN?\r\n");
         assert_eq!(lines[1], "+CPIN: READY\r\n");
         assert_eq!(lines[2], "OK\r\n");
+    }
+
+    // ─── SMS 发送流程模拟 ───
+
+    struct SimulatedModem {
+        read_data: io::Cursor<Vec<u8>>,
+        written: Vec<u8>,
+    }
+
+    impl SimulatedModem {
+        fn new(output: &[u8]) -> Self {
+            Self {
+                read_data: io::Cursor::new(output.to_vec()),
+                written: Vec::new(),
+            }
+        }
+    }
+
+    impl Read for SimulatedModem {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.read_data.read(buf)
+        }
+    }
+
+    impl Write for SimulatedModem {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.written.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_sms_sends_body_after_prompt() {
+        // 模组回显命令 → 返回 > 提示符 → 返回 OK
+        let mut modem = SimulatedModem::new(b"AT+CMGS=\"+8613800000000\"\r\n\r\n> Hello, OK\r\n");
+        run_io(&mut modem, Some("Hello")).unwrap();
+        // 写入的数据 = "Hello" + Ctrl+Z
+        assert_eq!(modem.written, b"Hello\x1A", "SMS body + Ctrl+Z should be written");
+    }
+
+    #[test]
+    fn test_sms_prompt_with_trailing_space() {
+        // 典型 prompt：\r\n> （带尾随空格）
+        let mut modem = SimulatedModem::new(b"\r\n> OK\r\n");
+        run_io(&mut modem, Some("test msg")).unwrap();
+        assert_eq!(modem.written, b"test msg\x1A");
+    }
+
+    #[test]
+    fn test_sms_prompt_without_trailing_space() {
+        // 某些模组返回 \r\n> 后紧接字符
+        let mut modem = SimulatedModem::new(b"\r\n>OK\r\n");
+        run_io(&mut modem, Some("hi")).unwrap();
+        assert_eq!(modem.written, b"hi\x1A");
+    }
+
+    #[test]
+    fn test_sms_no_prompt_no_write() {
+        // 无 > 提示符，不应写入短信
+        let mut modem = SimulatedModem::new(b"+CPIN: READY\r\nOK\r\n");
+        run_io(&mut modem, Some("should not send")).unwrap();
+        assert!(modem.written.is_empty(), "no > prompt, no write");
+    }
+
+    #[test]
+    fn test_sms_only_writes_once() {
+        // 多个 > 只触发一次写入
+        let mut modem = SimulatedModem::new(b"> first\r\n> second\r\nOK\r\n");
+        run_io(&mut modem, Some("once")).unwrap();
+        assert_eq!(modem.written, b"once\x1A", "SMS body written only once");
+    }
+
+    #[test]
+    fn test_sms_cms_error_after_send() {
+        // 写完后模组返回 CMS ERROR
+        let mut modem = SimulatedModem::new(b"\r\n> \r\n+CMS ERROR: 500\r\n");
+        run_io(&mut modem, Some("msg")).unwrap();
+        assert_eq!(modem.written, b"msg\x1A");
+    }
+
+    #[test]
+    fn test_sms_gt_in_data_does_not_trigger() {
+        // `>` 在数据行中间不应触发
+        let mut modem = SimulatedModem::new(b"+QENG: \"5G\"\r\nOK\r\n");
+        run_io(&mut modem, Some("no")).unwrap();
+        assert!(modem.written.is_empty());
+    }
+
+    #[test]
+    fn test_normal_command_no_message_no_write() {
+        // 无 sms_message 时不会写入任何内容
+        let mut modem = SimulatedModem::new(b"OK\r\n");
+        run_io(&mut modem, None).unwrap();
+        assert!(modem.written.is_empty());
+    }
+
+    #[test]
+    fn test_sms_long_message() {
+        // 长消息写入
+        let long_msg = "A".repeat(160);
+        let mut modem = SimulatedModem::new(b"\r\n> OK\r\n");
+        run_io(&mut modem, Some(&long_msg)).unwrap();
+        let expected = [long_msg.as_bytes(), &[0x1A]].concat();
+        assert_eq!(modem.written, expected);
+    }
+
+    #[test]
+    fn test_sms_multiline_response_before_prompt() {
+        // 提示符前有多行响应
+        let mut modem = SimulatedModem::new(b"+CMGF: 1\r\n\r\n> OK\r\n");
+        run_io(&mut modem, Some("hello")).unwrap();
+        assert_eq!(modem.written, b"hello\x1A");
     }
 }

@@ -288,7 +288,8 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
     telemetry.network_mode = Some(format!("{} {}", pcc.rat, pcc.opmode));
     telemetry.mccmnc = Some(format!("{}{}", pcc.mcc, pcc.mnc));
     telemetry.cell_id = Some(pcc.cell_id.clone());
-    if pcc.cell_id.len() >= 6 {
+    // cell_id 来自模组 AT 响应，通常为 ASCII 十六进制字符串；is_ascii() 快速路径避免 OOB panic
+    if pcc.cell_id.len() >= 6 && pcc.cell_id[..pcc.cell_id.len() - 3].is_ascii() {
         telemetry.enb_id = Some(pcc.cell_id[..pcc.cell_id.len() - 3].to_string());
     } else {
         telemetry.enb_id = Some(pcc.cell_id.clone());

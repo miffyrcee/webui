@@ -137,16 +137,25 @@ fn get_cpu_usage(prev: &mut Option<CpuSnapshot>) -> Option<String> {
     if !first_line.starts_with("cpu ") {
         return None;
     }
-    let nums: Vec<u64> = first_line
+    // 单次迭代直接计算 total 和 idle，零堆分配
+    let mut total: u64 = 0;
+    let mut idle: u64 = 0;
+    for (i, val) in first_line
         .split_whitespace()
         .skip(1)
         .filter_map(|s| s.parse::<u64>().ok())
-        .collect();
-    if nums.len() < 4 {
+        .enumerate()
+    {
+        total += val;
+        match i {
+            3 => idle += val,     // idle
+            4 => idle += val,     // iowait (也计入空闲)
+            _ => {}
+        }
+    }
+    if total == 0 {
         return None;
     }
-    let total: u64 = nums.iter().sum();
-    let idle = nums[3] + nums.get(4).copied().unwrap_or(0);
 
     match prev.as_ref() {
         Some(prev_snap) => {
@@ -1068,8 +1077,8 @@ impl HardwareBackend for RealBackend {
     }
 
     async fn set_usb_net_mode(&self, mode: u8) -> Result<String, String> {
-        if !matches!(mode, 0 | 1 | 2 | 3 | 4) {
-            return Err("不支持的 USB 网络模式，有效值为 0(RMNET), 1(ECM), 2(MBIM), 3(RNDIS), 4(NCM)".to_string());
+        if !matches!(mode, 0 | 1 | 2 | 3 | 4 | 5) {
+            return Err("不支持的 USB 网络模式，有效值为 0(RMNET), 1(ECM), 2(MBIM), 3(RNDIS), 5(NCM)".to_string());
         }
         let cmd = format!("AT+QCFG=\"usbnet\",{}", mode);
         send_at_command_inner(&self.serial_path, &cmd).await

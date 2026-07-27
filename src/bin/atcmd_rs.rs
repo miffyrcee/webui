@@ -48,6 +48,11 @@ fn line_is_terminator(line: &str) -> bool {
 fn main() {
     let cli = Cli::parse();
 
+    // Qualcomm SMD 字符设备不支持 O_NONBLOCK 标志。
+    // 尝试以非阻塞模式打开会导致 read() 行为不可控，无法通过 WouldBlock 实现非阻塞轮询。
+    // 因此 SMD 阻塞读必须用其他方案解决，例如：专用线程 + channel 封装，
+    // 或 tokio::spawn_blocking + 取消机制，而不是依赖 O_NONBLOCK。
+    // 参见: https://qualcomm.com/smd (Shared Memory Driver)
     let mut file = match OpenOptions::new()
         .read(true)
         .write(true)

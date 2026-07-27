@@ -54,6 +54,10 @@ struct Cli {
     #[arg(short = 'm', long = "message")]
     sms_message: Option<String>,
 
+    /// Hex-encoded raw SMS body (alternative to --message, for UCS2 etc.)
+    #[arg(long = "hex-body")]
+    hex_body: Option<String>,
+
     /// SMD device path
     #[arg(short = 'p', long = "path", default_value = "/dev/smd11")]
     device_path: String,
@@ -87,14 +91,14 @@ fn main() {
     }
     let _ = file.flush();
 
-    if let Err(e) = run_io(&mut file, cli.sms_message.as_deref()) {
+    if let Err(e) = run_io(&mut file, cli.sms_message.as_deref(), cli.hex_body.as_deref()) {
         eprintln!("I/O error: {}", e);
         process::exit(1);
     }
 }
 
 /// 核心 I/O 读写循环
-fn run_io(device: &mut (impl Read + Write), sms_message: Option<&str>) -> io::Result<()> {
+fn run_io(device: &mut (impl Read + Write), sms_message: Option<&str>, hex_body: Option<&str>) -> io::Result<()> {
     // 增大读取缓冲区到 4096 字节，提高接收大量短信时的读取效率
     let mut read_buf = [0_u8; 4096];
     let mut line = Vec::with_capacity(512);
@@ -128,6 +132,16 @@ fn run_io(device: &mut (impl Read + Write), sms_message: Option<&str>) -> io::Re
                 if let Some(message) = sms_message {
                     if !sms_written && line.len() <= 2 && trim_ascii(&line) == b">" {
                         device.write_all(message.as_bytes())?;
+                        device.write_all(&[0x1A])?; // Ctrl+Z
+                        device.flush()?;
+                        sms_written = true;
+                    }
+                }
+                if let Some(hex) = hex_body {
+                    if !sms_written && line.len() <= 2 && trim_ascii(&line) == b">" {
+                        let bytes = hex::decode(hex)
+                            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                        device.write_all(&bytes)?;
                         device.write_all(&[0x1A])?; // Ctrl+Z
                         device.flush()?;
                         sms_written = true;
@@ -250,14 +264,23 @@ mod tests {
     fn test_read_loop_without_lf_before_ok() {
         // 模拟短信正文只有 \r 没有 \n 紧接着 OK\r\n 的情况，依然能正常识别退出
         let mut modem = SimulatedModem::new(b"+CMGL: 0,\"REC READ\"\rSMS_TEXT_WITHOUT_LF\rOK\r\n");
-        run_io(&mut modem, None).unwrap();
+        run_io(&mut modem, None, None).unwrap();
     }
 
     #[test]
     fn test_sms_prompt_trigger() {
         // 模拟 SMS prompt `>` 后写入消息 + Ctrl+Z，然后 OK 退出
         let mut modem = SimulatedModem::new(b"\r\n> \r\nOK\r\n");
-        run_io(&mut modem, Some("Hello Modem")).unwrap();
+        run_io(&mut modem, Some("Hello Modem"), None).unwrap();
         assert_eq!(modem.written, b"Hello Modem\x1A");
+    }
+
+    #[test]
+    fn test_hex_body_trigger() {
+        // 模拟 SMS prompt `>` 后写入 hex 解码原始字节 + Ctrl+Z
+        // "你好" 的 UCS2 十六进制编码（UTF-16 BE）
+        let mut modem = SimulatedModem::new(b"\r\n> \r\nOK\r\n");
+        run_io(&mut modem, None, Some("4F60597D")).unwrap();
+        assert_eq!(modem.written, b"\x4F\x60\x59\x7D\x1A");
     }
 }

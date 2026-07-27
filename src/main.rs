@@ -14,6 +14,7 @@ use axum::{
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use base64::Engine;
+use hex;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -43,6 +44,19 @@ pub fn sanitize_at_param(input: &str) -> String {
         .chars()
         .filter(|&c| c != '"' && c != '\\' && c != '\r' && c != '\n')
         .collect()
+}
+
+/// 检查消息是否包含非 GSM 7-bit 字符（需要 UCS2 编码）
+fn needs_ucs2(s: &str) -> bool {
+    s.chars().any(|c| c > '\u{007F}')
+}
+
+/// 将字符串转换为 UCS2 十六进制编码（UTF-16 BE → hex）
+fn encode_ucs2_hex(s: &str) -> String {
+    let bytes: Vec<u8> = s.encode_utf16()
+        .flat_map(|c| c.to_be_bytes())
+        .collect();
+    hex::encode(bytes)
 }
 
 /// 安全递减活跃视图计数器（防止下溢翻转为 usize::MAX）
@@ -703,16 +717,51 @@ impl HardwareBackend for RealBackend {
     async fn send_sms_msg(&self, recipient: &str, message: &str) -> bool {
         let recipient = sanitize_at_param(recipient);
         let message = sanitize_at_param(message);
-        if send_at_command_inner(&self.serial_path, "AT+CMGF=1").await.is_ok() {
-            send_sms_command_inner(
+
+        if !needs_ucs2(&message) {
+            // GSM 7-bit 默认编码（原有逻辑）
+            if send_at_command_inner(&self.serial_path, "AT+CMGF=1").await.is_ok() {
+                send_sms_command_inner(
+                    &self.serial_path,
+                    &format!("AT+CMGS=\"{}\"", recipient),
+                    &message,
+                )
+                .await
+                .is_ok()
+            } else {
+                false
+            }
+        } else {
+            // UCS2 编码（支持中文等非 GSM 字符）
+            if send_at_command_inner(&self.serial_path, "AT+CMGF=1").await.is_err() {
+                return false;
+            }
+            if send_at_command_inner(&self.serial_path, "AT+CSCS=\"UCS2\"").await.is_err() {
+                return false;
+            }
+            if send_at_command_inner(&self.serial_path, "AT+CSMP=17,167,0,8").await.is_err() {
+                return false;
+            }
+
+            let ucs2_recipient = encode_ucs2_hex(&recipient);
+            let ucs2_hex_msg = encode_ucs2_hex(&message);
+
+            let result = send_ucs2_sms_command_inner(
                 &self.serial_path,
-                &format!("AT+CMGS=\"{}\"", recipient),
-                &message,
+                &format!("AT+CMGS=\"{}\"", ucs2_recipient),
+                &ucs2_hex_msg,
             )
             .await
-            .is_ok()
-        } else {
-            false
+            .is_ok();
+
+            // 恢复 GSM 字符集（UCS2 模式下字符串参数需用 UCS2 十六进制编码）
+            let _ = send_at_command_inner(
+                &self.serial_path,
+                "AT+CSCS=\"00470053004D\"",  // "GSM" 的 UCS2 十六进制
+            )
+            .await;
+
+            result
         }
     }
 
@@ -1276,11 +1325,15 @@ fn spawn_atcmd_rs(
     serial_path: &str,
     cmd: &str,
     sms_message: Option<&str>,
+    hex_message: Option<&str>,
 ) -> Result<tokio::process::Child, String> {
     let mut command = tokio::process::Command::new("atcmd_rs");
     command.arg("-p").arg(serial_path);
     if let Some(message) = sms_message {
         command.arg("--message").arg(message);
+    }
+    if let Some(hex) = hex_message {
+        command.arg("--hex-body").arg(hex);
     }
     command
         .arg(cmd)
@@ -1311,10 +1364,11 @@ async fn send_at_command_inner_with_options(
     cmd: &str,
     timeout: Duration,
     sms_message: Option<&str>,
+    hex_message: Option<&str>,
 ) -> Result<String, String> {
     let start = std::time::Instant::now();
 
-    let child = spawn_atcmd_rs(serial_path, cmd, sms_message)?;
+    let child = spawn_atcmd_rs(serial_path, cmd, sms_message, hex_message)?;
 
     let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
         Ok(Ok(output)) => output,
@@ -1350,7 +1404,7 @@ async fn send_at_command_inner_with_timeout(
     cmd: &str,
     timeout: Duration,
 ) -> Result<String, String> {
-    send_at_command_inner_with_options(serial_path, cmd, timeout, None).await
+    send_at_command_inner_with_options(serial_path, cmd, timeout, None, None).await
 }
 
 async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, String> {
@@ -1358,7 +1412,11 @@ async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, S
 }
 
 async fn send_sms_command_inner(serial_path: &str, cmd: &str, message: &str) -> Result<String, String> {
-    send_at_command_inner_with_options(serial_path, cmd, Duration::from_secs(30), Some(message)).await
+    send_at_command_inner_with_options(serial_path, cmd, Duration::from_secs(30), Some(message), None).await
+}
+
+async fn send_ucs2_sms_command_inner(serial_path: &str, cmd: &str, hex_message: &str) -> Result<String, String> {
+    send_at_command_inner_with_options(serial_path, cmd, Duration::from_secs(30), None, Some(hex_message)).await
 }
 
 async fn query_device_bands(serial_path: &str) -> String {

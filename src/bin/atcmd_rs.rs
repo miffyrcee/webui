@@ -1,6 +1,9 @@
 use clap::Parser;
 use std::fs::OpenOptions;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, Read, Write};
+
+#[cfg(test)]
+use std::io::BufRead;
 use std::process;
 
 // These are the exact terminators extracted from the original Compal firmware.
@@ -21,6 +24,10 @@ const TERMINATORS: &[&str] = &[
 struct Cli {
     /// AT command to send to the modem
     at_command: String,
+
+    /// SMS body to write after the modem returns the '>' prompt
+    #[arg(short = 'm', long = "message")]
+    sms_message: Option<String>,
 
     /// SMD device path
     #[arg(short = 'p', long = "path", default_value = "/dev/smd11")]
@@ -60,28 +67,57 @@ fn main() {
     }
     let _ = file.flush();
 
-    // SAFETY & FIX: The original Compal `atcli` used a 4096-byte global buffer (`byte_2410`)
-    // and `stpcpy`, causing buffer overflows on large responses.
-    // The original `atcmd` used `read` + `strstr`, causing serial fragmentation bugs.
-    //
-    // We fix both by using a streaming `BufReader` that reads exactly up to the `\n` byte.
-    // This prevents memory bloat (O(1) memory usage) and guarantees string completeness.
-    let mut reader = BufReader::new(file);
-    let mut line = String::new();
+    let mut read_buf = [0_u8; 256];
+    let mut line = Vec::with_capacity(256);
+    let mut sms_written = false;
+    let mut prompt_buf = Vec::with_capacity(4);
 
     loop {
-        line.clear();
-        match reader.read_line(&mut line) {
+        match file.read(&mut read_buf) {
             Ok(0) => {
                 eprintln!("EOF from modem");
                 break;
             }
-            Ok(_) => {
-                print!("{}", line);
+            Ok(n) => {
+                let chunk = &read_buf[..n];
+                if let Err(e) = io::stdout().write_all(chunk) {
+                    eprintln!("Error writing stdout: {}", e);
+                    break;
+                }
                 io::stdout().flush().ok();
 
-                if line_is_terminator(&line) {
-                    break;
+                for &b in chunk {
+                    if let Some(message) = &cli.sms_message {
+                        if !sms_written {
+                            prompt_buf.push(b);
+                            if prompt_buf.len() > 4 {
+                                prompt_buf.remove(0);
+                            }
+                            if prompt_buf.ends_with(b"\r\n> ") || prompt_buf.ends_with(b"\r\n>") {
+                                if let Err(e) = file.write_all(message.as_bytes()) {
+                                    eprintln!("failed to send SMS body to modem: {}", e);
+                                    process::exit(1);
+                                }
+                                if let Err(e) = file.write_all(&[0x1A]) {
+                                    eprintln!("failed to send SMS terminator to modem: {}", e);
+                                    process::exit(1);
+                                }
+                                let _ = file.flush();
+                                sms_written = true;
+                            }
+                        }
+                    }
+
+                    line.push(b);
+                    if b == b'\n' {
+                        let line_text = String::from_utf8_lossy(&line);
+                        if line_is_terminator(&line_text) {
+                            return;
+                        }
+                        line.clear();
+                    } else if line.len() >= 4096 {
+                        line.clear();
+                    }
                 }
             }
             Err(e) => {

@@ -35,6 +35,7 @@ use at::{
     parse_signal_quality,
     decode_cmgl_body, decode_hex_ucs2, format_bytes, normalize_at_command,
 };
+use at::parser::ParsedLine;
 
 /// AT 命令参数安全过滤（去除双引号、反斜杠与控制字符，防止 AT 注入）
 pub fn sanitize_at_param(input: &str) -> String {
@@ -702,27 +703,17 @@ impl HardwareBackend for RealBackend {
     async fn send_sms_msg(&self, recipient: &str, message: &str) -> bool {
         let recipient = sanitize_at_param(recipient);
         let message = sanitize_at_param(message);
-        let mut success = false;
         if send_at_command_inner(&self.serial_path, "AT+CMGF=1").await.is_ok() {
-            if send_at_command_inner(
+            send_sms_command_inner(
                 &self.serial_path,
                 &format!("AT+CMGS=\"{}\"", recipient),
+                &message,
             )
             .await
             .is_ok()
-            {
-                if send_at_command_inner(
-                    &self.serial_path,
-                    &format!("{}\u{001A}", message),
-                )
-                .await
-                .is_ok()
-                {
-                    success = true;
-                }
-            }
+        } else {
+            false
         }
-        success
     }
 
     async fn read_device_info(&self) -> DeviceInfoData {
@@ -1281,25 +1272,51 @@ async fn fetch_network_provider(serial_path: &str) -> String {
 // AT 命令基础架构（零锁 — Actor 串行化保证互斥）
 // ============================================================================
 
-async fn send_at_command_inner_with_timeout(
+fn spawn_atcmd_rs(
     serial_path: &str,
     cmd: &str,
-    timeout: Duration,
-) -> Result<String, String> {
-    let start = std::time::Instant::now();
-
-    let child = tokio::process::Command::new("atcmd_rs")
-        .arg("-p")
-        .arg(serial_path)
+    sms_message: Option<&str>,
+) -> Result<tokio::process::Child, String> {
+    let mut command = tokio::process::Command::new("atcmd_rs");
+    command.arg("-p").arg(serial_path);
+    if let Some(message) = sms_message {
+        command.arg("--message").arg(message);
+    }
+    command
         .arg(cmd)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| format!("atcmd_rs启动失败: {}", e))?;
+        .map_err(|e| format!("atcmd_rs启动失败: {}", e))
+}
 
-    let output = match tokio::time::timeout(timeout, child.wait_with_output()).await
-    {
+fn at_response_has_error(raw: &str) -> bool {
+    raw.lines().any(|line| matches!(at::parser::parse_single_line(line), Some(ParsedLine::Error)))
+}
+
+fn at_response_preview(raw: &str) -> &str {
+    raw.lines()
+        .find(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty()
+                && !matches!(at::parser::parse_single_line(trimmed), Some(ParsedLine::Ok | ParsedLine::Error))
+                && !trimmed.starts_with("AT+")
+        })
+        .unwrap_or(raw)
+}
+
+async fn send_at_command_inner_with_options(
+    serial_path: &str,
+    cmd: &str,
+    timeout: Duration,
+    sms_message: Option<&str>,
+) -> Result<String, String> {
+    let start = std::time::Instant::now();
+
+    let child = spawn_atcmd_rs(serial_path, cmd, sms_message)?;
+
+    let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
         Ok(Ok(output)) => output,
         Ok(Err(e)) => return Err(format!("atcmd_rs执行失败: {}", e)),
         Err(_) => return Err(format!("AT命令超时({}s): {}", timeout.as_secs(), cmd)),
@@ -1316,26 +1333,32 @@ async fn send_at_command_inner_with_timeout(
 
     let raw = String::from_utf8_lossy(&output.stdout).into_owned();
 
-    if raw.contains("ERROR") || raw.contains("+CME ERROR:") {
+    if at_response_has_error(&raw) {
         let elapsed = start.elapsed();
         push_log("WARN", "AT", &format!("[AT] {} 返回 ERROR ({}ms)", cmd, elapsed.as_millis()));
         return Err(format!("AT命令返回错误: {}", raw.trim()));
     }
 
     let elapsed = start.elapsed();
-    let preview = raw
-        .lines()
-        .find(|l| {
-            let t = l.trim();
-            !t.is_empty() && !t.starts_with("AT+")
-        })
-        .unwrap_or(&raw);
+    let preview = at_response_preview(&raw);
     push_log("INFO", "AT", &format!("{} 成功 ({}ms): {}", cmd, elapsed.as_millis(), preview.trim()));
     Ok(raw)
 }
 
+async fn send_at_command_inner_with_timeout(
+    serial_path: &str,
+    cmd: &str,
+    timeout: Duration,
+) -> Result<String, String> {
+    send_at_command_inner_with_options(serial_path, cmd, timeout, None).await
+}
+
 async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, String> {
     send_at_command_inner_with_timeout(serial_path, cmd, Duration::from_secs(10)).await
+}
+
+async fn send_sms_command_inner(serial_path: &str, cmd: &str, message: &str) -> Result<String, String> {
+    send_at_command_inner_with_options(serial_path, cmd, Duration::from_secs(30), Some(message)).await
 }
 
 async fn query_device_bands(serial_path: &str) -> String {

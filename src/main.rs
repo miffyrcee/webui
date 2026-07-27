@@ -51,12 +51,61 @@ fn needs_ucs2(s: &str) -> bool {
     s.chars().any(|c| c > '\u{007F}')
 }
 
-/// 将字符串转换为 UCS2 十六进制编码（UTF-16 BE → hex）
-fn encode_ucs2_hex(s: &str) -> String {
-    let bytes: Vec<u8> = s.encode_utf16()
+/// 构建 SMS-SUBMIT TPDU（用于 PDU 模式发送 UCS2 短信）
+///
+/// 格式参考 3GPP TS 23.040。包含 TP-RP/TP-RD 标志、相对有效期（1 周）、
+/// 以及 UCS2 (UTF-16 BE) 编码的消息体。收件人号码以 BCD 半八位字节编码。
+fn build_sms_submit_tpdu(recipient: &str, message: &str) -> Vec<u8> {
+    // 过滤非数字字符（保留 + 判断国际格式）
+    let digits: String = recipient
+        .chars()
+        .filter(|&c| c.is_ascii_digit())
+        .collect();
+    let address_length = digits.len();
+    // address_length 最大为 20（GSM 规范），usize 转 u8 安全
+    let address_length_u8 = address_length as u8;
+
+    // 号码类型：国际（+）或国内
+    let toa: u8 = if recipient.starts_with('+') {
+        0x91
+    } else {
+        0x81
+    };
+
+    // 半八位字节编码：每对数字交换高低 nibble，奇数位补 0xF
+    let addr_octets = (address_length + 1) / 2;
+    let mut addr_bytes = Vec::with_capacity(addr_octets);
+    let mut chars = digits.chars();
+    for _ in 0..addr_octets {
+        let first = chars.next().and_then(|c| c.to_digit(10)).unwrap_or(0) as u8;
+        let second = chars
+            .next()
+            .and_then(|c| c.to_digit(10))
+            .unwrap_or(0x0F) as u8;
+        addr_bytes.push((second << 4) | first);
+    }
+
+    // 消息编码为 UCS2（UTF-16 BE）
+    let ucs2_bytes: Vec<u8> = message
+        .encode_utf16()
         .flat_map(|c| c.to_be_bytes())
         .collect();
-    hex::encode(bytes)
+    let udl = ucs2_bytes.len();
+
+    // TPDU: 参考头 + 地址 + 协议标识 + DCS + 有效期 + 用户数据
+    let mut pdu = Vec::with_capacity(4 + 1 + addr_octets + 3 + 1 + udl);
+    pdu.push(0x21); // SMS-SUBMIT (MTI=01, VPF=10=相对有效期, RD=0, RP=0)
+    pdu.push(0x00); // TP-Message-Reference
+    pdu.push(address_length_u8); // TP-Destination-Address 长度（十进制位数）
+    pdu.push(toa); // TP-Destination-Address 类型
+    pdu.extend_from_slice(&addr_bytes); // TP-Destination-Address（半八位字节）
+    pdu.push(0x00); // TP-Protocol-Identifier
+    pdu.push(0x08); // TP-Data-Coding-Scheme (UCS2)
+    pdu.push(0xA7); // TP-Validity-Period (相对格式，1 周)
+    pdu.push(udl as u8); // TP-User-Data-Length
+    pdu.extend_from_slice(&ucs2_bytes); // TP-User-Data
+
+    pdu
 }
 
 /// 安全递减活跃视图计数器（防止下溢翻转为 usize::MAX）
@@ -743,36 +792,29 @@ impl HardwareBackend for RealBackend {
                 false
             }
         } else {
-            // UCS2 编码（支持中文等非 GSM 字符）
-            // 注意：收件人号码始终保持 ASCII 格式，不进行 UCS2 编码，
-            // 因为 Quectel 模块不支持 UCS2 编码的号码（会导致 ERROR）。
-            if send_at_command_inner(&self.serial_path, "AT+CMGF=1").await.is_err() {
-                return false;
-            }
-            if send_at_command_inner(&self.serial_path, "AT+CSCS=\"UCS2\"").await.is_err() {
-                return false;
-            }
-            if send_at_command_inner(&self.serial_path, "AT+CSMP=17,167,0,8").await.is_err() {
+            // UCS2 短信使用 PDU 模式发送
+            // Quectel 模块在 CSCS="UCS2" 文本模式下不支持 AT+CMGS，
+            // PDU 模式可绕过此限制，所有编码信息均在 TPDU 中自描述。
+            if send_at_command_inner(&self.serial_path, "AT+CMGF=0").await.is_err() {
                 return false;
             }
 
-            let ucs2_hex_msg = encode_ucs2_hex(&message);
+            let tpdu = build_sms_submit_tpdu(&recipient, &message);
+            let tpdu_len = tpdu.len();
+            // 00 = 使用 SIM 卡默认 SMSC 地址
+            let pdu_hex = format!("00{}", hex::encode(&tpdu));
 
             let result = send_sms_command_inner(
                 &self.serial_path,
-                &format!("AT+CMGS=\"{}\"", recipient),
-                &message,
-                Some(&ucs2_hex_msg),
+                &format!("AT+CMGS={}", tpdu_len),
+                &pdu_hex,
+                None,
             )
             .await
             .is_ok();
 
-            // 发送完毕后强制复位字符集为 GSM
-            let _ = send_at_command_inner(
-                &self.serial_path,
-                "AT+CSCS=\"GSM\"",
-            )
-            .await;
+            // 恢复文本模式
+            let _ = send_at_command_inner(&self.serial_path, "AT+CMGF=1").await;
 
             result
         }

@@ -735,6 +735,7 @@ impl HardwareBackend for RealBackend {
                     &self.serial_path,
                     &format!("AT+CMGS=\"{}\"", recipient),
                     &message,
+                    None,
                 )
                 .await
                 .is_ok()
@@ -743,6 +744,8 @@ impl HardwareBackend for RealBackend {
             }
         } else {
             // UCS2 编码（支持中文等非 GSM 字符）
+            // 注意：收件人号码始终保持 ASCII 格式，不进行 UCS2 编码，
+            // 因为 Quectel 模块不支持 UCS2 编码的号码（会导致 ERROR）。
             if send_at_command_inner(&self.serial_path, "AT+CMGF=1").await.is_err() {
                 return false;
             }
@@ -753,13 +756,13 @@ impl HardwareBackend for RealBackend {
                 return false;
             }
 
-            let ucs2_recipient = encode_ucs2_hex(&recipient);
             let ucs2_hex_msg = encode_ucs2_hex(&message);
 
             let result = send_sms_command_inner(
                 &self.serial_path,
-                &format!("AT+CMGS=\"{}\"", ucs2_recipient),
-                &ucs2_hex_msg,
+                &format!("AT+CMGS=\"{}\"", recipient),
+                &message,
+                Some(&ucs2_hex_msg),
             )
             .await
             .is_ok();
@@ -1335,11 +1338,15 @@ fn spawn_atcmd_rs(
     serial_path: &str,
     cmd: &str,
     sms_message: Option<&str>,
+    hex_body: Option<&str>,
 ) -> Result<tokio::process::Child, String> {
     let mut command = tokio::process::Command::new("atcmd_rs");
     command.arg("-p").arg(serial_path);
     if let Some(message) = sms_message {
         command.arg("--message").arg(message);
+    }
+    if let Some(hex) = hex_body {
+        command.arg("--hex-body").arg(hex);
     }
     command
         .arg(cmd)
@@ -1370,10 +1377,11 @@ async fn send_at_command_inner_with_options(
     cmd: &str,
     timeout: Duration,
     sms_message: Option<&str>,
+    hex_body: Option<&str>,
 ) -> Result<String, String> {
     let start = std::time::Instant::now();
 
-    let child = spawn_atcmd_rs(serial_path, cmd, sms_message)?;
+    let child = spawn_atcmd_rs(serial_path, cmd, sms_message, hex_body)?;
 
     let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
         Ok(Ok(output)) => output,
@@ -1409,15 +1417,18 @@ async fn send_at_command_inner_with_timeout(
     cmd: &str,
     timeout: Duration,
 ) -> Result<String, String> {
-    send_at_command_inner_with_options(serial_path, cmd, timeout, None).await
+    send_at_command_inner_with_options(serial_path, cmd, timeout, None, None).await
 }
 
 async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, String> {
     send_at_command_inner_with_timeout(serial_path, cmd, Duration::from_secs(10)).await
 }
 
-async fn send_sms_command_inner(serial_path: &str, cmd: &str, message: &str) -> Result<String, String> {
-    send_at_command_inner_with_options(serial_path, cmd, Duration::from_secs(30), Some(message)).await
+async fn send_sms_command_inner(serial_path: &str, cmd: &str, message: &str, hex_body: Option<&str>) -> Result<String, String> {
+    // 当使用 hex_body（UCS2 原始字节）时，不传递 sms_message，
+    // 避免 atcmd_rs 的 --message 抢占 `>` prompt 导致 hex_body 被跳过
+    let sms_message = if hex_body.is_some() { None } else { Some(message) };
+    send_at_command_inner_with_options(serial_path, cmd, Duration::from_secs(30), sms_message, hex_body).await
 }
 
 async fn query_device_bands(serial_path: &str) -> String {

@@ -235,16 +235,18 @@ fn set_carrier_telemetry(
     total_bw: f64,
     earfcns: &[String],
     pcis: &[String],
+    is_nr: bool,
     telemetry: &mut crate::TelemetryData,
 ) {
     if !bands.is_empty() {
         telemetry.bands = Some(bands.join(", "));
     }
     if !bw_parts.is_empty() {
+        let prefix = if is_nr { "NR " } else { "" };
         telemetry.bandwidth = if bw_parts.len() > 1 {
-            Some(format!("NR {} MHz ({})", total_bw, bw_parts.join("+")))
+            Some(format!("{}{} MHz ({})", prefix, total_bw, bw_parts.join("+")))
         } else {
-            Some(format!("NR {} MHz", total_bw))
+            Some(format!("{}{} MHz", prefix, total_bw))
         };
     }
     if !earfcns.is_empty() {
@@ -336,14 +338,7 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
         pcis.push(cell.pci.clone());
     }
 
-    if serving_cells.len() > 1 {
-        set_carrier_telemetry(&bands, &bw_parts, total_bw, &earfcns, &pcis, telemetry);
-    } else {
-        telemetry.bands = Some(bands.join(", "));
-        telemetry.bandwidth = Some(format!("{} MHz", total_bw));
-        telemetry.earfcn = Some(earfcns.join(", "));
-        telemetry.pci = Some(pcis.join(", "));
-    }
+    set_carrier_telemetry(&bands, &bw_parts, total_bw, &earfcns, &pcis, true, telemetry);
 }
 
 /// Parse +QCAINFO response and populate TelemetryData
@@ -394,7 +389,8 @@ pub fn parse_qcainfo(qca_res: &str, telemetry: &mut crate::TelemetryData) {
         }
     }
 
-    set_carrier_telemetry(&bands, &bw_parts, total_bw, &earfcns, &pcis, telemetry);
+    let is_nr_agg = entries.iter().any(|e| e.band.starts_with("NR5G"));
+    set_carrier_telemetry(&bands, &bw_parts, total_bw, &earfcns, &pcis, is_nr_agg, telemetry);
 
     crate::push_log("INFO", "QCAINFO", &format!(
         "QCAINFO parsed: bands={:?} bw={:?} earfcn={:?} pci={:?}",
@@ -722,7 +718,7 @@ mod tests {
         assert_eq!(telemetry.enb_id, Some("39074C".to_string()));
         assert_eq!(telemetry.tac, Some("72002F".to_string()));
         assert_eq!(telemetry.bands, Some("NR5G BAND 41".to_string()));
-        assert_eq!(telemetry.bandwidth, Some("100 MHz".to_string()));
+        assert_eq!(telemetry.bandwidth, Some("NR 100 MHz".to_string()));
         assert_eq!(telemetry.earfcn, Some("504990".to_string()));
         assert_eq!(telemetry.pci, Some("751".to_string()));
 
@@ -862,7 +858,7 @@ mod tests {
         assert_eq!(telemetry.assessment, Some("Good".to_string()));
         // QENG 设置了 bands/bandwidth/earfcn/pci，后续会被 QCAINFO 覆盖
         assert_eq!(telemetry.bands, Some("NR5G BAND 41".to_string()));
-        assert_eq!(telemetry.bandwidth, Some("100 MHz".to_string()));
+        assert_eq!(telemetry.bandwidth, Some("NR 100 MHz".to_string()));
         assert_eq!(telemetry.earfcn, Some("504990".to_string()));
         assert_eq!(telemetry.pci, Some("751".to_string()));
 

@@ -78,7 +78,7 @@ fn run_io(device: &mut (impl Read + Write), sms_message: Option<&str>) -> io::Re
     let mut read_buf = [0_u8; 256];
     let mut line = Vec::with_capacity(256);
     let mut sms_written = false;
-    let mut prompt_buf = Vec::with_capacity(4);
+    let mut prompt_buf = [0u8; 4];
 
     loop {
         let n = device.read(&mut read_buf)?;
@@ -94,11 +94,9 @@ fn run_io(device: &mut (impl Read + Write), sms_message: Option<&str>) -> io::Re
         for &b in chunk {
             if let Some(message) = sms_message {
                 if !sms_written {
-                    prompt_buf.push(b);
-                    if prompt_buf.len() > 4 {
-                        prompt_buf.remove(0);
-                    }
-                    if prompt_buf.ends_with(b"\r\n> ") || prompt_buf.ends_with(b"\r\n>") {
+                    prompt_buf.copy_within(1.., 0);
+                    prompt_buf[3] = b;
+                    if prompt_buf == *b"\r\n> " || prompt_buf[1..] == *b"\r\n>" {
                         device.write_all(message.as_bytes())?;
                         device.write_all(&[0x1A])?;
                         device.flush()?;

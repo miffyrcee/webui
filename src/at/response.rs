@@ -93,12 +93,6 @@ pub struct QcainfoEntry {
     pub sinr: Option<String>,
 }
 
-/// Parsed +CGCONTRDP response (APN info from active context)
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct CgcontrdpResponse {
-    pub apn: String,
-}
-
 /// Parsed +QTEMP single sensor line
 #[derive(Debug, Clone, Serialize)]
 pub struct QtempResponse {

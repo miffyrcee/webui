@@ -5,7 +5,6 @@ use crate::at::{
     utils::decode_hex_ucs2,
 };
 
-#[allow(dead_code)]
 fn split_at_fields(body: &str) -> Vec<String> {
     let mut fields = Vec::new();
     let mut current = String::new();
@@ -38,60 +37,8 @@ pub fn is_valid_data_apn(apn: &str) -> bool {
         && !apn.eq_ignore_ascii_case("ims")
 }
 
-/// Parse a full AT response and extract all result lines
-#[allow(dead_code)]
-pub fn parse_at_response(raw: &str) -> Vec<ParsedLine> {
-    let mut results = Vec::new();
-
-    // Use simple line-by-line matching instead of attempting full pest grammar
-    // which can be brittle for AT response noise/echo
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if let Some(parsed) = parse_single_line(trimmed) {
-            results.push(parsed);
-        }
-    }
-
-    results
-}
-
-/// Parse a combined AT response (e.g. "AT+CPIN?;+QENG=...;+QCAINFO;+CGPADDR")
-/// into individual response sections by known prefix markers.
-/// Extracts the first line matching each known prefix from the raw output
-/// (which may include echo line, trailing OK, etc.).
-#[allow(dead_code)]
-pub fn parse_combined_response(raw: &str) -> (String, String, String, String) {
-    let mut cpin = String::new();
-    let mut qeng = String::new();
-    let mut qca = String::new();
-    let mut gpad = String::new();
-
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("+CPIN:") {
-            cpin = trimmed.to_string();
-        } else if trimmed.starts_with("+QENG:") {
-            qeng = trimmed.to_string();
-        } else if trimmed.starts_with("+QCAINFO:") {
-            if qca.is_empty() {
-                qca = trimmed.to_string();
-            }
-        } else if trimmed.starts_with("+CGPADDR:") {
-            if gpad.is_empty() {
-                gpad = trimmed.to_string();
-            }
-        }
-    }
-
-    (cpin, qeng, qca, gpad)
-}
-
 /// Represents a single parsed line from an AT response
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum ParsedLine {
     Cpin(CpinResponse),
     Quimslot(QuimslotResponse),
@@ -103,7 +50,6 @@ pub enum ParsedLine {
     QengServingCell(QengServingCell),
     QengNeighbourCell(QengNeighbourCell),
     Qcainfo(QcainfoEntry),
-    Cgcontrdp(CgcontrdpResponse),
     Cnum(CnumResponse),
     Qccid(String),
     Cimi(String),
@@ -263,9 +209,6 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
         }
         return Some(ParsedLine::Qcainfo(entry));
     }
-    if let Some(values) = fields_after_prefix(trimmed, "+CGCONTRDP:") {
-        return Some(ParsedLine::Cgcontrdp(CgcontrdpResponse { apn: values.get(2).cloned().unwrap_or_default() }));
-    }
     if let Some(values) = fields_after_prefix(trimmed, "+CNUM:") {
         return Some(ParsedLine::Cnum(CnumResponse { number: values.get(1).cloned().unwrap_or_default() }));
     }
@@ -285,9 +228,33 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
     Some(ParsedLine::Other(trimmed.to_string()))
 }
 
-/// Extract sections from a combined AT response
-/// Combined commands like: "AT+CPIN?;+QENG=\"servingcell\";+QCAINFO;+CGPADDR"
-/// return all results concatenated. This function splits by known prefix markers.
+/// Write accumulated carrier aggregation info (bands, bandwidth, earfcn, pci) to telemetry.
+fn set_carrier_telemetry(
+    bands: &[String],
+    bw_parts: &[String],
+    total_bw: f64,
+    earfcns: &[String],
+    pcis: &[String],
+    telemetry: &mut crate::TelemetryData,
+) {
+    if !bands.is_empty() {
+        telemetry.bands = Some(bands.join(", "));
+    }
+    if !bw_parts.is_empty() {
+        telemetry.bandwidth = if bw_parts.len() > 1 {
+            Some(format!("NR {} MHz ({})", total_bw, bw_parts.join("+")))
+        } else {
+            Some(format!("NR {} MHz", total_bw))
+        };
+    }
+    if !earfcns.is_empty() {
+        telemetry.earfcn = Some(earfcns.join(", "));
+    }
+    if !pcis.is_empty() {
+        telemetry.pci = Some(pcis.join(", "));
+    }
+}
+
 /// Parse +QENG "servingcell" response string and populate TelemetryData
 pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
     if qeng_res.is_empty() {
@@ -347,56 +314,35 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
     telemetry.sinr = Some(format!("{} / {}%", sinr, sinr_pct));
     telemetry.signal_percentage = Some(format!("{}%", rsrp_pct));
 
-    // Carrier aggregation: process multiple lines
+    // Collect carrier aggregation info
+    let mut bands: Vec<String> = Vec::new();
+    let mut earfcns = Vec::new();
+    let mut pcis = Vec::new();
+    let mut total_bw = 0.0f64;
+    let mut bw_parts: Vec<String> = Vec::new();
+
+    for cell in &serving_cells {
+        let band = format!("NR5G BAND {}", cell.band);
+        if !bands.contains(&band) {
+            bands.push(band);
+        }
+        if let Ok(code) = cell.bandwidth.parse::<i32>() {
+            let is_nr = cell.rat.starts_with("NR5G");
+            let actual_bw = if is_nr { decode_nr_bandwidth(code) } else { decode_lte_bandwidth(code) };
+            total_bw += actual_bw;
+            bw_parts.push(actual_bw.to_string());
+        }
+        earfcns.push(cell.earfcn.clone());
+        pcis.push(cell.pci.clone());
+    }
+
     if serving_cells.len() > 1 {
-        // Bands: deduplicated
-        let mut bands: Vec<String> = Vec::new();
-        for cell in &serving_cells {
-            let band = format!("NR5G BAND {}", cell.band);
-            if !bands.contains(&band) {
-                bands.push(band);
-            }
-        }
-        telemetry.bands = Some(bands.join(", "));
-
-        // Bandwidth: decode codes then sum across all CCs
-        let mut total_bw = 0.0f64;
-        let mut bw_parts: Vec<String> = Vec::new();
-        for cell in &serving_cells {
-            if let Ok(code) = cell.bandwidth.parse::<i32>() {
-                let is_nr = cell.rat.starts_with("NR5G");
-                let actual_bw = if is_nr {
-                    decode_nr_bandwidth(code)
-                } else {
-                    decode_lte_bandwidth(code)
-                };
-                total_bw += actual_bw;
-                bw_parts.push(actual_bw.to_string());
-            }
-        }
-        if !bw_parts.is_empty() {
-            telemetry.bandwidth = Some(format!("NR {} MHz ({})", total_bw, bw_parts.join("+")));
-        }
-
-        // EARFCN / PCI: comma-joined
-        let earfcns: Vec<&str> = serving_cells.iter().map(|c| c.earfcn.as_str()).collect();
-        telemetry.earfcn = Some(earfcns.join(", "));
-
-        let pcis: Vec<&str> = serving_cells.iter().map(|c| c.pci.as_str()).collect();
-        telemetry.pci = Some(pcis.join(", "));
+        set_carrier_telemetry(&bands, &bw_parts, total_bw, &earfcns, &pcis, telemetry);
     } else {
-        // Single carrier
-        telemetry.bands = Some(format!("NR5G BAND {}", pcc.band));
-        let bw_value = pcc.bandwidth.parse::<i32>().map(|code| {
-            if pcc.rat.starts_with("NR5G") {
-                decode_nr_bandwidth(code)
-            } else {
-                decode_lte_bandwidth(code)
-            }
-        }).unwrap_or(0.0);
-        telemetry.bandwidth = Some(format!("{} MHz", bw_value));
-        telemetry.earfcn = Some(pcc.earfcn.clone());
-        telemetry.pci = Some(pcc.pci.clone());
+        telemetry.bands = Some(bands.join(", "));
+        telemetry.bandwidth = Some(format!("{} MHz", total_bw));
+        telemetry.earfcn = Some(earfcns.join(", "));
+        telemetry.pci = Some(pcis.join(", "));
     }
 }
 
@@ -431,16 +377,12 @@ pub fn parse_qcainfo(qca_res: &str, telemetry: &mut crate::TelemetryData) {
     for entry in entries.iter() {
         if let Ok(code) = entry.bandwidth.parse::<i32>() {
             let is_nr = entry.band.starts_with("NR5G");
-            let actual_bw = if is_nr {
-                decode_nr_bandwidth(code)
-            } else {
-                decode_lte_bandwidth(code)
-            };
+            let actual_bw = if is_nr { decode_nr_bandwidth(code) } else { decode_lte_bandwidth(code) };
             total_bw += actual_bw;
             bw_parts.push(actual_bw.to_string());
         }
-        earfcns.push(entry.earfcn.as_str());
-        pcis.push(entry.pci.as_str());
+        earfcns.push(entry.earfcn.clone());
+        pcis.push(entry.pci.clone());
 
         let band_label = if entry.band.starts_with("NR5G") {
             entry.band.clone()
@@ -452,22 +394,7 @@ pub fn parse_qcainfo(qca_res: &str, telemetry: &mut crate::TelemetryData) {
         }
     }
 
-    if !bands.is_empty() {
-        telemetry.bands = Some(bands.join(", "));
-    }
-    if !bw_parts.is_empty() {
-        if bw_parts.len() > 1 {
-            telemetry.bandwidth = Some(format!("NR {} MHz ({})", total_bw, bw_parts.join("+")));
-        } else {
-            telemetry.bandwidth = Some(format!("NR {} MHz", total_bw));
-        }
-    }
-    if !earfcns.is_empty() {
-        telemetry.earfcn = Some(earfcns.join(", "));
-    }
-    if !pcis.is_empty() {
-        telemetry.pci = Some(pcis.join(", "));
-    }
+    set_carrier_telemetry(&bands, &bw_parts, total_bw, &earfcns, &pcis, telemetry);
 
     crate::push_log("INFO", "QCAINFO", &format!(
         "QCAINFO parsed: bands={:?} bw={:?} earfcn={:?} pci={:?}",
@@ -710,21 +637,6 @@ mod tests {
     fn test_parse_qcainfo_scc() {
         let result = parse_single_line("+QCAINFO: \"SCC\",156490,3,\"NR5G BAND 28\",1,250,0,-,-");
         assert!(matches!(result, Some(ParsedLine::Qcainfo(ref r)) if r.component == "SCC"));
-    }
-
-    #[test]
-    fn test_parse_combined_response() {
-        let raw = "AT+CPIN?;+QENG=\"servingcell\";+QCAINFO;+CGPADDR\r\n
-+CPIN: READY\r\n
-+QENG: \"servingcell\",\"NOCONN\",\"NR5G-SA\",\"TDD\",460,00,39074C001,751,72002F,504990,41,12,-64,-11,22,1,-\r\n
-+QCAINFO: \"PCC\",504990,12,\"NR5G BAND 41\",751\r\n
-+CGPADDR: 1,\"10.202.165.254\",\"2409::1\"\r\n
-OK\r\n";
-        let (cpin, qeng, qca, gpad) = parse_combined_response(raw);
-        assert!(cpin.contains("READY"));
-        assert!(qeng.contains("servingcell"));
-        assert!(qca.contains("PCC"));
-        assert!(gpad.contains("10.202.165.254"));
     }
 
     #[test]

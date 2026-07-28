@@ -56,7 +56,8 @@ pub static PROFILE_GENERIC: DeviceProfile = DeviceProfile {
     id: DeviceId::Generic,
     name: "Generic Quectel Module",
     cgmm_prefixes: &[],
-    default_nr_bands: "1:3:8:28:41:77:78:79",
+    // 保持与旧版硬编码 NR 频段一致，确保未知模组降级后有完整的基础覆盖
+    default_nr_bands: "1:2:3:5:7:8:12:20:25:28:38:40:41:48:66:71:77:78:79",
     default_lte_bands: "1:3:5:8:34:38:39:40:41",
     nr_cell_lock_scs_threshold: 28,
     has_eth_driver: false,
@@ -113,6 +114,10 @@ mod tests {
     fn test_profile_matching_fallback() {
         let p = lookup_profile("UNKNOWN_MODULE");
         assert_eq!(p.id, DeviceId::Generic);
+        // 验证降级 profile 包含完整的默认频段（向后兼容）
+        assert!(p.default_nr_bands.contains("77:78:79"));
+        assert!(p.default_nr_bands.contains("1:2:3:5"));
+        assert_eq!(p.nr_cell_lock_scs_threshold, 28);
     }
 
     #[test]

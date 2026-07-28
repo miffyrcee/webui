@@ -647,6 +647,33 @@ trait HardwareBackend: Send + Sync {
 
 struct RealBackend {
     serial_path: String,
+    profile: &'static device::DeviceProfile,
+}
+
+impl RealBackend {
+    async fn new(serial_path: String) -> Self {
+        let mut backend = Self {
+            serial_path,
+            profile: &device::PROFILE_GENERIC,
+        };
+        // 必须使用 std::path 再次检查，因为 main() 中构造前可能路径已不存在
+        if std::path::Path::new(&backend.serial_path).exists() {
+            if let Some(cgmm) = send_at_get_line(&backend.serial_path, "AT+CGMM").await {
+                let detected = device::lookup_profile(&cgmm);
+                push_log("INFO", "Device", &format!(
+                    "检测到模组: {} → Profile: {}",
+                    cgmm.trim(),
+                    detected.name,
+                ));
+                backend.profile = detected;
+            } else {
+                push_log("WARN", "Device", "AT+CGMM 无响应，使用通用 Quectel Profile");
+            }
+        } else {
+            push_log("WARN", "Device", "串口设备不存在，使用通用 Quectel Profile");
+        }
+        backend
+    }
 }
 
 #[async_trait::async_trait]
@@ -2097,7 +2124,7 @@ async fn main() {
     // 根据串口设备是否存在选择后端
     let backend: Arc<dyn HardwareBackend> = if std::path::Path::new(&serial_path).exists() {
         push_log("INFO", "System", "检测到真实串口设备，使用 RealBackend");
-        Arc::new(RealBackend { serial_path: serial_path.clone() })
+        Arc::new(RealBackend::new(serial_path.clone()).await)
     } else {
         push_log("WARN", "System", "未检测到串口设备，已自动开启模拟测试模式 (MockBackend)");
         Arc::new(MockBackend)

@@ -911,14 +911,14 @@ impl HardwareBackend for RealBackend {
     async fn set_band_lock(&self, is_nr5g: bool, bands: &str) -> Result<String, String> {
         let cmd = if is_nr5g {
             let b = if bands.is_empty() || bands == "all" {
-                "1:2:3:5:7:8:12:20:25:28:38:40:41:48:66:71:77:78:79"
+                self.profile.default_nr_bands
             } else {
                 bands
             };
             format!("AT+QNWPREFCFG=\"nr5g_band\",{}", b)
         } else {
             let b = if bands.is_empty() || bands == "all" {
-                "1:3:5:8:34:38:39:40:41"
+                self.profile.default_lte_bands
             } else {
                 bands
             };
@@ -937,7 +937,7 @@ impl HardwareBackend for RealBackend {
         } else if tech.eq_ignore_ascii_case("5g") {
             let b = band.ok_or_else(|| "5G 锁小区必须提供 Band".to_string())?;
             // 低频段 FDD (<=28) 常用 15kHz，高频段 TDD 常用 30kHz
-            let scs = if b <= 28 { 15 } else { 30 };
+            let scs = if b <= self.profile.nr_cell_lock_scs_threshold { 15 } else { 30 };
             send_at_command_inner(&self.serial_path, &format!("AT+QNWLOCK=\"common/5g\",{},{},{},{}", pci, earfcn, scs, b)).await
         } else {
             send_at_command_inner(&self.serial_path, &format!("AT+QNWLOCK=\"common/lte\",1,{},{}", earfcn, pci)).await

@@ -1,4 +1,5 @@
 mod at;
+mod device;
 
 use axum::{
     Router,

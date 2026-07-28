@@ -639,6 +639,7 @@ trait HardwareBackend: Send + Sync {
     async fn get_usb_config(&self) -> Result<serde_json::Value, String>;
     async fn poll_telemetry(&self) -> TelemetryData;
     async fn read_static_info(&self) -> (String, String, String, String);
+    fn device_name(&self) -> &str;
 }
 
 // ---------------------------------------------------------------------------
@@ -1107,6 +1108,10 @@ impl HardwareBackend for RealBackend {
         (firmware_version, active_sim, network_provider, apn)
     }
 
+    fn device_name(&self) -> &str {
+        self.profile.name
+    }
+
     async fn set_usb_net_mode(&self, mode: u8) -> Result<String, String> {
         if !matches!(mode, 0 | 1 | 2 | 3 | 4 | 5) {
             return Err("不支持的 USB 网络模式，有效值为 0(RMNET), 1(ECM), 2(MBIM), 3(RNDIS), 5(NCM)".to_string());
@@ -1291,6 +1296,10 @@ impl HardwareBackend for MockBackend {
             "中国电信 (MOCK)".to_string(),
             "ctnet (MOCK)".to_string(),
         )
+    }
+
+    fn device_name(&self) -> &str {
+        "Mock Backend (Testing)"
     }
 }
 
@@ -2123,12 +2132,14 @@ async fn main() {
 
     // 根据串口设备是否存在选择后端
     let backend: Arc<dyn HardwareBackend> = if std::path::Path::new(&serial_path).exists() {
-        push_log("INFO", "System", "检测到真实串口设备，使用 RealBackend");
         Arc::new(RealBackend::new(serial_path.clone()).await)
     } else {
         push_log("WARN", "System", "未检测到串口设备，已自动开启模拟测试模式 (MockBackend)");
         Arc::new(MockBackend)
     };
+
+    let device_name = backend.device_name();
+    push_log("INFO", "System", &format!("检测到设备: {}", device_name));
 
     // 1. 启动硬件后台轮询与指令消费任务（内含静态信息初始化）
     tokio::spawn({
@@ -2149,7 +2160,7 @@ async fn main() {
         .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    push_log("INFO", "System", "RM520N WebUI 后端服务已在 http://0.0.0.0:3000 监听");
+    push_log("INFO", "System", &format!("{} WebUI 后端服务已在 http://0.0.0.0:3000 监听", device_name));
     axum::serve(listener, app).await.unwrap();
 }
 

@@ -2011,10 +2011,47 @@ async fn handle_at_request(
                 }
             }
         }
-        // TODO(Task 3): SetSimSlot / GetMbnList / SetMbn 的正式处理分支由 Task 3 添加。
-        // 此通配分支仅为保证 Task 2 编译通过（非穷尽匹配约束），Task 3 需将其替换为显式分支。
-        _ => {
-            push_log("WARN", "Actor", "收到暂未实现的 AT action（待 Task 3 处理）");
+        AtAction::SetSimSlot(slot) => {
+            push_log("INFO", "Actor", &format!("切换 SIM 卡槽为: {}", slot));
+            let res = backend.set_sim_slot(slot).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "sim_slot_res",
+                "data": {
+                    "success": res.is_ok(),
+                    "slot": slot,
+                    "msg": res.unwrap_or_else(|e| e),
+                    "note": "切换卡槽后需重启模组方可生效"
+                }
+            }));
+        }
+        AtAction::GetMbnList => {
+            push_log("INFO", "Actor", "查询 MBN 列表...");
+            match backend.get_mbn_list().await {
+                Ok(list) => {
+                    let _ = req.resp_tx.send(serde_json::json!({
+                        "type": "mbn_list_res",
+                        "data": { "success": true, "list": list }
+                    }));
+                }
+                Err(e) => {
+                    let _ = req.resp_tx.send(serde_json::json!({
+                        "type": "mbn_list_res",
+                        "data": { "success": false, "msg": e }
+                    }));
+                }
+            }
+        }
+        AtAction::SetMbn(name) => {
+            push_log("INFO", "Actor", &format!("选择 MBN: {}", name));
+            let res = backend.set_mbn(&name).await;
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "mbn_set_res",
+                "data": {
+                    "success": res.is_ok(),
+                    "msg": res.unwrap_or_else(|e| e),
+                    "note": "选择 MBN 后需重启模组方可生效"
+                }
+            }));
         }
     }
 }
@@ -2439,6 +2476,22 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             AtAction::SetUsbNetMode(mode)
                         }
                         "get_usb_config" => AtAction::GetUsbConfig,
+                        "set_sim_slot" => {
+                            let slot = cmd.payload.as_ref()
+                                .and_then(|p| p.get("slot"))
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0) as u32;
+                            AtAction::SetSimSlot(slot)
+                        }
+                        "get_mbn_list" => AtAction::GetMbnList,
+                        "set_mbn" => {
+                            let name = cmd.payload.as_ref()
+                                .and_then(|p| p.get("name"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            AtAction::SetMbn(name)
+                        }
                         unknown_action => {
                             push_log("WARN", "WS", &format!("未知 WebSocket 动作: {:?}", unknown_action));
                             continue;

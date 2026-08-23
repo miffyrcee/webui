@@ -1166,6 +1166,17 @@
             updateText("info_provider", data.network_provider);
             updateText("info_apn", data.apn);
 
+            // 自动同步回填 APN 输入框与下拉预设（避免用户手动重复选择当前 APN）
+            if (data.apn && data.apn !== 'N/A' && data.apn !== '--') {
+                const apnInput = getDomElement('net_apn_input');
+                const apnPreset = getDomElement('net_apn_preset');
+                if (apnInput && apnPreset && document.activeElement !== apnInput) {
+                    apnInput.value = data.apn;
+                    const match = Array.from(apnPreset.options).find(opt => opt.value.toLowerCase() === data.apn.toLowerCase());
+                    apnPreset.value = match ? match.value : 'custom';
+                }
+            }
+
             updateText("dev_firmware", data.firmware_version);
             updateText("dev_sim_status", data.active_sim);
         }
@@ -1924,7 +1935,7 @@
                         sendAtCommand('AT+QMAP="mpdn_rule",1,1,0,1,1'); // NAT
                     }
                     const status = getDomElement('eth_status');
-                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ 指令已下发，请在控制台执行 AT+CFUN=1,1 重启生效！</span>';
+                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ 指令已下发，点击下方控制台「热重启 (CFUN=1,1)」快捷按钮，或直接点击「全热重启模组 (Reboot)」即可生效！</span>';
                 });
             }
 

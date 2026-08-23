@@ -2162,8 +2162,8 @@
             if (rebootBtn) {
                 rebootBtn.addEventListener('click', () => {
                     if (confirm('确认重启模组？（重启耗时约 20 秒，连接将会暂时断开）')) {
+                        // 不在此处写日志：后端 Reboot 执行后会回传 settings_log，避免与“热重启指令已提交”重复
                         sendWsCommand('reboot');
-                        appendSettingsLog('热重启指令已提交。');
                     }
                 });
             }
@@ -2172,8 +2172,8 @@
             if (resetBtn) {
                 resetBtn.addEventListener('click', () => {
                     if (confirm('警告！这会将模组配置彻底恢复为出厂配置，是否确认？')) {
+                        // 不在此处写日志：后端 FactoryReset 执行后会回传 settings_log，避免重复断言
                         sendWsCommand('factory_reset');
-                        appendSettingsLog('物理重置恢复出厂命令已提交。');
                     }
                 });
             }

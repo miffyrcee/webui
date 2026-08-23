@@ -712,6 +712,15 @@ mod tests {
         assert!(result.is_none());
     }
 
+    #[test]
+    fn test_parse_qmbncfg_malformed_numeric() {
+        let result = parse_single_line("+QMBNCFG: \"List\",X,1,\"RM520NGLAAR01A02M4G_01.004\"");
+        assert!(
+            matches!(result, Some(ParsedLine::Qmbncfg(ref r))
+                if r.index == 0 && r.state == 1 && r.name == "RM520NGLAAR01A02M4G_01.004")
+        );
+    }
+
     // ── 以下测试基于真实设备 2026-07-01 采样数据 ──
 
     #[test]

@@ -2014,12 +2014,16 @@ async fn handle_at_request(
         AtAction::SetSimSlot(slot) => {
             push_log("INFO", "Actor", &format!("切换 SIM 卡槽为: {}", slot));
             let res = backend.set_sim_slot(slot).await;
+            let (success, msg) = match res {
+                Ok(_) => (true, "OK".to_string()),
+                Err(e) => (false, e),
+            };
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "sim_slot_res",
                 "data": {
-                    "success": res.is_ok(),
+                    "success": success,
                     "slot": slot,
-                    "msg": res.unwrap_or_else(|e| e),
+                    "msg": msg,
                     "note": "切换卡槽后需重启模组方可生效"
                 }
             }));
@@ -2044,11 +2048,15 @@ async fn handle_at_request(
         AtAction::SetMbn(name) => {
             push_log("INFO", "Actor", &format!("选择 MBN: {}", name));
             let res = backend.set_mbn(&name).await;
+            let (success, msg) = match res {
+                Ok(_) => (true, "OK".to_string()),
+                Err(e) => (false, e),
+            };
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "mbn_set_res",
                 "data": {
-                    "success": res.is_ok(),
-                    "msg": res.unwrap_or_else(|e| e),
+                    "success": success,
+                    "msg": msg,
                     "note": "选择 MBN 后需重启模组方可生效"
                 }
             }));

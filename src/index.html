@@ -1257,6 +1257,8 @@
                     const cur = item.state === 1 ? '（当前）' : '';
                     return '<option value="' + escapeHtml(String(item.name)) + '">' + escapeHtml(String(item.name)) + ' ' + cur + '</option>';
                 }).join('');
+                const active = data.list.find(item => item.state === 1);
+                if (active) select.value = String(active.name);
                 if (el) el.innerHTML = '<span class="text-green-500 font-semibold">✓ 已加载 ' + data.list.length + ' 个 MBN</span>';
             } else {
                 if (el) el.innerHTML = '<span class="text-red-500 font-semibold">✗ ' + escapeHtml(data.msg || '列表加载失败') + '</span>';

@@ -722,7 +722,7 @@ impl HardwareBackend for RealBackend {
         if !user.is_empty() {
             let _ = send_at_command_inner(
                 &self.serial_path,
-                &format!("AT+QGAUTH=1,{},\"{}\",\"{}\"", auth_type, user, pass),
+                &format!("AT+CGAUTH=1,{},\"{}\",\"{}\"", auth_type, user, pass),
             )
             .await;
         }
@@ -732,7 +732,7 @@ impl HardwareBackend for RealBackend {
         let at_mode = match mode {
             "nr5g" => "AT+QNWPREFCFG=\"mode_pref\",NR5G",
             "lte" => "AT+QNWPREFCFG=\"mode_pref\",LTE",
-            "nr5g_lte" => "AT+QNWPREFCFG=\"mode_pref\",NR5G:LTE",
+            "nr5g_lte" => "AT+QNWPREFCFG=\"mode_pref\",LTE:NR5G",
             "wcdma" => "AT+QNWPREFCFG=\"mode_pref\",WCDMA",
             "auto" => "AT+QNWPREFCFG=\"mode_pref\",AUTO",
             "disable_sa" => "AT+QNWPREFCFG=\"nr5g_disable_mode\",1",

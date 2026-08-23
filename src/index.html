@@ -399,6 +399,20 @@
                             </div>
                             <div class="p-4 space-y-3">
                                 <div class="flex flex-col gap-1">
+                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">常用运营商预设</label>
+                                    <select id="net_apn_preset" class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                        <option value="ctnet">中国电信 - ctnet (通用)</option>
+                                        <option value="ctlte">中国电信 - ctlte (4G/5G)</option>
+                                        <option value="3gnet">中国联通 - 3gnet (通用)</option>
+                                        <option value="wonet">中国联通 - wonet (5G)</option>
+                                        <option value="cmnet">中国移动 - cmnet (通用)</option>
+                                        <option value="cmiot">中国移动 - cmiot (物联网)</option>
+                                        <option value="cbnet">中国广电 - cbnet (5G)</option>
+                                        <option value="ims">IMS 专网 - ims</option>
+                                        <option value="custom">自定义输入 (Custom)...</option>
+                                    </select>
+                                </div>
+                                <div class="flex flex-col gap-1">
                                     <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">APN 接入点 (例如: ims 或 3gnet)</label>
                                     <input id="net_apn_input" type="text" placeholder="e.g. ims" maxlength="63"
                                         class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
@@ -1347,10 +1361,11 @@
             if (!status) return;
             if (data.kind === 'read' && data.success) {
                 status.innerHTML = '<span class="text-indigo-600 dark:text-indigo-400 font-semibold">✓ 当前 IMEI: ' + escapeHtml(data.imei || '') + '</span>';
-                updateText('imei_input', data.imei || '');
+                const imeiInput = getDomElement('imei_input');
+                if (imeiInput) imeiInput.value = data.imei || ''; // updateText 走 textContent，对 <input> 无效，必须赋 value
                 updateText('dev_imei', data.imei || '');
             } else if (data.success) {
-                status.innerHTML = '<span class="text-indigo-600 dark:text-indigo-400 font-semibold">✓ IMEI 写入成功</span>';
+                status.innerHTML = '<span class="text-indigo-600 dark:text-indigo-400 font-semibold">✓ IMEI 写入成功，请重启模组生效</span>';
             } else {
                 status.innerHTML = '<span class="text-red-500 font-semibold">✗ IMEI ' + (data.kind === 'write' ? '写入' : '读取') + '失败</span>';
             }
@@ -1941,6 +1956,29 @@
         }
 
         function initNetworkPanel() {
+            // APN 预设下拉与自定义输入联动
+            const apnPreset = getDomElement('net_apn_preset');
+            const apnInput = getDomElement('net_apn_input');
+
+            if (apnPreset && apnInput) {
+                apnPreset.addEventListener('change', (e) => {
+                    if (e.target.value === 'custom') {
+                        apnInput.value = '';
+                        apnInput.placeholder = '请在此键入自定义 APN...';
+                        apnInput.focus();
+                    } else {
+                        apnInput.value = e.target.value;
+                        apnInput.placeholder = 'e.g. ims';
+                    }
+                });
+
+                apnInput.addEventListener('input', () => {
+                    const curVal = apnInput.value.trim().toLowerCase();
+                    const matchOpt = Array.from(apnPreset.options).find(opt => opt.value.toLowerCase() === curVal);
+                    apnPreset.value = matchOpt ? matchOpt.value : 'custom';
+                });
+            }
+
             const applyBtn = getDomElement('net_apply_btn');
             if (applyBtn) {
                 applyBtn.addEventListener('click', () => {

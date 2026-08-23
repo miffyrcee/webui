@@ -504,10 +504,10 @@
                                 </select>
                             </div>
                             <div class="flex flex-col gap-1">
-                                <label class="text-slate-400 dark:text-slate-500 font-medium">IP Passthrough (直通桥接)</label>
+                                <label class="text-slate-400 dark:text-slate-500 font-medium">网口直通 / 路由模式</label>
                                 <select id="eth_ippt_select" class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer">
-                                    <option value="0" selected>NAT 路由模式 (模组分配内网IP)</option>
-                                    <option value="1">IP Passthrough 启用 (直通运营商公网IP)</option>
+                                    <option value="dmz" selected>DMZ 准直通 (推荐：消除双重NAT + 保留后台访问)</option>
+                                    <option value="nat">标准 NAT 路由 (多设备自动分配内网 IP)</option>
                                 </select>
                             </div>
                         </div>
@@ -1915,17 +1915,18 @@
         }
 
         function initEthImeiPanel() {
-            // M.2 转网口与 IP Passthrough 配置
+            // M.2 转网口配置 (精简稳定版：DMZ 准直通 + 标准 NAT)
             const ethApplyBtn = getDomElement('eth_apply_btn');
             if (ethApplyBtn) {
                 ethApplyBtn.addEventListener('click', () => {
                     const driver = getDomElement('eth_driver_select')?.value || 'r8125';
                     const pcie_rc = getDomElement('eth_pcie_select')?.value === '1';
-                    const ippt = getDomElement('eth_ippt_select')?.value === '1';
-                    // 1. 加载对应以太网 PHY 驱动
+                    const mode = getDomElement('eth_ippt_select')?.value || 'dmz';
+
+                    // 1. 加载网卡 PHY 驱动
                     sendAtCommand('AT+QETH="eth_driver","' + driver + '",1');
 
-                    // 2. PCIe 与数据总线模式配置
+                    // 2. 配置 PCIe 与数据总线通道
                     if (pcie_rc) {
                         sendAtCommand('AT+QCFG="pcie/mode",1');           // PCIe RC 主机模式
                         sendAtCommand('AT+QCFG="data_interface",1,0');    // PCIe 数据通道
@@ -1933,20 +1934,25 @@
                         sendAtCommand('AT+QCFG="pcie/mode",0');           // PCIe EP 从机模式
                     }
 
-                    // 3. 以太网网口自动拨号使能
+                    // 3. 始终确保清除容易产生死锁的 QMAP MPDN 真直通桥接
+                    sendAtCommand('AT+QMAP="MPDN_rule",0');
                     sendAtCommand('AT+QMAPWAC=1');
 
-                    // 4. 下发 MPDN 直通/NAT 规则（严格大写 MPDN_rule，使用 00:00:00:00:00:00 自动绑定首个网口设备）
-                    if (ippt) {
-                        sendAtCommand('AT+QMAP="MPDN_rule",0,1,0,1,1,"00:00:00:00:00:00"');
-                        sendAtCommand('AT+QMAP="IPPT_NAT",0');
+                    // 4. 下发工作模式
+                    if (mode === 'dmz') {
+                        // 【DMZ 准直通】：锁定单一 IP 且 1:1 映射全端口，消除双重 NAT，同时可随时访问 192.168.225.1 后台
+                        sendAtCommand('AT+QMAP="LANIP",192.168.225.2,192.168.225.2,192.168.225.1,1');
+                        sendAtCommand('AT+QMAP="DMZ",1,4,192.168.225.2');
                     } else {
-                        sendAtCommand('AT+QMAP="MPDN_rule",0,1,0,0,1');
-                        sendAtCommand('AT+QMAP="IPPT_NAT",1');
+                        // 【标准 NAT 模式】：恢复正常 DHCP 地址池 (192.168.225.20~100) 并关闭 DMZ
+                        sendAtCommand('AT+QMAP="LANIP",192.168.225.20,192.168.225.100,192.168.225.1,1');
+                        sendAtCommand('AT+QMAP="DMZ",0');
                     }
 
                     const status = getDomElement('eth_status');
-                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ 指令已下发！请点击「全热重启模组 (Reboot)」或断电重启以使 PCIe 网卡驱动生效。</span>';
+                    if (status) {
+                        status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ 指令已下发！请点击控制台「热重启 (CFUN=1,1)」或断电重启使网卡生效。</span>';
+                    }
                 });
             }
 

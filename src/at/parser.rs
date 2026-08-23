@@ -51,6 +51,7 @@ pub enum ParsedLine {
     QengNeighbourCell(QengNeighbourCell),
     Qcainfo(QcainfoEntry),
     Cnum(CnumResponse),
+    Qmbncfg(QmbncfgEntry),
     Qccid(String),
     Cimi(String),
     Qtemp(QtempResponse),
@@ -223,6 +224,17 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
             sensor: values.first().cloned().unwrap_or_default(),
             temperature: values.get(1).and_then(|v| v.parse::<f64>().ok()),
         }));
+    }
+    if let Some(values) = fields_after_prefix(trimmed, "+QMBNCFG:") {
+        if values.first().map(String::as_str) == Some("List") {
+            let name = values.get(3).cloned().unwrap_or_default();
+            if !name.is_empty() {
+                let index = values.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let state = values.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                return Some(ParsedLine::Qmbncfg(QmbncfgEntry { index, state, name }));
+            }
+            return None;
+        }
     }
 
     Some(ParsedLine::Other(trimmed.to_string()))
@@ -677,6 +689,27 @@ mod tests {
     fn test_parse_qtemp_temperature_invalid_value() {
         let resp = "+QTEMP:\"cpuss-0-usr\",\"--\"";
         assert_eq!(parse_qtemp_temperature(resp), None);
+    }
+
+    #[test]
+    fn test_parse_qmbncfg_list() {
+        let result = parse_single_line("+QMBNCFG: \"List\",0,1,\"RM520NGLAAR01A02M4G_01.004\"");
+        assert!(
+            matches!(result, Some(ParsedLine::Qmbncfg(ref r))
+                if r.index == 0 && r.state == 1 && r.name == "RM520NGLAAR01A02M4G_01.004")
+        );
+    }
+
+    #[test]
+    fn test_parse_qmbncfg_ignores_non_list() {
+        let result = parse_single_line("+QMBNCFG: \"AutoSel\",0");
+        assert!(matches!(result, Some(ParsedLine::Other(_))));
+    }
+
+    #[test]
+    fn test_parse_qmbncfg_ignores_empty_name() {
+        let result = parse_single_line("+QMBNCFG: \"List\",0,0,\"\"");
+        assert!(result.is_none());
     }
 
     // ── 以下测试基于真实设备 2026-07-01 采样数据 ──

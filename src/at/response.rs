@@ -120,3 +120,11 @@ pub struct QengNeighbourCell {
     pub srxlev: String,
 }
 
+/// Parsed +QMBNCFG: "List" entry
+#[derive(Debug, Clone, Serialize)]
+pub struct QmbncfgEntry {
+    pub index: u32,
+    pub state: u32,
+    pub name: String,
+}
+

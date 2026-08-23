@@ -436,6 +436,12 @@ enum AtAction {
     SetUsbNetMode(u8),
     /// 获取当前 USB 模式
     GetUsbConfig,
+    /// (slot) — 切换 SIM 卡槽，仅支持 1/2
+    SetSimSlot(u32),
+    /// 查询 MBN 列表（AT+QMBNCFG="List"）
+    GetMbnList,
+    /// (name) — 选择 MBN 配置（AT+QMBNCFG="Select",...）
+    SetMbn(String),
 }
 
 struct AtRequest {
@@ -637,6 +643,9 @@ trait HardwareBackend: Send + Sync {
     async fn get_diagnostics(&self, diag: &DiagnosticType) -> Result<String, String>;
     async fn set_usb_net_mode(&self, mode: u8) -> Result<String, String>;
     async fn get_usb_config(&self) -> Result<serde_json::Value, String>;
+    async fn set_sim_slot(&self, slot: u32) -> Result<String, String>;
+    async fn get_mbn_list(&self) -> Result<Vec<serde_json::Value>, String>;
+    async fn set_mbn(&self, name: &str) -> Result<String, String>;
     async fn poll_telemetry(&self) -> TelemetryData;
     async fn read_static_info(&self) -> (String, String, String, String);
     fn device_name(&self) -> &str;
@@ -1157,6 +1166,41 @@ impl HardwareBackend for RealBackend {
             "usbnet_supported": usbnet_supported
         }))
     }
+
+    async fn set_sim_slot(&self, slot: u32) -> Result<String, String> {
+        if !matches!(slot, 1 | 2) {
+            return Err(format!("无效的 SIM 卡槽，仅支持 1/2: {}", slot));
+        }
+        send_at_command_inner(&self.serial_path, &format!("AT+QUIMSLOT={}", slot)).await
+    }
+
+    async fn get_mbn_list(&self) -> Result<Vec<serde_json::Value>, String> {
+        let resp = send_at_command_inner(&self.serial_path, "AT+QMBNCFG=\"List\"").await?;
+        let entries: Vec<serde_json::Value> = resp
+            .lines()
+            .filter_map(|line| {
+                match at::parser::parse_single_line(line.trim()) {
+                    Some(at::parser::ParsedLine::Qmbncfg(e)) => {
+                        Some(serde_json::json!({ "index": e.index, "state": e.state, "name": e.name }))
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+        if entries.is_empty() {
+            Err(format!("未解析到 MBN 列表: {}", resp.trim()))
+        } else {
+            Ok(entries)
+        }
+    }
+
+    async fn set_mbn(&self, name: &str) -> Result<String, String> {
+        let name = sanitize_at_param(name);
+        if name.is_empty() {
+            return Err("MBN 名称不能为空".to_string());
+        }
+        send_at_command_inner(&self.serial_path, &format!("AT+QMBNCFG=\"Select\",\"{}\"", name)).await
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1286,6 +1330,24 @@ impl HardwareBackend for MockBackend {
             "usbnet_name": "ECM (Linux/Mac免驱) [MOCK]",
             "usbnet_supported": true
         }))
+    }
+
+    async fn set_sim_slot(&self, slot: u32) -> Result<String, String> {
+        push_log("MOCK", "SIM", &format!("Mock: 切换 SIM 卡槽为 {}", slot));
+        Ok("OK\r\n".to_string())
+    }
+
+    async fn get_mbn_list(&self) -> Result<Vec<serde_json::Value>, String> {
+        push_log("MOCK", "MBN", "Mock: 查询 MBN 列表");
+        Ok(vec![
+            serde_json::json!({ "index": 0, "state": 1, "name": "RM520NGLAAR01A02M4G_01.004 (MOCK)" }),
+            serde_json::json!({ "index": 1, "state": 0, "name": "RM520NGLAAR01A02M4G_01.006 (MOCK)" }),
+        ])
+    }
+
+    async fn set_mbn(&self, name: &str) -> Result<String, String> {
+        push_log("MOCK", "MBN", &format!("Mock: 选择 MBN {}", name));
+        Ok("OK\r\n".to_string())
     }
 
     async fn read_static_info(&self) -> (String, String, String, String) {
@@ -1948,6 +2010,11 @@ async fn handle_at_request(
                     }));
                 }
             }
+        }
+        // TODO(Task 3): SetSimSlot / GetMbnList / SetMbn 的正式处理分支由 Task 3 添加。
+        // 此通配分支仅为保证 Task 2 编译通过（非穷尽匹配约束），Task 3 需将其替换为显式分支。
+        _ => {
+            push_log("WARN", "Actor", "收到暂未实现的 AT action（待 Task 3 处理）");
         }
     }
 }

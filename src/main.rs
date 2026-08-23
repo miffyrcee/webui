@@ -565,7 +565,7 @@ pub enum DiagnosticType {
     Neighbour,
     Qlts,
     MbnList,
-    MbnAutoclose,
+    AutoSelQuery,
 }
 
 impl std::fmt::Display for DiagnosticType {
@@ -574,7 +574,7 @@ impl std::fmt::Display for DiagnosticType {
             DiagnosticType::Neighbour => write!(f, "neighbour"),
             DiagnosticType::Qlts => write!(f, "qlts"),
             DiagnosticType::MbnList => write!(f, "mbn_list"),
-            DiagnosticType::MbnAutoclose => write!(f, "mbn_autoclose"),
+            DiagnosticType::AutoSelQuery => write!(f, "autosel_query"),
         }
     }
 }
@@ -971,7 +971,7 @@ impl HardwareBackend for RealBackend {
                 }
             }
             DiagnosticType::MbnList => send_at_command_inner(&self.serial_path, "AT+QMBNCFG=\"List\"").await,
-            DiagnosticType::MbnAutoclose => send_at_command_inner(&self.serial_path, "AT+QMBNCFG=\"AutoSel\",0").await,
+            DiagnosticType::AutoSelQuery => send_at_command_inner(&self.serial_path, "AT+QMBNCFG=\"AutoSel\"").await,
         }
     }
 
@@ -2664,7 +2664,7 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                                 "neighbour" | "neighbor" => DiagnosticType::Neighbour,
                                 "qlt" | "qlts" => DiagnosticType::Qlts,
                                 "mbn_list" | "qmbncfg" => DiagnosticType::MbnList,
-                                "mbn_autoclose" | "autosel" => DiagnosticType::MbnAutoclose,
+                                "autosel_query" | "autosel" => DiagnosticType::AutoSelQuery,
                                 _ => {
                                     push_log("WARN", "WS", &format!("未知诊断子命令: {}", sub));
                                     continue;

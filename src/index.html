@@ -684,22 +684,22 @@
                         </div>
                         <div class="p-4 space-y-3">
                             <div class="flex flex-wrap gap-2">
-                                <button id="diag_neighbour_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">邻区侦测</button>
-                                <button id="diag_qlts_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">时区校准</button>
-                                <button id="diag_mbn_list_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">MBN 分配</button>
-                                <button id="diag_autosel_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">AutoSel MBN</button>
+                                <button id="diag_neighbour_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">邻区侦测 / Neighbour</button>
+                                <button id="diag_qlts_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">时区校准 / Clock (QLTS)</button>
+                                <button id="diag_mbn_list_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">MBN 列表 / MBN List</button>
+                                <button id="diag_autosel_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">AutoSel 状态 / AutoSel Query</button>
                             </div>
                             <div class="flex flex-wrap gap-2">
-                                <button id="mbn_autosel_on" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">启用 AutoSel (自动)</button>
-                                <button id="mbn_autosel_off" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">禁用 AutoSel (锁定)</button>
-                                <button id="mbn_deactivate_btn" class="flex-1 min-w-[100px] bg-amber-600 hover:bg-amber-500 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">停用当前 MBN</button>
+                                <button id="mbn_autosel_on" class="flex-1 min-w-[100px] bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">启用 AutoSel / Enable AutoSel</button>
+                                <button id="mbn_autosel_off" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">禁用 AutoSel / Disable AutoSel</button>
+                                <button id="mbn_deactivate_btn" class="flex-1 min-w-[100px] bg-amber-600 hover:bg-amber-500 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">停用当前 MBN / Deactivate MBN</button>
                             </div>
                             <div class="flex flex-wrap items-center gap-2">
                                 <select id="mbn_select" class="flex-1 min-w-[140px] bg-white dark:bg-[#111622] border border-slate-200 dark:border-slate-700 text-xs rounded px-2 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500">
                                     <option value="">请先刷新 MBN 列表</option>
                                 </select>
-                                <button id="mbn_refresh_btn" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">刷新列表</button>
-                                <button id="mbn_apply_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">应用所选 MBN</button>
+                                <button id="mbn_refresh_btn" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">刷新列表 / Refresh</button>
+                                <button id="mbn_apply_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">应用 MBN / Apply</button>
                             </div>
                             <div id="mbn_status" class="text-[11px] text-slate-400 dark:text-slate-500 min-h-[16px]"></div>
                             <pre id="diag_output" class="p-3 bg-slate-50 dark:bg-slate-900/30 rounded border border-slate-200/50 dark:border-slate-850/40 text-xs font-mono text-indigo-600 dark:text-indigo-400 max-h-[250px] overflow-y-auto whitespace-pre-wrap">点击按钮查询并触发高级诊断交互。</pre>
@@ -744,23 +744,29 @@
                             autocomplete="off" spellcheck="false">
                         <button id="console_send_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-5 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">命令发送</button>
                     </div>
-                    <div id="console_quick_btns" class="px-4 pb-4 pt-2 flex flex-wrap gap-2 text-xs">
-                        <span class="text-slate-400 dark:text-slate-500 self-center mr-1">快捷指令板:</span>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+CGMI</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+CGSN</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+CSQ</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+COPS?</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+CGPADDR</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+QENG</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+CGDCONT?</button>
-                        <span class="text-slate-400 dark:text-slate-500 self-center mr-1">排错指令板:</span>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer" data-cmd="AT+CFUN=1,1">热重启 (CFUN=1,1)</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer" data-cmd="AT+CFUN=0">关射频 (CFUN=0)</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer" data-cmd="AT+CFUN=1">开射频 (CFUN=1)</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer" data-cmd="AT+QSIMSTAT?">SIM 在位检测</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer" data-cmd="AT+QMAP=&quot;WWAN&quot;">查看分配 IP (WWAN)</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer" data-cmd="AT+QENG=&quot;servingcell&quot;">服务小区详情</button>
-                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer" data-cmd="AT+EGMR=0,7">读取 IMEI</button>
+                    <div id="console_quick_btns" class="px-4 pb-4 pt-2 space-y-2 text-xs">
+                        <!-- 快捷指令板 -->
+                        <div class="flex flex-wrap items-center gap-1.5">
+                            <span class="text-slate-400 dark:text-slate-500 font-bold mr-1 shrink-0">快捷指令板 / Quick:</span>
+                            <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium" data-cmd="AT+CGMI">制造商信息 / Mfr (CGMI)</button>
+                            <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium" data-cmd="AT+CGSN">IMEI 串号 / Serial (CGSN)</button>
+                            <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium" data-cmd="AT+CSQ">信号质量 / Signal (CSQ)</button>
+                            <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium" data-cmd="AT+COPS?">当前运营商 / Operator (COPS?)</button>
+                            <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium" data-cmd="AT+CGPADDR">PDP IP 地址 / IP Addr (CGPADDR)</button>
+                            <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium" data-cmd='AT+QENG="servingcell"'>服务小区 / Serving Cell (QENG)</button>
+                            <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium" data-cmd="AT+CGDCONT?">APN 接入点配置 / APN List (CGDCONT?)</button>
+                        </div>
+                        <!-- 排错指令板 -->
+                        <div class="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/40">
+                            <span class="text-amber-500/90 dark:text-amber-400/90 font-bold mr-1 shrink-0">排错指令板 / Troubleshoot:</span>
+                            <button class="console-quick-btn bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-900/40 border border-amber-200 dark:border-amber-800/60 rounded px-2.5 py-1 text-amber-700 dark:text-amber-300 cursor-pointer font-medium" data-cmd="AT+CFUN=1,1">热重启 / Reboot (CFUN=1,1)</button>
+                            <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium" data-cmd="AT+CFUN=0">关射频 / RF Off (CFUN=0)</button>
+                            <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium" data-cmd="AT+CFUN=1">开射频 / RF On (CFUN=1)</button>
+                            <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium" data-cmd="AT+QSIMSTAT?">SIM 在位检测 / SIM Status (QSIMSTAT?)</button>
+                            <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium" data-cmd='AT+QMAP="WWAN"'>查看分配 IP / WWAN IP (QMAP)</button>
+                            <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium" data-cmd='AT+QENG="servingcell"'>服务小区详情 / Cell Detail (QENG)</button>
+                            <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium" data-cmd="AT+EGMR=0,7">读取 IMEI / Read IMEI (EGMR)</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1900,17 +1906,8 @@
                 quickContainer.addEventListener('click', (e) => {
                     const btnEl = e.target.closest('.console-quick-btn');
                     if (!btnEl) return;
-                    const label = btnEl.textContent.trim();
-                    const cmdMap = {
-                        'AT+CGMI': 'AT+CGMI',
-                        'AT+CGSN': 'AT+CGSN',
-                        'AT+CSQ': 'AT+CSQ',
-                        'AT+COPS?': 'AT+COPS?',
-                        'AT+CGPADDR': 'AT+CGPADDR',
-                        'AT+QENG': 'AT+QENG="servingcell"',
-                        'AT+CGDCONT?': 'AT+CGDCONT?',
-                    };
-                    const cmd = btnEl.dataset.cmd || (cmdMap[label] || label);
+                    // 优先使用 data-cmd 属性中的标准 AT 命令
+                    const cmd = btnEl.dataset.cmd || btnEl.textContent.trim();
                     if (input) input.value = cmd;
                     sendAtCommand(cmd);
                 });
@@ -2250,7 +2247,7 @@
             setupDiagBtn('diag_neighbour_btn', 'neighbour');
             setupDiagBtn('diag_qlts_btn', 'qlts');
             setupDiagBtn('diag_mbn_list_btn', 'mbn_list');
-            setupDiagBtn('diag_autosel_btn', 'mbn_autoclose');
+            setupDiagBtn('diag_autosel_btn', 'autosel_query');
         }
 
         function initSmsPanel() {

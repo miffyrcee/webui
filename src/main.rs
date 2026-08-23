@@ -442,6 +442,10 @@ enum AtAction {
     GetMbnList,
     /// (name) — 选择 MBN 配置（AT+QMBNCFG="Select",...）
     SetMbn(String),
+    /// 读取 IMEI（AT+EGMR=0,7）
+    ReadImei,
+    /// (imei) — 写入 IMEI（AT+EGMR=1,7,"<imei>"）
+    WriteImei(String),
 }
 
 struct AtRequest {
@@ -1456,6 +1460,35 @@ fn spawn_atcmd_rs(
         .map_err(|e| format!("atcmd_rs启动失败: {}", e))
 }
 
+/// IMEI (AT+EGMR) 响应解析结果
+#[derive(Debug, PartialEq, Serialize)]
+struct ImeiParseResult {
+    kind: String,
+    success: bool,
+    imei: Option<String>,
+}
+
+/// 从 AT+EGMR 原始响应中提取 IMEI 数字串（如 `+EGMR: "866355057849136"`）
+fn extract_egmr_imei(raw: &str) -> Option<String> {
+    let marker = "+EGMR:";
+    let pos = raw.find(marker)?;
+    let rest = raw[pos + marker.len()..].trim_start().trim_start_matches('"');
+    let imei: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if imei.is_empty() { None } else { Some(imei) }
+}
+
+/// 解析 AT+EGMR 响应（读取/写入 IMEI），返回 None 表示非 EGMR 响应
+fn parse_egmr_response(raw: &str) -> Option<ImeiParseResult> {
+    if !raw.contains("AT+EGMR") { return None; }
+    let is_write = raw.contains("AT+EGMR=1,7");
+    let kind = if is_write { "write" } else { "read" };
+    if let Some(imei) = extract_egmr_imei(raw) {
+        return Some(ImeiParseResult { kind: "read".to_string(), success: true, imei: Some(imei) });
+    }
+    let success = raw.contains("OK");
+    Some(ImeiParseResult { kind: kind.to_string(), success, imei: None })
+}
+
 fn at_response_has_error(raw: &str) -> bool {
     raw.lines().any(|line| matches!(at::parser::parse_single_line(line), Some(ParsedLine::Error)))
 }
@@ -2061,6 +2094,23 @@ async fn handle_at_request(
                 }
             }));
         }
+        AtAction::ReadImei => {
+            push_log("INFO", "Actor", "读取 IMEI...");
+            let raw = backend.exec_raw_at("AT+EGMR=0,7").await;
+            let parsed = parse_egmr_response(&raw).unwrap_or(ImeiParseResult {
+                kind: "read".to_string(), success: false, imei: None,
+            });
+            let _ = req.resp_tx.send(serde_json::json!({ "type": "imei_res", "data": parsed }));
+        }
+        AtAction::WriteImei(imei) => {
+            let imei = sanitize_at_param(&imei);
+            push_log("INFO", "Actor", &format!("写入 IMEI: {}", imei));
+            let raw = backend.exec_raw_at(&format!("AT+EGMR=1,7,\"{}\"", imei)).await;
+            let parsed = parse_egmr_response(&raw).unwrap_or(ImeiParseResult {
+                kind: "write".to_string(), success: false, imei: None,
+            });
+            let _ = req.resp_tx.send(serde_json::json!({ "type": "imei_res", "data": parsed }));
+        }
     }
 }
 
@@ -2370,6 +2420,11 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                             let payload = cmd.payload.and_then(|p| p.as_str().map(String::from)).unwrap_or_default();
                             AtAction::ManualAt(payload)
                         }
+                        "read_imei" => AtAction::ReadImei,
+                        "write_imei" => {
+                            let imei = cmd.payload.and_then(|p| p.as_str().map(String::from)).unwrap_or_default();
+                            AtAction::WriteImei(imei)
+                        }
                         "set_interval" => {
                             let secs = cmd.payload.as_ref().and_then(|p| {
                                 p.as_u64().or_else(|| p.as_str().and_then(|s| s.parse::<u64>().ok()))
@@ -2534,4 +2589,82 @@ async fn style_handler() -> impl IntoResponse {
     .unwrap_or_else(|_| {
         (StatusCode::INTERNAL_SERVER_ERROR, "CSS not found").into_response()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_egmr_read_success() {
+        let raw = "AT+EGMR=0,7\r\r\n+EGMR: \"866355057849136\"\r\n\r\nOK\r\n";
+        assert_eq!(
+            parse_egmr_response(raw),
+            Some(ImeiParseResult {
+                kind: "read".to_string(),
+                success: true,
+                imei: Some("866355057849136".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_egmr_write_success() {
+        let raw = "AT+EGMR=1,7,\"866355057849136\"\r\r\nOK\r\n";
+        assert_eq!(
+            parse_egmr_response(raw),
+            Some(ImeiParseResult {
+                kind: "write".to_string(),
+                success: true,
+                imei: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_egmr_read_fail() {
+        // exec_raw_at 失败时会包装成 "ERROR: AT命令返回错误: <raw>"
+        let raw = "ERROR: AT命令返回错误: AT+EGMR=0,7\r\r\nERROR\r\n";
+        assert_eq!(
+            parse_egmr_response(raw),
+            Some(ImeiParseResult {
+                kind: "read".to_string(),
+                success: false,
+                imei: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_egmr_write_fail() {
+        let raw = "ERROR: AT命令返回错误: AT+EGMR=1,7,\"123\"\r\r\nERROR\r\n";
+        assert_eq!(
+            parse_egmr_response(raw),
+            Some(ImeiParseResult {
+                kind: "write".to_string(),
+                success: false,
+                imei: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_egmr_read_fail_plain_error() {
+        // 防御性覆盖：裸 ERROR 响应（不经过 exec_raw_at 包装）
+        let raw = "AT+EGMR=0,7\r\r\nERROR\r\n";
+        assert_eq!(
+            parse_egmr_response(raw),
+            Some(ImeiParseResult {
+                kind: "read".to_string(),
+                success: false,
+                imei: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_egmr_non_egmr_returns_none() {
+        let raw = "AT+CSQ\r\r\n+CSQ: 25,99\r\n\r\nOK\r\n";
+        assert_eq!(parse_egmr_response(raw), None);
+    }
 }

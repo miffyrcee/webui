@@ -988,6 +988,7 @@
             'sim_slot_res': d => handleSimSlotRes(d.data),
             'mbn_list_res': d => handleMbnListRes(d.data),
             'mbn_set_res': d => handleMbnSetRes(d.data),
+            'imei_res': d => handleImeiRes(d.data),
         };
         function getDomElement(id) {
             if (!domElements[id]) {
@@ -1338,6 +1339,20 @@
                 el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">✓ ' + escapeHtml(data.msg || '选择成功') + '，⚠ ' + escapeHtml(data.note || '需重启生效') + '</span>';
             } else {
                 el.innerHTML = '<span class="text-red-500 font-semibold">✗ ' + escapeHtml(data.msg || '选择失败') + '</span>';
+            }
+        }
+
+        function handleImeiRes(data) {
+            const status = getDomElement('imei_status');
+            if (!status) return;
+            if (data.kind === 'read' && data.success) {
+                status.innerHTML = '<span class="text-indigo-600 dark:text-indigo-400 font-semibold">✓ 当前 IMEI: ' + escapeHtml(data.imei || '') + '</span>';
+                updateText('imei_input', data.imei || '');
+                updateText('dev_imei', data.imei || '');
+            } else if (data.success) {
+                status.innerHTML = '<span class="text-indigo-600 dark:text-indigo-400 font-semibold">✓ IMEI 写入成功</span>';
+            } else {
+                status.innerHTML = '<span class="text-red-500 font-semibold">✗ IMEI ' + (data.kind === 'write' ? '写入' : '读取') + '失败</span>';
             }
         }
 
@@ -1904,7 +1919,7 @@
                 imeiReadBtn.addEventListener('click', () => {
                     const status = getDomElement('imei_status');
                     if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在读取 IMEI...</span>';
-                    sendAtCommand('AT+EGMR=0,7');
+                    sendWsCommand('read_imei');
                 });
             }
 
@@ -1919,7 +1934,7 @@
                     if (confirm('确认将模组 IMEI 修改为: ' + imei + ' ?')) {
                         const status = getDomElement('imei_status');
                         if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在写入 IMEI...</span>';
-                        sendAtCommand('AT+EGMR=1,7,"' + imei + '"');
+                        sendWsCommand('write_imei', imei);
                     }
                 });
             }

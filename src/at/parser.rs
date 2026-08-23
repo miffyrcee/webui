@@ -227,10 +227,24 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
     }
     if let Some(values) = fields_after_prefix(trimmed, "+QMBNCFG:") {
         if values.first().map(String::as_str) == Some("List") {
-            // 兼容两种 List 行格式（不同固件字段顺序不同）：
+            // 兼容多种 List 行格式（不同固件字段数量/顺序不同）：
             //   A) +QMBNCFG: "List",<index>,<state>,"<name>"
             //   B) +QMBNCFG: "List",<index>,"<name>",<state>
-            // 判定规则：第 2 个字段为纯数字 → 格式 A（name 在末位）；否则 → 格式 B。
+            //   C) +QMBNCFG: "List",<index>,<state>,<status>,"<name>",<version>,<date>（实测 RM520N）
+            // 判定规则：
+            //   - 字段数≥5 且第 3 字段（state 之后）仍为纯数字 → 格式 C，name 在第 4 字段；
+            //   - 否则第 2 字段为纯数字 → 格式 A（name 在末位）；否则 → 格式 B。
+            if values.len() >= 5
+                && values.get(3).map(|v| v.parse::<u32>().is_ok()).unwrap_or(false)
+            {
+                let name = values.get(4).cloned().unwrap_or_default();
+                if !name.is_empty() {
+                    let index = values.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+                    let state = values.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                    return Some(ParsedLine::Qmbncfg(QmbncfgEntry { index, state, name }));
+                }
+                return None;
+            }
             if values.get(2).map(|v| v.parse::<u32>().is_ok()).unwrap_or(false) {
                 let name = values.get(3).cloned().unwrap_or_default();
                 if !name.is_empty() {
@@ -753,6 +767,40 @@ mod tests {
             matches!(result, Some(ParsedLine::Qmbncfg(ref r))
                 if r.index == 0 && r.state == 1 && r.name == "12345")
         );
+    }
+
+    #[test]
+    fn test_parse_qmbncfg_list_format_c_with_extra_fields() {
+        // 实测 RM520N 固件：+QMBNCFG: "List",<index>,<state>,<status>,"<name>",<version>,<date>
+        let result = parse_single_line("+QMBNCFG: \"List\",0,1,1,\"VoLTE_OPNMKT_CT\",0x0A0113E0,202204211");
+        assert!(
+            matches!(result, Some(ParsedLine::Qmbncfg(ref r))
+                if r.index == 0 && r.state == 1 && r.name == "VoLTE_OPNMKT_CT")
+        );
+    }
+
+    #[test]
+    fn test_parse_qmbncfg_list_format_c_short() {
+        // 格式 C 无版本/日期尾字段
+        let result = parse_single_line("+QMBNCFG: \"List\",3,0,0,\"CZO2_Commercial\"");
+        assert!(
+            matches!(result, Some(ParsedLine::Qmbncfg(ref r))
+                if r.index == 3 && r.state == 0 && r.name == "CZO2_Commercial")
+        );
+    }
+
+    #[test]
+    fn test_parse_qmbncfg_list_format_c_multiple_entries() {
+        // 真实多条混合：非激活项 name 不应再被误读为 state
+        let lines = "+QMBNCFG: \"List\",1,0,0,\"Volte_OpenMkt-Commercial-CMCC\",0x0A012010,202212151\n\
+                     +QMBNCFG: \"List\",2,0,0,\"VoLTE-CU\",0x0A011561,202204211";
+        let mut names = Vec::new();
+        for line in lines.lines() {
+            if let Some(ParsedLine::Qmbncfg(e)) = parse_single_line(line) {
+                names.push(e.name);
+            }
+        }
+        assert_eq!(names, vec!["Volte_OpenMkt-Commercial-CMCC", "VoLTE-CU"]);
     }
 
     // ── 以下测试基于真实设备 2026-07-01 采样数据 ──

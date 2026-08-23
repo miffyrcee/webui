@@ -1010,6 +1010,7 @@
             'network_status': d => handleNetworkStatus(d.data),
             'scan_result': d => handleScanResult(d.data),
             'sms_list': d => typeof d.data === 'string' ? handleAtResponse(d.data) : handleSmsList(d.data),
+            'sms_sent': d => handleSmsSent(d.data),
             'backend_log': d => handleBackendLog(d.data),
             'device_info': d => handleDeviceInfo(d.data),
             'settings_info': d => handleSettingsInfo(d.data),
@@ -1275,13 +1276,34 @@
             }
         }
 
+        // 频段重置挂起标志：点击“恢复全频段”后先不下发假成功，待后端返回成功才清空磁贴
+        let bandResetPending = false;
+
+        function clearActiveBandPillsUi() {
+            const nr5g = document.querySelector('input[name="band_rat"]:checked')?.value === 'nr5g';
+            const grid = getDomElement(nr5g ? 'nr5g_bands_grid' : 'lte_bands_grid');
+            if (grid) {
+                grid.querySelectorAll('.band-pill.active').forEach(btn => {
+                    btn.classList.remove('active', 'bg-indigo-50', 'dark:bg-indigo-950/40', 'border-indigo-400', 'dark:border-indigo-500', 'text-indigo-600', 'dark:text-indigo-400', 'font-bold');
+                    btn.classList.add('bg-slate-50', 'dark:bg-[#161d2b]/60', 'border-slate-100', 'dark:border-slate-800/40', 'text-slate-650', 'dark:text-slate-350');
+                });
+            }
+            const preview = getDomElement('band_lock_preview');
+            if (preview) preview.textContent = 'all (默认出厂全频段)';
+        }
+
         function handleBandLockRes(data) {
             const el = getDomElement('band_lock_status');
             if (!el) return;
             if (data.success) {
                 el.innerHTML = '<span class="text-indigo-600 dark:text-indigo-400 font-semibold">✓ ' + escapeHtml(data.msg || 'OK') + '</span>';
+                if (bandResetPending) {
+                    bandResetPending = false;
+                    clearActiveBandPillsUi();
+                }
             } else {
                 el.innerHTML = '<span class="text-red-500 font-semibold">✗ ' + escapeHtml(data.msg || 'Failed') + '</span>';
+                bandResetPending = false;
             }
         }
 
@@ -1383,7 +1405,9 @@
             const el = getDomElement('mbn_status');
             if (!el) return;
             if (data.success) {
-                el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">✓ ' + escapeHtml(data.msg || '选择成功') + '，⚠ ' + escapeHtml(data.note || '需重启生效') + '</span>';
+                // 仅在后端明确提供 note 时才展示“需重启生效”类提示，避免误导
+                const note = data.note ? ('，⚠ ' + escapeHtml(data.note)) : '';
+                el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">✓ ' + escapeHtml(data.msg || '选择成功') + note + '</span>';
             } else {
                 el.innerHTML = '<span class="text-red-500 font-semibold">✗ ' + escapeHtml(data.msg || '选择失败') + '</span>';
             }
@@ -1433,7 +1457,8 @@
                 autoselOnBtn.addEventListener('click', () => {
                     const el = getDomElement('mbn_status');
                     if (el) el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 启用 MBN AutoSel 自动选择...</span>';
-                    sendAtCommand('AT+QMBNCFG="AutoSel",1');
+                    // 走专用 action，后端执行完以 mbn_set_res 回传真实结果，避免状态卡在加载中
+                    sendWsCommand('mbn_autosel', '1');
                 });
             }
             const autoselOffBtn = getDomElement('mbn_autosel_off');
@@ -1441,7 +1466,7 @@
                 autoselOffBtn.addEventListener('click', () => {
                     const el = getDomElement('mbn_status');
                     if (el) el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 禁用 MBN AutoSel (锁定当前 MBN)...</span>';
-                    sendAtCommand('AT+QMBNCFG="AutoSel",0');
+                    sendWsCommand('mbn_autosel', '0');
                 });
             }
             const deactivateBtn = getDomElement('mbn_deactivate_btn');
@@ -1450,7 +1475,7 @@
                     if (!confirm('确认停用当前 MBN Profile？')) return;
                     const el = getDomElement('mbn_status');
                     if (el) el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在停用当前 MBN...</span>';
-                    sendAtCommand('AT+QMBNCFG="Deactivate"');
+                    sendWsCommand('mbn_deactivate');
                 });
             }
         }
@@ -1638,6 +1663,22 @@
                         </div>`
                     ).join('');
                 }
+            }
+        }
+
+        function handleSmsSent(data) {
+            const status = getDomElement('sms_send_status');
+            const isSuccess = data.status && data.status.includes('successfully');
+            if (isSuccess) {
+                if (status) status.innerHTML = '<span class="text-green-500 font-semibold">✓ 短信已发送至 ' + escapeHtml(data.recipient || '') + '</span>';
+                // 仅在确认发送成功后清空输入框，避免失败时丢失正文
+                const msgInput = getDomElement('sms_message');
+                if (msgInput) msgInput.value = '';
+                const counter = getDomElement('sms_char_count');
+                if (counter) counter.textContent = '0';
+            } else {
+                if (status) status.innerHTML = '<span class="text-red-500 font-semibold">✗ ' + escapeHtml(data.status || '短信发送失败') + '，请检查信号/余额后重试</span>';
+                // 失败时保留输入正文，便于用户直接重试
             }
         }
 
@@ -2072,8 +2113,8 @@
                 const btn = getDomElement(id);
                 if (btn) {
                     btn.addEventListener('click', () => {
+                        // 不在此处写日志：结果由后端 network_status（success/msg）统一反馈
                         sendWsCommand('set_mode_pref', mode);
-                        appendSettingsLog('SA/NSA: ' + mode);
                     });
                 }
             }
@@ -2140,16 +2181,16 @@
             const flightOn = getDomElement('settings_flight_on_btn');
             if (flightOn) {
                 flightOn.addEventListener('click', () => {
+                    // 不在此处写日志：等待后端执行 AT+CFUN 完成后回传 settings_log，避免假成功
                     sendWsCommand('flight_mode', '1');
-                    appendSettingsLog('飞行模式已激活。');
                 });
             }
 
             const flightOff = getDomElement('settings_flight_off_btn');
             if (flightOff) {
                 flightOff.addEventListener('click', () => {
+                    // 不在此处写日志：等待后端执行 AT+CFUN 完成后回传 settings_log，避免假成功
                     sendWsCommand('flight_mode', '0');
-                    appendSettingsLog('飞行模式已退出，重新搜网。');
                 });
             }
 
@@ -2164,15 +2205,6 @@
                 if (!grid) return { nr5g, bands: [] };
                 const selected = grid.querySelectorAll('.band-pill.active');
                 return { nr5g, bands: Array.from(selected).map(btn => btn.dataset.band) };
-            }
-
-            function deactivateAllPills() {
-                const { grid } = getActiveBandGrid();
-                if (!grid) return;
-                grid.querySelectorAll('.band-pill.active').forEach(btn => {
-                    btn.classList.remove('active', 'bg-indigo-50', 'dark:bg-indigo-950/40', 'border-indigo-400', 'dark:border-indigo-500', 'text-indigo-600', 'dark:text-indigo-400', 'font-bold');
-                    btn.classList.add('bg-slate-50', 'dark:bg-[#161d2b]/60', 'border-slate-100', 'dark:border-slate-800/40', 'text-slate-650', 'dark:text-slate-350');
-                });
             }
 
             function setPillActive(btn, active) {
@@ -2225,6 +2257,8 @@
             const bandLockApply = getDomElement('band_lock_apply_btn');
             if (bandLockApply) {
                 bandLockApply.addEventListener('click', () => {
+                    // 应用指定频段不应清空磁贴，取消可能残留的重置挂起标志
+                    bandResetPending = false;
                     const { nr5g, bands } = getSelectedBandNumbers();
                     sendWsCommand('set_band_lock', { nr5g, bands: bands.join(':') });
                     const status = getDomElement('band_lock_status');
@@ -2236,8 +2270,8 @@
             if (bandLockReset) {
                 bandLockReset.addEventListener('click', () => {
                     const { nr5g } = getActiveBandGrid();
-                    deactivateAllPills();
-                    updateSelectedBandsString();
+                    // 先不提前清空磁贴/预览：等后端返回 band_lock_res 成功后由 handleBandLockRes 统一更新
+                    bandResetPending = true;
                     sendWsCommand('set_band_lock', { nr5g, bands: 'all' });
                     const status = getDomElement('band_lock_status');
                     if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在重置全频段...</span>';
@@ -2306,10 +2340,7 @@
                     }
                     sendWsCommand('send_sms', { recipient, message });
                     if (status) status.innerHTML = '<span class="text-[#744df0] font-semibold">正在发送短信...</span>';
-                    const msgInput = getDomElement('sms_message');
-                    if (msgInput) msgInput.value = '';
-                    const counter = getDomElement('sms_char_count');
-                    if (counter) counter.textContent = '0';
+                    // 正文保留在输入框：是否清空由 handleSmsSent 依据真实发送结果决定
                 });
             }
 

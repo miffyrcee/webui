@@ -445,6 +445,10 @@ enum AtAction {
     GetMbnList,
     /// (name) — 选择 MBN 配置（AT+QMBNCFG="Select",...）
     SetMbn(String),
+    /// true=启用 AutoSel, false=禁用（AT+QMBNCFG="AutoSel",x）
+    SetMbnAutoSel(bool),
+    /// 停用当前 MBN（AT+QMBNCFG="Deactivate"）
+    DeactivateMbn,
     /// 读取 IMEI（AT+EGMR=0,7）
     ReadImei,
     /// (imei) — 写入 IMEI（AT+EGMR=1,7,"<imei>"）
@@ -640,9 +644,9 @@ struct DeviceInfoData {
 trait HardwareBackend: Send + Sync {
     async fn exec_raw_at(&self, cmd: &str) -> String;
     async fn read_sms_list(&self) -> String;
-    async fn configure_apn(&self, apn: &str, user: &str, pass: &str, auth_type: u8);
+    async fn configure_apn(&self, apn: &str, user: &str, pass: &str, auth_type: u8) -> Result<String, String>;
     async fn set_network_mode_pref(&self, mode: &str) -> Result<String, String>;
-    async fn set_data_session(&self, connect: bool);
+    async fn set_data_session(&self, connect: bool) -> Result<String, String>;
     async fn scan_available_networks(&self) -> Vec<serde_json::Value>;
     async fn send_sms_msg(&self, recipient: &str, message: &str) -> bool;
     async fn read_device_info(&self) -> DeviceInfoData;
@@ -714,22 +718,23 @@ impl HardwareBackend for RealBackend {
             .unwrap_or_else(|_| "+CMGL: 0 messages\r\nOK\r\n".to_string())
     }
 
-    async fn configure_apn(&self, apn: &str, user: &str, pass: &str, auth_type: u8) {
+    async fn configure_apn(&self, apn: &str, user: &str, pass: &str, auth_type: u8) -> Result<String, String> {
         let apn = sanitize_at_param(apn);
         let user = sanitize_at_param(user);
         let pass = sanitize_at_param(pass);
-        let _ = send_at_command_inner(
+        send_at_command_inner(
             &self.serial_path,
             &format!("AT+CGDCONT=1,\"IPV4V6\",\"{}\"", apn),
         )
-        .await;
+        .await?;
         if !user.is_empty() {
-            let _ = send_at_command_inner(
+            send_at_command_inner(
                 &self.serial_path,
                 &format!("AT+CGAUTH=1,{},\"{}\",\"{}\"", auth_type, user, pass),
             )
-            .await;
+            .await?;
         }
+        Ok(format!("APN {} 设置已应用", apn))
     }
 
     async fn set_network_mode_pref(&self, mode: &str) -> Result<String, String> {
@@ -747,13 +752,14 @@ impl HardwareBackend for RealBackend {
         send_at_command_inner(&self.serial_path, at_mode).await
     }
 
-    async fn set_data_session(&self, connect: bool) {
+    async fn set_data_session(&self, connect: bool) -> Result<String, String> {
         let action_val = if connect { "1" } else { "0" };
-        let _ = send_at_command_inner(
+        send_at_command_inner(
             &self.serial_path,
             &format!("AT+CGACT={},1", action_val),
         )
-        .await;
+        .await?;
+        Ok(if connect { "拨号连接指令已下发" } else { "拨号断开指令已下发" }.to_string())
     }
 
     async fn scan_available_networks(&self) -> Vec<serde_json::Value> {
@@ -1231,8 +1237,9 @@ impl HardwareBackend for MockBackend {
         "+CMGL: 0 messages\r\nOK\r\n".to_string()
     }
 
-    async fn configure_apn(&self, _apn: &str, _user: &str, _pass: &str, _auth_type: u8) {
+    async fn configure_apn(&self, apn: &str, _user: &str, _pass: &str, _auth_type: u8) -> Result<String, String> {
         push_log("MOCK", "APN", &format!("Mock: 配置 APN"));
+        Ok(format!("APN {} 设置已应用 (Mock)", apn))
     }
 
     async fn set_network_mode_pref(&self, mode: &str) -> Result<String, String> {
@@ -1240,8 +1247,9 @@ impl HardwareBackend for MockBackend {
         Ok("OK\r\n".to_string())
     }
 
-    async fn set_data_session(&self, connect: bool) {
+    async fn set_data_session(&self, connect: bool) -> Result<String, String> {
         push_log("MOCK", "Net", &format!("Mock: 数据会话 {}", if connect { "连接" } else { "断开" }));
+        Ok(if connect { "拨号连接指令已下发 (Mock)" } else { "拨号断开指令已下发 (Mock)" }.to_string())
     }
 
     async fn scan_available_networks(&self) -> Vec<serde_json::Value> {
@@ -1897,10 +1905,19 @@ async fn handle_at_request(
         }
         AtAction::SetApn(apn, user, pass, auth_type) => {
             push_log("INFO", "Actor", &format!("配置 APN: {}", apn));
-            backend.configure_apn(&apn, &user, &pass, auth_type).await;
+            let res = backend.configure_apn(&apn, &user, &pass, auth_type).await;
+            let (success, msg) = match res {
+                Ok(m) => (true, m),
+                Err(e) => (false, e),
+            };
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "network_status",
-                "data": { "status": "APN settings applied", "apn": apn }
+                "data": {
+                    "status": if success { "APN settings applied" } else { "APN settings failed" },
+                    "success": success,
+                    "msg": msg,
+                    "apn": apn
+                }
             }));
         }
         AtAction::SetNetworkMode(mode) => {
@@ -1913,10 +1930,18 @@ async fn handle_at_request(
         }
         AtAction::NetConnect(connect) => {
             push_log("INFO", "Actor", &format!("拨号控制: {}", if connect { "连接" } else { "断开" }));
-            backend.set_data_session(connect).await;
+            let res = backend.set_data_session(connect).await;
+            let (success, msg) = match res {
+                Ok(m) => (true, m),
+                Err(e) => (false, e),
+            };
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "network_status",
-                "data": { "status": format!("{} command sent", if connect { "Connect" } else { "Disconnect" }) }
+                "data": {
+                    "status": format!("{} command {}", if connect { "Connect" } else { "Disconnect" }, if success { "sent" } else { "failed" }),
+                    "success": success,
+                    "msg": msg
+                }
             }));
         }
         AtAction::NetworkScan => {
@@ -2121,6 +2146,34 @@ async fn handle_at_request(
                     "success": success,
                     "msg": msg,
                     "note": "选择 MBN 后需重启模组方可生效"
+                }
+            }));
+        }
+        AtAction::SetMbnAutoSel(on) => {
+            push_log("INFO", "Actor", &format!("MBN AutoSel 切换: {}", if on { "启用" } else { "禁用" }));
+            let cmd = format!("AT+QMBNCFG=\"AutoSel\",{}", if on { 1 } else { 0 });
+            let res = backend.exec_raw_at(&cmd).await;
+            let ok = !at_exec_failed(&res);
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "mbn_set_res",
+                "data": {
+                    "success": ok,
+                    "msg": if ok {
+                        (if on { "MBN AutoSel 已启用" } else { "MBN AutoSel 已禁用（锁定当前 MBN）" }).to_string()
+                    } else { at_response_preview(&res).to_string() }
+                }
+            }));
+        }
+        AtAction::DeactivateMbn => {
+            push_log("INFO", "Actor", "停用当前 MBN");
+            let res = backend.exec_raw_at("AT+QMBNCFG=\"Deactivate\"").await;
+            let ok = !at_exec_failed(&res);
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "mbn_set_res",
+                "data": {
+                    "success": ok,
+                    "msg": if ok { "当前 MBN 已停用".to_string() } else { at_response_preview(&res).to_string() },
+                    "note": if ok { "需重启模组方可生效" } else { "" }
                 }
             }));
         }
@@ -2813,6 +2866,11 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                                 .to_string();
                             AtAction::SetMbn(name)
                         }
+                        "mbn_autosel" => {
+                            let on = cmd.payload.as_ref().and_then(|p| p.as_str()).unwrap_or("0") == "1";
+                            AtAction::SetMbnAutoSel(on)
+                        }
+                        "mbn_deactivate" => AtAction::DeactivateMbn,
                         "set_eth_config" => {
                             let payload = cmd.payload.as_ref();
                             let driver = payload.and_then(|p| p.get("driver"))

@@ -214,6 +214,11 @@
                                 <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">活跃卡槽 Slot</span>
                                     <span id="info_sim" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
+                                    <div class="flex items-center gap-2 mt-2">
+                                        <button data-slot="1" class="sim-slot-btn flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold px-2 py-1 text-[11px] rounded transition-all active:scale-95 cursor-pointer">SIM 1</button>
+                                        <button data-slot="2" class="sim-slot-btn flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold px-2 py-1 text-[11px] rounded transition-all active:scale-95 cursor-pointer">SIM 2</button>
+                                    </div>
+                                    <div id="sim_slot_status" class="text-[10px] text-slate-400 dark:text-slate-500 mt-1 min-h-[14px]"></div>
                                 </div>
                                 <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">运营商 Provider</span>
@@ -912,6 +917,7 @@
             'settings_log': d => { if (d.data && d.data.msg) appendSettingsLog(d.data.msg); },
             'usb_config_info': d => handleUsbConfigInfo(d.data),
             'usb_net_res': d => handleUsbNetRes(d.data),
+            'sim_slot_res': d => handleSimSlotRes(d.data),
         };
         function getDomElement(id) {
             if (!domElements[id]) {
@@ -1077,6 +1083,7 @@
 
             updateText("dev_firmware", data.firmware_version);
             updateText("dev_sim_status", data.active_sim);
+            updateSimSlotHighlight();
         }
 
         function decodeUcs2Hex(hex) {
@@ -1183,6 +1190,52 @@
                 el.textContent = 'ERROR: ' + (data.msg || 'Unknown error');
                 el.className = 'p-3 bg-slate-50 dark:bg-slate-900/30 rounded border border-slate-200/50 dark:border-brandBorder/20 text-xs font-mono text-red-500 max-h-[250px] overflow-y-auto whitespace-pre-wrap';
             }
+        }
+
+        function updateSimSlotHighlight() {
+            const cur = (getDomElement('info_sim')?.textContent || '').trim();
+            document.querySelectorAll('.sim-slot-btn').forEach(btn => {
+                const active = cur.includes(btn.dataset.slot);
+                btn.classList.toggle('bg-indigo-50', active);
+                btn.classList.toggle('dark:bg-indigo-950/30', active);
+                btn.classList.toggle('border-indigo-400', active);
+                btn.classList.toggle('dark:border-indigo-500', active);
+                btn.classList.toggle('text-indigo-700', active);
+                btn.classList.toggle('dark:text-indigo-300', active);
+                btn.classList.toggle('font-bold', active);
+                btn.classList.toggle('bg-slate-100', !active);
+                btn.classList.toggle('dark:bg-slate-800/80', !active);
+                btn.classList.toggle('border-slate-200', !active);
+                btn.classList.toggle('dark:border-slate-700', !active);
+                btn.classList.toggle('text-slate-600', !active);
+                btn.classList.toggle('dark:text-slate-300', !active);
+            });
+        }
+
+        function handleSimSlotRes(data) {
+            const el = getDomElement('sim_slot_status');
+            if (!el) return;
+            if (data.success) {
+                updateText('info_sim', 'SIM ' + data.slot);
+                updateText('dev_sim_status', 'SIM ' + data.slot);
+                updateSimSlotHighlight();
+                el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ ' + escapeHtml(data.note || '切换成功') + '</span>';
+            } else {
+                el.innerHTML = '<span class="text-red-500 font-semibold">✗ ' + escapeHtml(data.msg || '切换失败') + '</span>';
+            }
+        }
+
+        function initSimSlotPanel() {
+            document.querySelectorAll('.sim-slot-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const slot = parseInt(btn.dataset.slot, 10);
+                    if (isNaN(slot)) return;
+                    sendWsCommand('set_sim_slot', { slot });
+                    const el = getDomElement('sim_slot_status');
+                    if (el) el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在切换到 SIM ' + slot + '...</span>';
+                });
+            });
+            updateSimSlotHighlight();
         }
 
         /* ======== USB Handler Functions ======== */
@@ -2118,6 +2171,7 @@
         initSmsPanel();
         initUsbPanel();
         initDevicePanel();
+        initSimSlotPanel();
         initCopyOnClick();
         initCopyToastDismiss();
 

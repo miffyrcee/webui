@@ -213,8 +213,7 @@
                             <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm">
                                 <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">活跃卡槽 Slot</span>
-                                    <span id="info_sim" class="text-slate-800 dark:text-slate-200 font-semibold mt-1">--</span>
-                                    <div class="flex items-center gap-2 mt-2">
+                                    <div class="flex items-center gap-2 mt-1">
                                         <button data-slot="1" class="sim-slot-btn flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold px-2 py-1 text-[11px] rounded transition-all active:scale-95 cursor-pointer">SIM 1</button>
                                         <button data-slot="2" class="sim-slot-btn flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold px-2 py-1 text-[11px] rounded transition-all active:scale-95 cursor-pointer">SIM 2</button>
                                     </div>
@@ -908,6 +907,7 @@
         const WS_RECONNECT_MAX = 60000;    // 重连最大间隔 (ms)
         let wsReconnectAttempt = 0;          // 当前重连尝试次数
         let wsReconnectTimer = null;         // 重连定时器句柄
+        let activeSimSlot = '--';            // 当前活跃 SIM 卡槽状态
 
         // WebSocket 消息分发映射表
         const WS_HANDLERS = {
@@ -1087,13 +1087,12 @@
 
         function handleStaticInfo(data) {
             updateText("firmware_ver", data.firmware_version);
-            updateText("info_sim", data.active_sim);
+            setActiveSimSlot(data.active_sim);
             updateText("info_provider", data.network_provider);
             updateText("info_apn", data.apn);
 
             updateText("dev_firmware", data.firmware_version);
             updateText("dev_sim_status", data.active_sim);
-            updateSimSlotHighlight();
         }
 
         function decodeUcs2Hex(hex) {
@@ -1206,8 +1205,13 @@
             }
         }
 
+        function setActiveSimSlot(value) {
+            activeSimSlot = (value === null || value === undefined) ? '--' : String(value);
+            updateSimSlotHighlight();
+        }
+
         function updateSimSlotHighlight() {
-            const cur = (getDomElement('info_sim')?.textContent || '').trim();
+            const cur = (activeSimSlot || '').trim();
             document.querySelectorAll('.sim-slot-btn').forEach(btn => {
                 const active = cur.includes(btn.dataset.slot);
                 btn.classList.toggle('bg-indigo-50', active);
@@ -1230,9 +1234,8 @@
             const el = getDomElement('sim_slot_status');
             if (!el) return;
             if (data.success) {
-                updateText('info_sim', 'SIM ' + data.slot);
+                setActiveSimSlot('SIM ' + data.slot);
                 updateText('dev_sim_status', 'SIM ' + data.slot);
-                updateSimSlotHighlight();
                 el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ ' + escapeHtml(data.note || '切换成功') + '</span>';
             } else {
                 el.innerHTML = '<span class="text-red-500 font-semibold">✗ ' + escapeHtml(data.msg || '切换失败') + '</span>';
@@ -1563,7 +1566,7 @@
             updateUsageBar("cpu_bar", p.cpu_usage);
             updateUsageBar("mem_bar", p.memory_usage);
 
-            updateText("info_sim", p.active_sim);
+            setActiveSimSlot(p.active_sim);
             updateText("info_provider", p.network_provider);
             updateText("info_mccmnc", p.mccmnc);
             updateText("info_apn", p.apn);
@@ -1651,7 +1654,7 @@
 
         function initCopyOnClick() {
             const copyableIds = [
-                'info_sim', 'info_provider', 'info_mccmnc', 'info_apn',
+                'info_provider', 'info_mccmnc', 'info_apn',
                 'info_mode', 'info_bands', 'info_bandwidth', 'info_earfcn',
                 'info_pci', 'info_ipv4', 'info_ipv6', 'info_uptime',
                 'sig_assessment', 'sig_traffic', 'sig_cell_id', 'sig_enb', 'sig_tac',

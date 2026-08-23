@@ -1,0 +1,6 @@
+- [默认编译目标](project_build_target.md) — quectel-webui 使用 armv7-unknown-linux-musleabihf 交叉编译
+- [Windows 适配规则](windows_rules.md)
+- [SMD 设备不支持 O_NONBLOCK](smd_nonblock.md) — Qualcomm SMD 字符设备不兼容 POSIX 非阻塞 I/O，需用专用线程/spawn_blocking 方案
+- [AT 命令队列](at_command_queue.md) — 队列去重合并相同请求，用户任务优先于轮询
+- [忽略 templates 目录](ignore_templates.md) — 不关注 templates/ 下的任何内容
+- [纯 Rust 交叉编译约束](cross_compile_pure_rust.md) — armv7-musl 所有依赖必须纯 Rust，避免 ring/openssl

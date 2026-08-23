@@ -628,6 +628,14 @@
                                 <button id="diag_mbn_list_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">MBN 分配</button>
                                 <button id="diag_autosel_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">AutoSel MBN</button>
                             </div>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <select id="mbn_select" class="flex-1 min-w-[140px] bg-white dark:bg-[#111622] border border-slate-200 dark:border-slate-700 text-xs rounded px-2 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500">
+                                    <option value="">请先刷新 MBN 列表</option>
+                                </select>
+                                <button id="mbn_refresh_btn" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">刷新列表</button>
+                                <button id="mbn_apply_btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">应用所选 MBN</button>
+                            </div>
+                            <div id="mbn_status" class="text-[11px] text-slate-400 dark:text-slate-500 min-h-[16px]"></div>
                             <pre id="diag_output" class="p-3 bg-slate-50 dark:bg-slate-900/30 rounded border border-slate-200/50 dark:border-slate-850/40 text-xs font-mono text-indigo-600 dark:text-indigo-400 max-h-[250px] overflow-y-auto whitespace-pre-wrap">点击按钮查询并触发高级诊断交互。</pre>
                         </div>
                     </div>
@@ -918,6 +926,8 @@
             'usb_config_info': d => handleUsbConfigInfo(d.data),
             'usb_net_res': d => handleUsbNetRes(d.data),
             'sim_slot_res': d => handleSimSlotRes(d.data),
+            'mbn_list_res': d => handleMbnListRes(d.data),
+            'mbn_set_res': d => handleMbnSetRes(d.data),
         };
         function getDomElement(id) {
             if (!domElements[id]) {
@@ -1236,6 +1246,56 @@
                 });
             });
             updateSimSlotHighlight();
+        }
+
+        function handleMbnListRes(data) {
+            const el = getDomElement('mbn_status');
+            const select = getDomElement('mbn_select');
+            if (!select) return;
+            if (data.success && Array.isArray(data.list)) {
+                select.innerHTML = '<option value="">请选择 MBN</option>' + data.list.map(item => {
+                    const cur = item.state === 1 ? '（当前）' : '';
+                    return '<option value="' + escapeHtml(String(item.name)) + '">' + escapeHtml(String(item.name)) + ' ' + cur + '</option>';
+                }).join('');
+                if (el) el.innerHTML = '<span class="text-green-500 font-semibold">✓ 已加载 ' + data.list.length + ' 个 MBN</span>';
+            } else {
+                if (el) el.innerHTML = '<span class="text-red-500 font-semibold">✗ ' + escapeHtml(data.msg || '列表加载失败') + '</span>';
+            }
+        }
+
+        function handleMbnSetRes(data) {
+            const el = getDomElement('mbn_status');
+            if (!el) return;
+            if (data.success) {
+                el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">✓ ' + escapeHtml(data.msg || '选择成功') + '，⚠ ' + escapeHtml(data.note || '需重启生效') + '</span>';
+            } else {
+                el.innerHTML = '<span class="text-red-500 font-semibold">✗ ' + escapeHtml(data.msg || '选择失败') + '</span>';
+            }
+        }
+
+        function initMbnPanel() {
+            const refreshBtn = getDomElement('mbn_refresh_btn');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', () => {
+                    const el = getDomElement('mbn_status');
+                    if (el) el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在查询 MBN 列表...</span>';
+                    sendWsCommand('get_mbn_list');
+                });
+            }
+            const applyBtn = getDomElement('mbn_apply_btn');
+            if (applyBtn) {
+                applyBtn.addEventListener('click', () => {
+                    const name = getDomElement('mbn_select')?.value || '';
+                    if (!name) {
+                        const el = getDomElement('mbn_status');
+                        if (el) el.innerHTML = '<span class="text-red-500 font-semibold">请先刷新并选择一个 MBN</span>';
+                        return;
+                    }
+                    sendWsCommand('set_mbn', { name });
+                    const el = getDomElement('mbn_status');
+                    if (el) el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在应用 MBN...</span>';
+                });
+            }
         }
 
         /* ======== USB Handler Functions ======== */
@@ -2172,6 +2232,7 @@
         initUsbPanel();
         initDevicePanel();
         initSimSlotPanel();
+        initMbnPanel();
         initCopyOnClick();
         initCopyToastDismiss();
 

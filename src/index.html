@@ -1023,6 +1023,8 @@
             'mbn_list_res': d => handleMbnListRes(d.data),
             'mbn_set_res': d => handleMbnSetRes(d.data),
             'imei_res': d => handleImeiRes(d.data),
+            'eth_res': d => handleEthRes(d.data),
+            'ippt_res': d => handleIpptRes(d.data),
         };
         function getDomElement(id) {
             if (!domElements[id]) {
@@ -1499,8 +1501,10 @@
             if (!el) return;
             if (data.success) {
                 el.innerHTML = '<span class="text-indigo-600 dark:text-indigo-400 font-semibold">✓ ' + escapeHtml(data.msg || 'OK') + '</span>';
-                // 刷新配置摘要
-                setTimeout(() => sendWsCommand('get_usb_config'), 1500);
+                // 配置摘要由后端在设置成功后回读并随响应推送，无需前端定时轮询
+                if (data.config) {
+                    handleUsbConfigInfo({ success: true, config: data.config });
+                }
             } else {
                 el.innerHTML = '<span class="text-red-500 font-semibold">✗ ' + escapeHtml(data.msg || 'Failed') + '</span>';
             }
@@ -1511,6 +1515,26 @@
             if (applyBtn) {
                 applyBtn.disabled = false;
                 applyBtn.textContent = '应用 USB 模式并提示重启';
+            }
+        }
+
+        function handleEthRes(data) {
+            const status = getDomElement('eth_status');
+            if (!status) return;
+            if (data.success) {
+                status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ ' + escapeHtml(data.msg || 'OK') + '</span>';
+            } else {
+                status.innerHTML = '<span class="text-red-500 font-semibold">✗ ' + escapeHtml(data.msg || '配置失败') + '</span>';
+            }
+        }
+
+        function handleIpptRes(data) {
+            const status = getDomElement('eth_ippt_status');
+            if (!status) return;
+            if (data.success) {
+                status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ ' + escapeHtml(data.msg || 'OK') + '</span>';
+            } else {
+                status.innerHTML = '<span class="text-red-500 font-semibold">✗ ' + escapeHtml(data.msg || '配置失败') + '</span>';
             }
         }
 
@@ -1936,21 +1960,10 @@
                     const driver = getDomElement('eth_driver_select')?.value || 'r8125';
                     const pcie_rc = getDomElement('eth_pcie_select')?.value === '1';
 
-                    // 1. 加载网卡 PHY 驱动
-                    sendAtCommand('AT+QETH="eth_driver","' + driver + '",1');
-
-                    // 2. 配置 PCIe 与数据总线通道
-                    if (pcie_rc) {
-                        sendAtCommand('AT+QCFG="pcie/mode",1');           // PCIe RC 主机模式
-                        sendAtCommand('AT+QCFG="data_interface",1,0');    // PCIe 数据通道
-                    } else {
-                        sendAtCommand('AT+QCFG="pcie/mode",0');           // PCIe EP 从机模式
-                    }
-
                     const status = getDomElement('eth_status');
-                    if (status) {
-                        status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ 网口配置已下发！请点击控制台「热重启 (CFUN=1,1)」或断电重启使网卡生效。</span>';
-                    }
+                    if (status) status.innerHTML = '<span class="text-indigo-600 dark:text-indigo-400 font-semibold">⏳ 正在下发网口配置...</span>';
+
+                    sendWsCommand('set_eth_config', { driver: driver, pcie_rc: pcie_rc });
                 });
             }
 
@@ -1960,24 +1973,10 @@
                 ipptApplyBtn.addEventListener('click', () => {
                     const mode = getDomElement('eth_ippt_select')?.value || 'dmz';
 
-                    // 1. 网口自动拨号使能
-                    sendAtCommand('AT+QMAPWAC=1');
-
-                    // 2. 下发工作模式
-                    if (mode === 'dmz') {
-                        // 【DMZ 准直通】：锁定单一 IP 且 1:1 映射全端口，消除双重 NAT，同时可随时访问 192.168.225.1 后台
-                        sendAtCommand('AT+QMAP="LANIP",192.168.225.2,192.168.225.2,192.168.225.1,1');
-                        sendAtCommand('AT+QMAP="DMZ",1,4,192.168.225.2');
-                    } else {
-                        // 【标准 NAT 模式】：恢复正常 DHCP 地址池 (192.168.225.20~100) 并关闭 DMZ
-                        sendAtCommand('AT+QMAP="LANIP",192.168.225.20,192.168.225.100,192.168.225.1,1');
-                        sendAtCommand('AT+QMAP="DMZ",0');
-                    }
-
                     const status = getDomElement('eth_ippt_status');
-                    if (status) {
-                        status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ 直通配置已下发！请点击控制台「热重启 (CFUN=1,1)」或断电重启使配置生效。</span>';
-                    }
+                    if (status) status.innerHTML = '<span class="text-indigo-600 dark:text-indigo-400 font-semibold">⏳ 正在下发直通配置...</span>';
+
+                    sendWsCommand('set_ippt_config', { mode: mode });
                 });
             }
 

@@ -449,6 +449,10 @@ enum AtAction {
     ReadImei,
     /// (imei) — 写入 IMEI（AT+EGMR=1,7,"<imei>"）
     WriteImei(String),
+    /// (driver, pcie_rc) — M.2 网口配置：加载网卡驱动 + 配置 PCIe/数据通道，原子执行
+    SetEthConfig { driver: String, pcie_rc: bool },
+    /// (mode) — IP Passthrough 配置：dmz 准直通 / nat 标准路由，原子执行
+    SetIpptConfig { mode: String },
 }
 
 struct AtRequest {
@@ -1497,6 +1501,13 @@ fn at_response_has_error(raw: &str) -> bool {
     raw.lines().any(|line| matches!(at::parser::parse_single_line(line), Some(ParsedLine::Error)))
 }
 
+/// 判断 `exec_raw_at` 的返回值是否表示命令执行失败。
+/// `exec_raw_at` 成功时返回原始 AT 响应（不会以 ERROR 开头）；
+/// 失败时统一包装为 `ERROR: ...` 前缀。再叠加原始响应中的 ERROR 行兜底检测。
+fn at_exec_failed(raw: &str) -> bool {
+    raw.trim_start().starts_with("ERROR") || at_response_has_error(raw)
+}
+
 fn at_response_preview(raw: &str) -> &str {
     raw.lines()
         .find(|line| {
@@ -2022,12 +2033,27 @@ async fn handle_at_request(
         AtAction::SetUsbNetMode(mode) => {
             push_log("INFO", "Actor", &format!("设置 USB 网络模式为: {}", mode));
             let res = backend.set_usb_net_mode(mode).await;
+
+            // 设置成功后主动回读当前配置，随响应一并推送，替代前端固定延时轮询
+            let config = if res.is_ok() {
+                match backend.get_usb_config().await {
+                    Ok(c) => Some(c),
+                    Err(e) => {
+                        push_log("WARN", "Actor", &format!("设置 USB 模式后回读配置失败: {}", e));
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "usb_net_res",
                 "data": {
                     "success": res.is_ok(),
                     "msg": res.unwrap_or_else(|e| e),
-                    "note": "注意：USB 模式修改后通常需要重启模组方可生效！"
+                    "note": "注意：USB 模式修改后通常需要重启模组方可生效！",
+                    "config": config
                 }
             }));
         }
@@ -2114,6 +2140,94 @@ async fn handle_at_request(
                 kind: "write".to_string(), success: false, imei: None,
             });
             let _ = req.resp_tx.send(serde_json::json!({ "type": "imei_res", "data": parsed }));
+        }
+        AtAction::SetEthConfig { driver, pcie_rc } => {
+            push_log("INFO", "Actor", &format!("开始原子配置网口: driver={}, pcie_rc={}", driver, pcie_rc));
+
+            // 步骤 1: 加载网卡 PHY 驱动
+            let r1 = backend.exec_raw_at(&format!("AT+QETH=\"eth_driver\",\"{}\",1", driver)).await;
+            if at_exec_failed(&r1) {
+                let _ = req.resp_tx.send(serde_json::json!({
+                    "type": "eth_res",
+                    "data": { "success": false, "msg": format!("加载网卡驱动失败: {}", r1.trim()) }
+                }));
+                return;
+            }
+
+            // 步骤 2: 配置 PCIe 总线模式
+            let r2 = backend.exec_raw_at(&format!("AT+QCFG=\"pcie/mode\",{}", if pcie_rc { 1 } else { 0 })).await;
+            if at_exec_failed(&r2) {
+                let _ = req.resp_tx.send(serde_json::json!({
+                    "type": "eth_res",
+                    "data": { "success": false, "msg": format!("设置 PCIe 模式失败: {}", r2.trim()) }
+                }));
+                return;
+            }
+
+            // 步骤 3: PCIe RC 主机模式时启用数据通道
+            if pcie_rc {
+                let r3 = backend.exec_raw_at("AT+QCFG=\"data_interface\",1,0").await;
+                if at_exec_failed(&r3) {
+                    let _ = req.resp_tx.send(serde_json::json!({
+                        "type": "eth_res",
+                        "data": { "success": false, "msg": format!("设置数据通道失败: {}", r3.trim()) }
+                    }));
+                    return;
+                }
+            }
+
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "eth_res",
+                "data": { "success": true, "msg": "网口配置全部下发成功，请热重启 (CFUN=1,1) 或断电重启使网卡生效" }
+            }));
+        }
+        AtAction::SetIpptConfig { mode } => {
+            push_log("INFO", "Actor", &format!("开始原子配置 IP 直通: mode={}", mode));
+
+            // 步骤 1: 开启网口自动拨号
+            let r1 = backend.exec_raw_at("AT+QMAPWAC=1").await;
+            if at_exec_failed(&r1) {
+                let _ = req.resp_tx.send(serde_json::json!({
+                    "type": "ippt_res",
+                    "data": { "success": false, "msg": format!("开启自动拨号失败: {}", r1.trim()) }
+                }));
+                return;
+            }
+
+            // 步骤 2: 下发 LANIP 地址池
+            let lanip = if mode == "dmz" {
+                "AT+QMAP=\"LANIP\",192.168.225.2,192.168.225.2,192.168.225.1,1"
+            } else {
+                "AT+QMAP=\"LANIP\",192.168.225.20,192.168.225.100,192.168.225.1,1"
+            };
+            let r2 = backend.exec_raw_at(lanip).await;
+            if at_exec_failed(&r2) {
+                let _ = req.resp_tx.send(serde_json::json!({
+                    "type": "ippt_res",
+                    "data": { "success": false, "msg": format!("设置 LANIP 失败: {}", r2.trim()) }
+                }));
+                return;
+            }
+
+            // 步骤 3: 下发 DMZ 映射 / 关闭 DMZ
+            let dmz = if mode == "dmz" {
+                "AT+QMAP=\"DMZ\",1,4,192.168.225.2"
+            } else {
+                "AT+QMAP=\"DMZ\",0"
+            };
+            let r3 = backend.exec_raw_at(dmz).await;
+            if at_exec_failed(&r3) {
+                let _ = req.resp_tx.send(serde_json::json!({
+                    "type": "ippt_res",
+                    "data": { "success": false, "msg": format!("设置 DMZ 失败: {}", r3.trim()) }
+                }));
+                return;
+            }
+
+            let _ = req.resp_tx.send(serde_json::json!({
+                "type": "ippt_res",
+                "data": { "success": true, "msg": "直通配置全部下发成功，请热重启 (CFUN=1,1) 或断电重启使配置生效" }
+            }));
         }
     }
 }
@@ -2698,6 +2812,25 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                                 .unwrap_or("")
                                 .to_string();
                             AtAction::SetMbn(name)
+                        }
+                        "set_eth_config" => {
+                            let payload = cmd.payload.as_ref();
+                            let driver = payload.and_then(|p| p.get("driver"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("r8125")
+                                .to_string();
+                            let pcie_rc = payload.and_then(|p| p.get("pcie_rc"))
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(true);
+                            AtAction::SetEthConfig { driver, pcie_rc }
+                        }
+                        "set_ippt_config" => {
+                            let mode = cmd.payload.as_ref()
+                                .and_then(|p| p.get("mode"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("dmz")
+                                .to_string();
+                            AtAction::SetIpptConfig { mode }
                         }
                         unknown_action => {
                             push_log("WARN", "WS", &format!("未知 WebSocket 动作: {:?}", unknown_action));

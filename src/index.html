@@ -480,14 +480,14 @@
                     </div>
                 </div>
 
-                <!-- M.2 转网口 & IP Passthrough (IP 直通) 控制卡 -->
+                <!-- M.2 转网口 控制卡 -->
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div class="lg:col-span-2 bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm space-y-4">
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm space-y-4">
                         <div class="border-b border-slate-100 dark:border-slate-800/60 pb-3 flex justify-between items-center">
-                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">M.2 转网口 &amp; IP Passthrough (IP 直通)</h2>
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">M.2 转网口</h2>
                             <span class="text-[10px] text-amber-500 font-semibold">修改后需热重启生效</span>
                         </div>
-                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                        <div class="grid grid-cols-1 gap-3 text-xs">
                             <div class="flex flex-col gap-1">
                                 <label class="text-slate-400 dark:text-slate-500 font-medium">网卡驱动 (Eth Driver)</label>
                                 <select id="eth_driver_select" class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer">
@@ -503,6 +503,20 @@
                                     <option value="0">EP 模式 (从机直通工控机)</option>
                                 </select>
                             </div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button id="eth_apply_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">应用网口配置</button>
+                        </div>
+                        <div id="eth_status" class="text-xs font-mono text-slate-400 dark:text-slate-500 min-h-[16px]"></div>
+                    </div>
+
+                    <!-- IP Passthrough (IP 直通) 控制卡 -->
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm space-y-4">
+                        <div class="border-b border-slate-100 dark:border-slate-800/60 pb-3 flex justify-between items-center">
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">IP Passthrough (IP 直通)</h2>
+                            <span class="text-[10px] text-amber-500 font-semibold">修改后需热重启生效</span>
+                        </div>
+                        <div class="flex flex-col gap-3 text-xs">
                             <div class="flex flex-col gap-1">
                                 <label class="text-slate-400 dark:text-slate-500 font-medium">网口直通 / 路由模式</label>
                                 <select id="eth_ippt_select" class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer">
@@ -512,9 +526,9 @@
                             </div>
                         </div>
                         <div class="flex gap-2">
-                            <button id="eth_apply_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">一键应用网口与直通配置</button>
+                            <button id="eth_ippt_apply_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">应用直通配置</button>
                         </div>
-                        <div id="eth_status" class="text-xs font-mono text-slate-400 dark:text-slate-500 min-h-[16px]"></div>
+                        <div id="eth_ippt_status" class="text-xs font-mono text-slate-400 dark:text-slate-500 min-h-[16px]"></div>
                     </div>
 
                     <!-- IMEI 硬件识别码读取与修复 (AT+EGMR) -->
@@ -1915,13 +1929,12 @@
         }
 
         function initEthImeiPanel() {
-            // M.2 转网口配置 (精简稳定版：DMZ 准直通 + 标准 NAT)
+            // M.2 转网口配置 (网卡驱动 + PCIe 总线)
             const ethApplyBtn = getDomElement('eth_apply_btn');
             if (ethApplyBtn) {
                 ethApplyBtn.addEventListener('click', () => {
                     const driver = getDomElement('eth_driver_select')?.value || 'r8125';
                     const pcie_rc = getDomElement('eth_pcie_select')?.value === '1';
-                    const mode = getDomElement('eth_ippt_select')?.value || 'dmz';
 
                     // 1. 加载网卡 PHY 驱动
                     sendAtCommand('AT+QETH="eth_driver","' + driver + '",1');
@@ -1934,11 +1947,23 @@
                         sendAtCommand('AT+QCFG="pcie/mode",0');           // PCIe EP 从机模式
                     }
 
-                    // 3. 始终确保清除容易产生死锁的 QMAP MPDN 真直通桥接
-                    sendAtCommand('AT+QMAP="MPDN_rule",0');
+                    const status = getDomElement('eth_status');
+                    if (status) {
+                        status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ 网口配置已下发！请点击控制台「热重启 (CFUN=1,1)」或断电重启使网卡生效。</span>';
+                    }
+                });
+            }
+
+            // IP Passthrough (IP 直通) 配置 (DMZ 准直通 + 标准 NAT)
+            const ipptApplyBtn = getDomElement('eth_ippt_apply_btn');
+            if (ipptApplyBtn) {
+                ipptApplyBtn.addEventListener('click', () => {
+                    const mode = getDomElement('eth_ippt_select')?.value || 'dmz';
+
+                    // 1. 网口自动拨号使能
                     sendAtCommand('AT+QMAPWAC=1');
 
-                    // 4. 下发工作模式
+                    // 2. 下发工作模式
                     if (mode === 'dmz') {
                         // 【DMZ 准直通】：锁定单一 IP 且 1:1 映射全端口，消除双重 NAT，同时可随时访问 192.168.225.1 后台
                         sendAtCommand('AT+QMAP="LANIP",192.168.225.2,192.168.225.2,192.168.225.1,1');
@@ -1949,9 +1974,9 @@
                         sendAtCommand('AT+QMAP="DMZ",0');
                     }
 
-                    const status = getDomElement('eth_status');
+                    const status = getDomElement('eth_ippt_status');
                     if (status) {
-                        status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ 指令已下发！请点击控制台「热重启 (CFUN=1,1)」或断电重启使网卡生效。</span>';
+                        status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ 直通配置已下发！请点击控制台「热重启 (CFUN=1,1)」或断电重启使配置生效。</span>';
                     }
                 });
             }

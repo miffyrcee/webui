@@ -466,6 +466,58 @@
                     </div>
                 </div>
 
+                <!-- M.2 转网口 & IP Passthrough (IP 直通) 控制卡 -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="lg:col-span-2 bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm space-y-4">
+                        <div class="border-b border-slate-100 dark:border-slate-800/60 pb-3 flex justify-between items-center">
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">M.2 转网口 &amp; IP Passthrough (IP 直通)</h2>
+                            <span class="text-[10px] text-amber-500 font-semibold">修改后需热重启生效</span>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                            <div class="flex flex-col gap-1">
+                                <label class="text-slate-400 dark:text-slate-500 font-medium">网卡驱动 (Eth Driver)</label>
+                                <select id="eth_driver_select" class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                    <option value="r8125" selected>Realtek RTL8125 (2.5G 推荐)</option>
+                                    <option value="r8168">Realtek RTL8168/8111 (千兆)</option>
+                                    <option value="aqc107">Aquantia AQC107 (万兆)</option>
+                                </select>
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="text-slate-400 dark:text-slate-500 font-medium">PCIe 总线模式</label>
+                                <select id="eth_pcie_select" class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                    <option value="1" selected>RC 模式 (主机驱动外接网卡)</option>
+                                    <option value="0">EP 模式 (从机直通工控机)</option>
+                                </select>
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="text-slate-400 dark:text-slate-500 font-medium">IP Passthrough (直通桥接)</label>
+                                <select id="eth_ippt_select" class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                    <option value="0" selected>NAT 路由模式 (模组分配内网IP)</option>
+                                    <option value="1">IP Passthrough 启用 (直通运营商公网IP)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button id="eth_apply_btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">一键应用网口与直通配置</button>
+                        </div>
+                        <div id="eth_status" class="text-xs font-mono text-slate-400 dark:text-slate-500 min-h-[16px]"></div>
+                    </div>
+
+                    <!-- IMEI 硬件识别码读取与修复 (AT+EGMR) -->
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm space-y-3">
+                        <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">IMEI 硬件识别码读取与修复 (AT+EGMR)</h2>
+                        <div class="flex flex-col gap-2">
+                            <input id="imei_input" type="text" maxlength="15" placeholder="输入 15 位新 IMEI 串号"
+                                class="w-full bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-700 rounded px-3 py-1.5 text-xs font-mono text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                            <div class="flex gap-2">
+                                <button id="imei_read_btn" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">读取当前</button>
+                                <button id="imei_write_btn" class="flex-1 bg-amber-600 hover:bg-amber-500 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">写入修复</button>
+                            </div>
+                        </div>
+                        <div id="imei_status" class="text-xs font-mono text-slate-400 dark:text-slate-500 min-h-[16px]"></div>
+                    </div>
+                </div>
+
                 <!-- 第二行：高级锁频与锁物理小区 (2列并排) -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
@@ -623,6 +675,11 @@
                                 <button id="diag_mbn_list_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">MBN 分配</button>
                                 <button id="diag_autosel_btn" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">AutoSel MBN</button>
                             </div>
+                            <div class="flex flex-wrap gap-2">
+                                <button id="mbn_autosel_on" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">启用 AutoSel (自动)</button>
+                                <button id="mbn_autosel_off" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">禁用 AutoSel (锁定)</button>
+                                <button id="mbn_deactivate_btn" class="flex-1 min-w-[100px] bg-amber-600 hover:bg-amber-500 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">停用当前 MBN</button>
+                            </div>
                             <div class="flex flex-wrap items-center gap-2">
                                 <select id="mbn_select" class="flex-1 min-w-[140px] bg-white dark:bg-[#111622] border border-slate-200 dark:border-slate-700 text-xs rounded px-2 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500">
                                     <option value="">请先刷新 MBN 列表</option>
@@ -682,6 +739,14 @@
                         <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+CGPADDR</button>
                         <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+QENG</button>
                         <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer">AT+CGDCONT?</button>
+                        <span class="text-slate-400 dark:text-slate-500 self-center mr-1">排错指令板:</span>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer" data-cmd="AT+CFUN=1,1">热重启 (CFUN=1,1)</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer" data-cmd="AT+CFUN=0">关射频 (CFUN=0)</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer" data-cmd="AT+CFUN=1">开射频 (CFUN=1)</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer" data-cmd="AT+QSIMSTAT?">SIM 在位检测</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer" data-cmd="AT+QMAP=&quot;WWAN&quot;">查看分配 IP (WWAN)</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer" data-cmd="AT+QENG=&quot;servingcell&quot;">服务小区详情</button>
+                        <button class="console-quick-btn bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer" data-cmd="AT+EGMR=0,7">读取 IMEI</button>
                     </div>
                 </div>
             </div>
@@ -1299,6 +1364,32 @@
                     if (el) el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在应用 MBN...</span>';
                 });
             }
+
+            const autoselOnBtn = getDomElement('mbn_autosel_on');
+            if (autoselOnBtn) {
+                autoselOnBtn.addEventListener('click', () => {
+                    const el = getDomElement('mbn_status');
+                    if (el) el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 启用 MBN AutoSel 自动选择...</span>';
+                    sendAtCommand('AT+QMBNCFG="AutoSel",1');
+                });
+            }
+            const autoselOffBtn = getDomElement('mbn_autosel_off');
+            if (autoselOffBtn) {
+                autoselOffBtn.addEventListener('click', () => {
+                    const el = getDomElement('mbn_status');
+                    if (el) el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 禁用 MBN AutoSel (锁定当前 MBN)...</span>';
+                    sendAtCommand('AT+QMBNCFG="AutoSel",0');
+                });
+            }
+            const deactivateBtn = getDomElement('mbn_deactivate_btn');
+            if (deactivateBtn) {
+                deactivateBtn.addEventListener('click', () => {
+                    if (!confirm('确认停用当前 MBN Profile？')) return;
+                    const el = getDomElement('mbn_status');
+                    if (el) el.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在停用当前 MBN...</span>';
+                    sendAtCommand('AT+QMBNCFG="deactivate"');
+                });
+            }
         }
 
         /* ======== USB Handler Functions ======== */
@@ -1777,9 +1868,59 @@
                         'AT+QENG': 'AT+QENG="servingcell"',
                         'AT+CGDCONT?': 'AT+CGDCONT?',
                     };
-                    const cmd = cmdMap[label] || label;
+                    const cmd = btnEl.dataset.cmd || (cmdMap[label] || label);
                     if (input) input.value = cmd;
                     sendAtCommand(cmd);
+                });
+            }
+        }
+
+        function initEthImeiPanel() {
+            // M.2 转网口与 IP Passthrough 配置
+            const ethApplyBtn = getDomElement('eth_apply_btn');
+            if (ethApplyBtn) {
+                ethApplyBtn.addEventListener('click', () => {
+                    const driver = getDomElement('eth_driver_select')?.value || 'r8125';
+                    const pcie_rc = getDomElement('eth_pcie_select')?.value === '1';
+                    const ippt = getDomElement('eth_ippt_select')?.value === '1';
+                    sendAtCommand('AT+QETH="eth_driver","' + driver + '",1');
+                    if (pcie_rc) {
+                        sendAtCommand('AT+QCFG="pcie/mode",1');
+                        sendAtCommand('AT+QCFG="data_interface",0,0');
+                    }
+                    if (ippt) {
+                        sendAtCommand('AT+QMAP="mpdn_rule",1,1,2,1,1'); // IP Passthrough
+                    } else {
+                        sendAtCommand('AT+QMAP="mpdn_rule",1,1,0,1,1'); // NAT
+                    }
+                    const status = getDomElement('eth_status');
+                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ 指令已下发，请在控制台执行 AT+CFUN=1,1 重启生效！</span>';
+                });
+            }
+
+            // IMEI 读取与写入
+            const imeiReadBtn = getDomElement('imei_read_btn');
+            if (imeiReadBtn) {
+                imeiReadBtn.addEventListener('click', () => {
+                    const status = getDomElement('imei_status');
+                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在读取 IMEI...</span>';
+                    sendAtCommand('AT+EGMR=0,7');
+                });
+            }
+
+            const imeiWriteBtn = getDomElement('imei_write_btn');
+            if (imeiWriteBtn) {
+                imeiWriteBtn.addEventListener('click', () => {
+                    const imei = getDomElement('imei_input')?.value.trim() || '';
+                    if (!imei || imei.length !== 15 || !/^\d+$/.test(imei)) {
+                        alert('请输入 15 位纯数字的标准 IMEI');
+                        return;
+                    }
+                    if (confirm('确认将模组 IMEI 修改为: ' + imei + ' ?')) {
+                        const status = getDomElement('imei_status');
+                        if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⏳ 正在写入 IMEI...</span>';
+                        sendAtCommand('AT+EGMR=1,7,"' + imei + '"');
+                    }
                 });
             }
         }
@@ -2229,6 +2370,7 @@
         initVisibilityHandler();
         initConsole();
         initNetworkPanel();
+        initEthImeiPanel();
         initScanPanel();
         initSettingsPanel();
         initSmsPanel();

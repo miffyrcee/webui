@@ -1192,8 +1192,12 @@
             const el = getDomElement('diag_output');
             if (!el) return;
             if (data.success) {
-                const raw = data.data ? JSON.stringify(data.data, null, 2) : (data.msg || '');
-                el.textContent = raw || '(empty response)';
+                let raw = data.data;
+                // 优先直接显示原始 AT 返回值；仅对结构化对象（如 neighbour 的 cells）做 JSON 展示
+                if (raw && typeof raw === 'object') {
+                    raw = (typeof raw.raw === 'string') ? raw.raw : JSON.stringify(raw, null, 2);
+                }
+                el.textContent = String(raw ?? '') || '(empty response)';
                 el.className = 'p-3 bg-slate-50 dark:bg-slate-900/30 rounded border border-slate-200/50 dark:border-brandBorder/20 text-xs font-mono text-indigo-600 dark:text-indigo-400 max-h-[250px] overflow-y-auto whitespace-pre-wrap';
                 el.classList.remove('text-red-400');
             } else {

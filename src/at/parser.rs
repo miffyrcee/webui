@@ -227,13 +227,27 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
     }
     if let Some(values) = fields_after_prefix(trimmed, "+QMBNCFG:") {
         if values.first().map(String::as_str) == Some("List") {
-            let name = values.get(3).cloned().unwrap_or_default();
-            if !name.is_empty() {
-                let index = values.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
-                let state = values.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
-                return Some(ParsedLine::Qmbncfg(QmbncfgEntry { index, state, name }));
+            // 兼容两种 List 行格式（不同固件字段顺序不同）：
+            //   A) +QMBNCFG: "List",<index>,<state>,"<name>"
+            //   B) +QMBNCFG: "List",<index>,"<name>",<state>
+            // 判定规则：第 2 个字段为纯数字 → 格式 A（name 在末位）；否则 → 格式 B。
+            if values.get(2).map(|v| v.parse::<u32>().is_ok()).unwrap_or(false) {
+                let name = values.get(3).cloned().unwrap_or_default();
+                if !name.is_empty() {
+                    let index = values.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+                    let state = values.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                    return Some(ParsedLine::Qmbncfg(QmbncfgEntry { index, state, name }));
+                }
+                return None;
+            } else {
+                let name = values.get(2).cloned().unwrap_or_default();
+                if !name.is_empty() {
+                    let index = values.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+                    let state = values.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
+                    return Some(ParsedLine::Qmbncfg(QmbncfgEntry { index, state, name }));
+                }
+                return None;
             }
-            return None;
         }
     }
 
@@ -718,6 +732,26 @@ mod tests {
         assert!(
             matches!(result, Some(ParsedLine::Qmbncfg(ref r))
                 if r.index == 0 && r.state == 1 && r.name == "RM520NGLAAR01A02M4G_01.004")
+        );
+    }
+
+    #[test]
+    fn test_parse_qmbncfg_list_format_b() {
+        // 部分固件（如 RM502Q-AE）返回 "List",<index>,"<name>",<state> 顺序
+        let result = parse_single_line("+QMBNCFG: \"List\",4,\"VoLTE_OPNMKT_CT\",1");
+        assert!(
+            matches!(result, Some(ParsedLine::Qmbncfg(ref r))
+                if r.index == 4 && r.state == 1 && r.name == "VoLTE_OPNMKT_CT")
+        );
+    }
+
+    #[test]
+    fn test_parse_qmbncfg_list_format_a_numeric_name() {
+        // 格式 A 下 name 为纯数字时不应被误当成 state
+        let result = parse_single_line("+QMBNCFG: \"List\",0,1,\"12345\"");
+        assert!(
+            matches!(result, Some(ParsedLine::Qmbncfg(ref r))
+                if r.index == 0 && r.state == 1 && r.name == "12345")
         );
     }
 

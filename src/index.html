@@ -1922,18 +1922,34 @@
                     const driver = getDomElement('eth_driver_select')?.value || 'r8125';
                     const pcie_rc = getDomElement('eth_pcie_select')?.value === '1';
                     const ippt = getDomElement('eth_ippt_select')?.value === '1';
+                    // 1. 加载对应以太网 PHY 驱动 (RTL8125 / RTL8168 / AQC107)
                     sendAtCommand('AT+QETH="eth_driver","' + driver + '",1');
+
+                    // 2. PCIe 与数据总线模式配置
                     if (pcie_rc) {
-                        sendAtCommand('AT+QCFG="pcie/mode",1');
-                        sendAtCommand('AT+QCFG="data_interface",0,0');
-                    }
-                    if (ippt) {
-                        sendAtCommand('AT+QMAP="mpdn_rule",1,1,2,1,1'); // IP Passthrough
+                        sendAtCommand('AT+QCFG="pcie/mode",1');           // PCIe RC 主机模式
+                        sendAtCommand('AT+QCFG="data_interface",1,0');    // PCIe 数据通信通道
                     } else {
-                        sendAtCommand('AT+QMAP="mpdn_rule",1,1,0,1,1'); // NAT
+                        sendAtCommand('AT+QCFG="pcie/mode",0');           // PCIe EP 从机模式
                     }
+
+                    // 3. 以太网网口自动拨号使能
+                    sendAtCommand('AT+QMAPWAC=1');
+
+                    // 4. 下发 MPDN 直通/NAT 规则（固件不支持 AT+QMAP="mpdn_rule",0 单参数清理简写，直接覆盖写入完整参数）
+                    if (ippt) {
+                        // 开启网卡 IP Passthrough（直通给接入的设备 MAC，广播通配符自动绑定首个活跃设备）
+                        sendAtCommand('AT+QMAP="mpdn_rule",0,1,0,1,1,"FF:FF:FF:FF:FF:FF"');
+                        // 禁用模组内部 DNS 代理，直接透传运营商 DNS
+                        sendAtCommand('AT+QMAP="DHCPV4DNS","disable"');
+                    } else {
+                        // 恢复模组 NAT 路由模式 (192.168.225.1)
+                        sendAtCommand('AT+QMAP="mpdn_rule",0,1,0,0,1');
+                        sendAtCommand('AT+QMAP="DHCPV4DNS","enable"');
+                    }
+
                     const status = getDomElement('eth_status');
-                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ 指令已下发，点击下方控制台「热重启 (CFUN=1,1)」快捷按钮，或直接点击「全热重启模组 (Reboot)」即可生效！</span>';
+                    if (status) status.innerHTML = '<span class="text-amber-500 dark:text-amber-400 font-semibold">⚠ 指令已全部下发！点击下方控制台「热重启 / Reboot (CFUN=1,1)」快捷按钮，或点击「全热重启模组 (Reboot)」，也可断电重启以使 PCIe 网卡驱动生效。</span>';
                 });
             }
 

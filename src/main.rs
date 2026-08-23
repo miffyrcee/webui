@@ -432,7 +432,7 @@ enum AtAction {
     SetCellLock { tech: String, pci: u32, earfcn: u32, band: Option<u32>, enable: bool },
     /// 诊断子命令
     GetDiagnostics(DiagnosticType),
-    /// (mode_num) — 0:RMNET, 1:ECM, 2:MBIM, 3:RNDIS, 5:NCM
+    /// (mode_num) — 0:RMNET, 1:ECM, 2:MBIM, 3:RNDIS, 4:NCM(SDX55), 5:NCM(SDX62)
     SetUsbNetMode(u8),
     /// 获取当前 USB 模式
     GetUsbConfig,
@@ -1127,7 +1127,7 @@ impl HardwareBackend for RealBackend {
 
     async fn set_usb_net_mode(&self, mode: u8) -> Result<String, String> {
         if !matches!(mode, 0 | 1 | 2 | 3 | 4 | 5) {
-            return Err("不支持的 USB 网络模式，有效值为 0(RMNET), 1(ECM), 2(MBIM), 3(RNDIS), 5(NCM)".to_string());
+            return Err("不支持的 USB 网络模式，有效值为 0(RMNET), 1(ECM), 2(MBIM), 3(RNDIS), 4(NCM/SDX55), 5(NCM/SDX62)".to_string());
         }
         let cmd = format!("AT+QCFG=\"usbnet\",{}", mode);
         send_at_command_inner(&self.serial_path, &cmd).await
@@ -1157,7 +1157,8 @@ impl HardwareBackend for RealBackend {
                 1 => "ECM (Linux/Mac免驱)",
                 2 => "MBIM (Win10/11原生)",
                 3 => "RNDIS (Windows免驱)",
-                5 => "NCM (高速网卡)",
+                4 => "NCM (SDX55)",
+                5 => "NCM (SDX62 高速网卡)",
                 _ => "Unknown",
             }
         } else {

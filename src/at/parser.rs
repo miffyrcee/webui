@@ -328,8 +328,9 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
     telemetry.network_mode = Some(format!("{} {}", pcc.rat, pcc.opmode));
     telemetry.mccmnc = Some(format!("{}{}", pcc.mcc, pcc.mnc));
     telemetry.cell_id = Some(pcc.cell_id.clone());
-    // cell_id 来自模组 AT 响应，通常为 ASCII 十六进制字符串；is_ascii() 快速路径避免 OOB panic
-    if pcc.cell_id.len() >= 6 && pcc.cell_id[..pcc.cell_id.len() - 3].is_ascii() {
+    // cell_id 来自模组 AT 响应，通常为 ASCII 十六进制字符串；
+    // 先整体判断 is_ascii() 再切片，避免多字节 UTF-8 乱码导致 [..len-3] 边界 panic
+    if pcc.cell_id.is_ascii() && pcc.cell_id.len() >= 6 {
         telemetry.enb_id = Some(pcc.cell_id[..pcc.cell_id.len() - 3].to_string());
     } else {
         telemetry.enb_id = Some(pcc.cell_id.clone());
@@ -857,6 +858,18 @@ mod tests {
 
         // assessment: rsrp=-65 > -80 (true), sinr=19 > 20 (false) → "Good"
         assert_eq!(telemetry.assessment, Some("Good".to_string()));
+    }
+
+    #[test]
+    fn test_parse_qeng_non_ascii_cell_id_no_panic() {
+        // 固件异常输出非 ASCII 乱码 cell_id（"abéé" 含 2 字节 UTF-8 字符），
+        // 旧代码 `cell_id[..len-3]` 切片边界 len-3=3 会落在 é(字节 2-3) 中间导致 panic。
+        let raw = "+QENG: \"servingcell\",\"NOCONN\",\"NR5G-SA\",\"TDD\",460,00,abéé,751,72002F,504990,41,12,-65,-11,19,1,-";
+        let mut telemetry = crate::TelemetryData::default();
+        parse_qeng(raw, &mut telemetry);
+        // 不应 panic，非 ASCII 时 enb_id 回退为完整 cell_id
+        assert_eq!(telemetry.cell_id, Some("abéé".to_string()));
+        assert_eq!(telemetry.enb_id, Some("abéé".to_string()));
     }
 
     #[test]

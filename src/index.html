@@ -866,9 +866,9 @@
                                     <span class="block text-xs">RNDIS</span>
                                     <span class="block text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5">Windows 免驱</span>
                                 </button>
-                                <button type="button" class="usb-mode-btn min-h-[36px] px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="4">
+                                <button type="button" class="usb-mode-btn min-h-[36px] px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center" data-mode="5">
                                     <span class="block text-xs">NCM</span>
-                                    <span class="block text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5">高速网卡</span>
+                                    <span class="block text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5">高速网卡 (RM520N)</span>
                                 </button>
                             </div>
 
@@ -923,7 +923,7 @@
                         <button class="usb-quick-at bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium" data-cmd='AT+QCFG="usbnet"'>查询 USB 模式</button>
                         <button class="usb-quick-at bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium" data-cmd='AT+QCFG="usbnet",1'>切换到 ECM</button>
                         <button class="usb-quick-at bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium" data-cmd='AT+QCFG="usbnet",2'>切换到 MBIM</button>
-                        <button class="usb-quick-at bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium" data-cmd='AT+QCFG="usbnet",4'>切换到 NCM</button>
+                        <button class="usb-quick-at bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium" data-cmd='AT+QCFG="usbnet",5'>切换到 NCM (RM520N)</button>
                     </div>
                 </div>
             </div>
@@ -1448,7 +1448,8 @@
                 1: 'ECM (Linux/Mac 免驱)',
                 2: 'MBIM (Win10/11 原生)',
                 3: 'RNDIS (Windows 免驱)',
-                4: 'NCM (高速网卡)'
+                4: 'NCM (SDX55)',
+                5: 'NCM (SDX62 高速网卡)'
             };
             const modeName = cfg.usbnet_supported ? (modeNames[cfg.usbnet_mode] || ('未知 (' + cfg.usbnet_mode + ')')) : 'N/A (指令不支持)';
             updateText("usb_current_mode", modeName);

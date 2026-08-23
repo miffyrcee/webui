@@ -17,3 +17,10 @@ async-trait = "0.1"
 hmac = "0.12"
 base64 = "0.22"
 anyhow = "1"
+
+# 纯 Rust TLS 服务端（禁用默认 provider，切断 aws-lc-rs/ring C 依赖）
+axum-server = { version = "0.8", default-features = false, features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12"] }
+rustls-rustcrypto = "0.0.2-alpha"
+# 纯 Rust 内存证书生成（仅 p256 特性，零 C 代码）
+certkit = { version = "0.2", default-features = false, features = ["p256"] }

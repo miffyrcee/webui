@@ -22,6 +22,9 @@ use sha2::{Digest, Sha256};
 
 type HmacSha256 = Hmac<Sha256>;
 
+use axum_server::tls_rustls::RustlsConfig;
+use std::path::Path;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use std::fs;
@@ -1798,7 +1801,7 @@ async fn login_post_handler(
         push_log("INFO", "Auth", &format!("管理员登录成功 (来源: {})", ip));
 
         let cookie = format!(
-            "auth_token={}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800",
+            "auth_token={}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=604800",
             token
         );
 
@@ -2248,8 +2251,91 @@ async fn hardware_task(
     }
 }
 
+/// 加载 TLS 证书配置：
+/// 1. 优先读取 SSL_CERT_PATH / SSL_KEY_PATH 指定的文件；
+/// 2. 未找到文件时，用 certkit 纯内存签发 ECC P-256 自签名证书（零 C 依赖，开箱即用）。
+async fn load_or_generate_tls_config() -> Result<RustlsConfig, Box<dyn std::error::Error>> {
+    let cert_path = env::var("SSL_CERT_PATH").unwrap_or_else(|_| "cert.pem".to_string());
+    let key_path = env::var("SSL_KEY_PATH").unwrap_or_else(|_| "key.pem".to_string());
+
+    if Path::new(&cert_path).exists() && Path::new(&key_path).exists() {
+        push_log("INFO", "TLS", &format!("从文件加载 SSL 证书: {} / {}", cert_path, key_path));
+        return Ok(RustlsConfig::from_pem_file(cert_path, key_path).await?);
+    }
+
+    push_log("WARN", "TLS", "未检测到外部 SSL 证书，正在通过 RustCrypto 内存动态签发证书 (开箱即用)...");
+
+    // 纯 Rust 生成 ECC P-256 密钥对
+    let key_pair = certkit::key::KeyPair::generate_ecdsa_p256();
+
+    // SAN 覆盖常见网关 IP 与 localhost，避免浏览器提示主机名不匹配
+    let san = certkit::cert::extensions::SubjectAltName {
+        dns_names: vec!["localhost".to_string()],
+        ip_addresses: vec![
+            "127.0.0.1".parse().unwrap(),
+            "192.168.1.1".parse().unwrap(),
+            "192.168.0.1".parse().unwrap(),
+            "192.168.8.1".parse().unwrap(),
+            "192.168.100.1".parse().unwrap(),
+        ],
+        email_addresses: Vec::new(),
+    };
+
+    let subject = certkit::cert::params::DistinguishedName::builder()
+        .common_name("RM520N 5G WebUI".to_string())
+        .organization("Argon Cellular".to_string())
+        .build();
+
+    let cert_info = certkit::cert::params::CertificateParams::builder()
+        .subject(subject)
+        .subject_public_key(certkit::key::PublicKey::from_key_pair(&key_pair))
+        .extensions(vec![certkit::cert::params::ExtensionParam::from_extension(san, false)?])
+        .build();
+
+    let cert = certkit::cert::Certificate::new_self_signed(&cert_info, &key_pair)?;
+
+    let cert_pem = cert.to_pem()?;
+    let key_pem = key_pair.encode_private_key_pem()?;
+
+    let config = RustlsConfig::from_pem(cert_pem.into_bytes(), key_pem.into_bytes()).await?;
+    push_log("INFO", "TLS", "内存自签名证书已就绪 (ECC P-256, 零 C 依赖)");
+    Ok(config)
+}
+
+/// 创建 HTTP -> HTTPS 自动重定向 Router（Axum 0.8 兼容）
+fn create_http_redirect_app(https_port: u16) -> Router {
+    Router::new().fallback(move |headers: HeaderMap, uri: axum::http::Uri| async move {
+        let host_header = headers
+            .get(header::HOST)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("localhost");
+
+        // 剥离请求头里的旧端口号
+        let hostname = host_header.split(':').next().unwrap_or(host_header);
+
+        let target_url = if https_port == 443 {
+            format!("https://{}{}", hostname, uri)
+        } else {
+            format!("https://{}:{}{}", hostname, https_port, uri)
+        };
+
+        // axum 的 Redirect::permanent 在 0.8 中为 308（保留请求方法），
+        // 此处按网关惯例显式返回 301 Moved Permanently
+        Response::builder()
+            .status(StatusCode::MOVED_PERMANENTLY)
+            .header(header::LOCATION, target_url)
+            .body(axum::body::Body::empty())
+            .unwrap()
+    })
+}
+
 #[tokio::main]
 async fn main() {
+    // 注册纯 Rust 的 RustCrypto 为全局 TLS Provider（关键：避免拉取 aws-lc-rs/ring C 依赖）
+    rustls_rustcrypto::provider()
+        .install_default()
+        .expect("Failed to install RustCrypto provider");
+
     // 初始化异步日志 Worker
     let log_rx = init_log_worker();
     tokio::spawn(log_worker_task(log_rx));
@@ -2322,9 +2408,66 @@ async fn main() {
         .route("/style.css", get(style_handler))
         .with_state(app_state);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    push_log("INFO", "System", &format!("{} WebUI 后端服务已在 http://0.0.0.0:3000 监听", device_name));
-    axum::serve(listener, app).await.unwrap();
+    // ========================================================================
+    // 端口与协议配置解析 (默认 HTTP=80, HTTPS=443)
+    // ========================================================================
+    let enable_https = env::var("ENABLE_HTTPS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(true);
+
+    let enable_http_redirect = env::var("HTTP_REDIRECT")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(true);
+
+    let http_port: u16 = env::var("HTTP_PORT")
+        .or_else(|_| env::var("PORT"))
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(80);
+
+    let https_port: u16 = env::var("HTTPS_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(443);
+
+    let http_addr: std::net::SocketAddr = format!("0.0.0.0:{}", http_port).parse().unwrap();
+    let https_addr: std::net::SocketAddr = format!("0.0.0.0:{}", https_port).parse().unwrap();
+
+    if enable_https {
+        match load_or_generate_tls_config().await {
+            Ok(tls_config) => {
+                // 开启 HTTP -> HTTPS 重定向，并且两端口不冲突时，后台启动 HTTP 重定向监听
+                if enable_http_redirect && http_port != https_port {
+                    let redirect_app = create_http_redirect_app(https_port);
+                    tokio::spawn(async move {
+                        if let Ok(listener) = tokio::net::TcpListener::bind(http_addr).await {
+                            push_log("INFO", "System", &format!("🔀 HTTP 自动重定向服务已在 http://{} 监听 (-> https://...:{})", http_addr, https_port));
+                            let _ = axum::serve(listener, redirect_app).await;
+                        } else {
+                            push_log("WARN", "System", &format!("HTTP 重定向端口 {} 绑定失败，跳过重定向服务", http_port));
+                        }
+                    });
+                }
+
+                push_log("INFO", "System", &format!("🔒 {} WebUI HTTPS 服务已在 https://{} 启动", device_name, https_addr));
+                axum_server::bind_rustls(https_addr, tls_config)
+                    .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+                    .await
+                    .unwrap();
+            }
+            Err(e) => {
+                push_log("ERROR", "TLS", &format!("TLS 初始化失败 ({})，回退到纯 HTTP 模式", e));
+                let listener = tokio::net::TcpListener::bind(http_addr).await.unwrap();
+                push_log("INFO", "System", &format!("{} WebUI 服务已在 http://{} 监听", device_name, http_addr));
+                axum::serve(listener, app).await.unwrap();
+            }
+        }
+    } else {
+        // 纯 HTTP 模式
+        let listener = tokio::net::TcpListener::bind(http_addr).await.unwrap();
+        push_log("INFO", "System", &format!("{} WebUI 服务已在 http://{} 监听 (纯 HTTP 模式)", device_name, http_addr));
+        axum::serve(listener, app).await.unwrap();
+    }
 }
 
 async fn ws_handler(

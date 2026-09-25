@@ -414,10 +414,14 @@ pub async fn handle_at_request(
             let raw = backend
                 .exec_raw_at(&format!("AT+EGMR=1,7,\"{}\"", imei))
                 .await;
-            let parsed = parse_egmr_response(&raw).unwrap_or(ImeiParseResult {
-                kind: "write".to_string(),
-                success: false,
-                imei: None,
+            let parsed = parse_egmr_response(&raw).unwrap_or_else(|| {
+                // 无回显时模组写入成功仅返回 OK（不含 AT+EGMR 回显）
+                let ok = !at_exec_failed(&raw) && raw.contains("OK");
+                ImeiParseResult {
+                    kind: "write".to_string(),
+                    success: ok,
+                    imei: None,
+                }
             });
             let _ = req
                 .resp_tx

@@ -51,11 +51,7 @@ pub fn extract_egmr_imei(raw: &str) -> Option<String> {
 
 /// 解析 AT+EGMR 响应（读取/写入 IMEI），返回 None 表示非 EGMR 响应
 pub fn parse_egmr_response(raw: &str) -> Option<ImeiParseResult> {
-    if !raw.contains("AT+EGMR") {
-        return None;
-    }
-    let is_write = raw.contains("AT+EGMR=1,7");
-    let kind = if is_write { "write" } else { "read" };
+    // 1. 优先尝试提取 IMEI：只要包含 +EGMR: 响应头，无论是否有命令回显均判定为读取成功
     if let Some(imei) = extract_egmr_imei(raw) {
         return Some(ImeiParseResult {
             kind: "read".to_string(),
@@ -63,12 +59,21 @@ pub fn parse_egmr_response(raw: &str) -> Option<ImeiParseResult> {
             imei: Some(imei),
         });
     }
-    let success = raw.contains("OK");
-    Some(ImeiParseResult {
-        kind: kind.to_string(),
-        success,
-        imei: None,
-    })
+
+    // 2. 带有 AT+EGMR 命令回显的场景
+    if raw.contains("AT+EGMR") {
+        let is_write = raw.contains("AT+EGMR=1,7");
+        let kind = if is_write { "write" } else { "read" };
+        let has_error = at_exec_failed(raw);
+        let success = !has_error && raw.contains("OK");
+        return Some(ImeiParseResult {
+            kind: kind.to_string(),
+            success,
+            imei: None,
+        });
+    }
+
+    None
 }
 
 pub fn at_response_has_error(raw: &str) -> bool {
@@ -343,6 +348,20 @@ mod tests {
     #[test]
     fn parse_egmr_read_success() {
         let raw = "AT+EGMR=0,7\r\r\n+EGMR: \"866355057849136\"\r\n\r\nOK\r\n";
+        assert_eq!(
+            parse_egmr_response(raw),
+            Some(ImeiParseResult {
+                kind: "read".to_string(),
+                success: true,
+                imei: Some("866355057849136".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_egmr_read_without_echo_success() {
+        // 模组 ATE0（无回显）时的真实响应
+        let raw = "\r\n+EGMR: \"866355057849136\"\r\n\r\nOK\r\n";
         assert_eq!(
             parse_egmr_response(raw),
             Some(ImeiParseResult {

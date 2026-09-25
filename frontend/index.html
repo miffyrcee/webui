@@ -230,18 +230,27 @@
                             </div>
                             <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm">
                                 <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
-                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">活跃卡槽 Slot</span>
-                                    <div class="flex items-center gap-2 mt-1">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider shrink-0">活跃卡槽 Slot</span>
+                                        <span x-show="$store.net.simSlotStatusText" x-cloak
+                                            class="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium truncate"
+                                            x-text="$store.net.simSlotStatusText"></span>
+                                    </div>
+                                    <div class="mt-2 p-1 bg-slate-200/70 dark:bg-slate-800/90 rounded-lg flex items-center gap-1">
                                         <template x-for="slot in [1, 2]" :key="slot">
                                             <button type="button" @click="$store.net.setSimSlot(slot)"
-                                                class="flex-1 whitespace-nowrap min-w-[52px] font-semibold px-2 py-1 text-[11px] rounded transition-all active:scale-95 cursor-pointer border"
+                                                class="flex-1 flex items-center justify-center gap-1.5 py-1 text-xs sm:text-sm font-bold rounded-md transition-colors duration-200 active:scale-95 cursor-pointer"
                                                 :class="String($store.telemetry.active_sim).includes(String(slot))
-                                                    ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-400 dark:border-indigo-500 text-indigo-700 dark:text-indigo-300'
-                                                    : 'bg-slate-100 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'"
-                                                x-text="`SIM ${slot}`"></button>
+                                                    ? 'bg-white dark:bg-indigo-600 text-indigo-600 dark:text-white shadow-sm'
+                                                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'">
+                                                <span class="w-1.5 h-1.5 rounded-full shrink-0 transition-colors duration-200"
+                                                    :class="String($store.telemetry.active_sim).includes(String(slot))
+                                                        ? 'bg-emerald-500 dark:bg-emerald-400'
+                                                        : 'bg-transparent'"></span>
+                                                <span x-text="`SIM ${slot}`"></span>
+                                            </button>
                                         </template>
                                     </div>
-                                    <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-1 min-h-[14px]" x-text="$store.net.simSlotStatusText"></div>
                                 </div>
                                 <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
                                     <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">运营商 Provider</span>

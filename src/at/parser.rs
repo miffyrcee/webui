@@ -160,23 +160,40 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
     }
     if let Some(values) = fields_after_prefix(trimmed, "+QENG:") {
         if values.first().map(String::as_str) == Some("servingcell") {
+            let get = |i: usize| values.get(i).cloned().unwrap_or_default();
             let mut cell = QengServingCell::default();
-            if let Some(v) = values.get(1) { cell.connection_status = v.clone(); }
-            if let Some(v) = values.get(2) { cell.rat = v.clone(); }
-            if let Some(v) = values.get(3) { cell.opmode = v.clone(); }
-            if let Some(v) = values.get(4) { cell.mcc = v.clone(); }
-            if let Some(v) = values.get(5) { cell.mnc = v.clone(); }
-            if let Some(v) = values.get(6) { cell.cell_id = v.clone(); }
-            if let Some(v) = values.get(7) { cell.pci = v.clone(); }
-            if let Some(v) = values.get(8) { cell.tac = v.clone(); }
-            if let Some(v) = values.get(9) { cell.earfcn = v.clone(); }
-            if let Some(v) = values.get(10) { cell.band = v.clone(); }
-            if let Some(v) = values.get(11) { cell.bandwidth = v.clone(); }
-            if let Some(v) = values.get(12) { cell.rsrp = v.clone(); }
-            if let Some(v) = values.get(13) { cell.rsrq = v.clone(); }
-            if let Some(v) = values.get(14) { cell.sinr = v.clone(); }
-            if let Some(v) = values.get(15) { cell.srxlev = v.clone(); }
-            if let Some(v) = values.get(16) { cell.rssi = v.clone(); }
+            // RAT 决定字段布局：LTE 无 TAC 且带宽分 UL/DL 两段
+            let is_nr = get(2).contains("NR5G");
+
+            cell.connection_status = get(1);
+            cell.rat = get(2);
+            cell.opmode = get(3);
+            cell.mcc = get(4);
+            cell.mnc = get(5);
+            cell.cell_id = get(6);
+            cell.pci = get(7);
+
+            if is_nr {
+                // NR5G: pci,tac,arfcn,band,bw,rsrp,rsrq,sinr,srxlev,rssi
+                cell.tac = get(8);
+                cell.earfcn = get(9);
+                cell.band = get(10);
+                cell.bandwidth = get(11);
+                cell.rsrp = get(12);
+                cell.rsrq = get(13);
+                cell.sinr = get(14);
+                cell.srxlev = get(15);
+                cell.rssi = get(16);
+            } else {
+                // LTE: pci,earfcn,band,ul_bw,dl_bw,rsrp,rsrq,rssi,sinr（无 TAC，取 DL 带宽）
+                cell.earfcn = get(8);
+                cell.band = get(9);
+                cell.bandwidth = get(11);
+                cell.rsrp = get(12);
+                cell.rsrq = get(13);
+                cell.rssi = get(14);
+                cell.sinr = get(15);
+            }
             return Some(ParsedLine::QengServingCell(cell));
         }
         if values.first().map(String::as_str) == Some("neighbourcell") {
@@ -335,7 +352,11 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::actor::telemetry::Telem
     } else {
         telemetry.enb_id = Some(pcc.cell_id.clone());
     }
-    telemetry.tac = Some(pcc.tac.clone());
+    telemetry.tac = if pcc.tac.is_empty() {
+        None
+    } else {
+        Some(pcc.tac.clone())
+    };
 
     // Signal metrics
     let rsrp: i32 = pcc.rsrp.parse().unwrap_or(-140);
@@ -366,12 +387,16 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::actor::telemetry::Telem
     let mut bw_parts: Vec<String> = Vec::new();
 
     for cell in &serving_cells {
-        let band = format!("NR5G BAND {}", cell.band);
+        let is_nr = cell.rat.contains("NR5G");
+        let band = if is_nr {
+            format!("NR5G BAND {}", cell.band)
+        } else {
+            format!("LTE BAND {}", cell.band)
+        };
         if !bands.contains(&band) {
             bands.push(band);
         }
         if let Ok(code) = cell.bandwidth.parse::<i32>() {
-            let is_nr = cell.rat.starts_with("NR5G");
             let actual_bw = if is_nr { decode_nr_bandwidth(code) } else { decode_lte_bandwidth(code) };
             total_bw += actual_bw;
             bw_parts.push(actual_bw.to_string());
@@ -380,7 +405,9 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::actor::telemetry::Telem
         pcis.push(cell.pci.clone());
     }
 
-    set_carrier_telemetry(&bands, &bw_parts, total_bw, &earfcns, &pcis, true, telemetry);
+    // 带宽前缀由主载波（PCC）制式决定，不可写死为 NR
+    let is_nr_pcc = pcc.rat.contains("NR5G");
+    set_carrier_telemetry(&bands, &bw_parts, total_bw, &earfcns, &pcis, is_nr_pcc, telemetry);
 }
 
 /// Parse +QCAINFO response and populate TelemetryData
@@ -421,10 +448,10 @@ pub fn parse_qcainfo(qca_res: &str, telemetry: &mut crate::actor::telemetry::Tel
         earfcns.push(entry.earfcn.clone());
         pcis.push(entry.pci.clone());
 
-        let band_label = if entry.band.starts_with("NR5G") {
+        let band_label = if entry.band.starts_with("NR5G") || entry.band.starts_with("LTE") {
             entry.band.clone()
         } else {
-            format!("NR5G BAND {}", entry.band)
+            format!("LTE BAND {}", entry.band)
         };
         if !bands.contains(&band_label) {
             bands.push(band_label);
@@ -1078,6 +1105,50 @@ mod tests {
         let raw = "+QENG: \"servingcell\",\"NOCONN\",\"NR5G-SA\",\"TDD\",460,00,39074C001,751,72002F,504990,41,12,-65,-11,19,1,-";
         let cells = parse_qeng_neighbour(raw);
         assert!(cells.is_empty());
+    }
+
+    #[test]
+    fn test_parse_qeng_lte_servingcell() {
+        // LTE servingcell 布局：无 TAC，且频宽分 UL/DL 两段
+        // "servingcell",state,LTE,FDD,mcc,mnc,cellid,pci,earfcn,band,ul_bw,dl_bw,rsrp,rsrq,rssi,sinr
+        let raw = "+QENG: \"servingcell\",\"CONNECT\",\"LTE\",\"FDD\",460,00,39074C001,751,6300,3,20,20,-65,-11,-70,19";
+        let mut telemetry = crate::actor::telemetry::TelemetryData::default();
+        parse_qeng(raw, &mut telemetry);
+
+        assert_eq!(telemetry.network_mode, Some("LTE FDD".to_string()));
+        assert_eq!(telemetry.bands, Some("LTE BAND 3".to_string()));
+        // 无 NR 前缀
+        assert_eq!(telemetry.bandwidth, Some("20 MHz".to_string()));
+        assert_eq!(telemetry.earfcn, Some("6300".to_string()));
+        assert_eq!(telemetry.pci, Some("751".to_string()));
+        // LTE 无 TAC 字段
+        assert_eq!(telemetry.tac, None);
+        // sinr 取 [15]，不可误取 RSSI(-70)
+        assert_eq!(telemetry.sinr, Some("19 / 78%".to_string()));
+        assert_eq!(telemetry.ss_rsrp, Some("-65 / 78%".to_string()));
+        assert_eq!(telemetry.ss_rsrq, Some("-11 / 52%".to_string()));
+    }
+
+    #[test]
+    fn test_parse_qcainfo_lte_band_label() {
+        // LTE 下 QCAINFO 的 band 字段为裸数字，不应被拼成 "NR5G BAND 3"
+        let raw = "+QCAINFO: \"PCC\",6300,100,\"3\",751";
+        let mut telemetry = crate::actor::telemetry::TelemetryData::default();
+        parse_qcainfo(raw, &mut telemetry);
+
+        assert_eq!(telemetry.bands, Some("LTE BAND 3".to_string()));
+        assert_eq!(telemetry.bandwidth, Some("20 MHz".to_string()));
+        assert_eq!(telemetry.earfcn, Some("6300".to_string()));
+    }
+
+    #[test]
+    fn test_parse_qcainfo_lte_prefixed_band_not_doubled() {
+        // 部分固件已带 "LTE BAND " 前缀，不可再叠加
+        let raw = "+QCAINFO: \"PCC\",6300,100,\"LTE BAND 3\",751";
+        let mut telemetry = crate::actor::telemetry::TelemetryData::default();
+        parse_qcainfo(raw, &mut telemetry);
+
+        assert_eq!(telemetry.bands, Some("LTE BAND 3".to_string()));
     }
 }
 

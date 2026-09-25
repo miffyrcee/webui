@@ -78,47 +78,10 @@ body {
     background-color: #080b14;
 }
 
-/* 信息行布局 */
-.param-row {
-    background-color: transparent !important;
-    border: none !important;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.04) !important;
-    border-radius: 0 !important;
-    padding: 11px 12px !important;
-    display: flex !important;
-    flex-direction: row !important;
-    justify-content: flex-start !important;
-    align-items: center !important;
-    transition: background-color 0.15s ease !important;
-}
-.dark .param-row { border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important; }
-.param-row:hover { background-color: rgba(94, 114, 228, 0.03) !important; }
-.dark .param-row:hover { background-color: rgba(130, 94, 228, 0.04) !important; }
-
-.param-row > span:first-child {
-    width: 40% !important;
-    min-width: 120px !important;
-    max-width: 220px !important;
-    flex-shrink: 0 !important;
-    font-size: 13px !important;
-    font-weight: 500 !important;
-    color: #4b5563 !important;
-    text-align: left !important;
-}
-.dark .param-row > span:first-child { color: #9ca3af !important; }
-
-.param-row > span:last-child {
-    flex-grow: 1 !important;
-    font-size: 13px !important;
-    font-weight: 500 !important;
-    color: #111827 !important;
-    text-align: left !important;
-}
-.dark .param-row > span:last-child { color: #e5e7eb !important; }
-
-@media (max-width: 480px) {
-    .param-row > span:first-child { min-width: 80px !important; width: 35% !important; }
-}
+/* 注：`.param-row` 的旧样式（!important 强制 flex-row / 去边框 / 去圆角）已移除。
+   该类现仅供 index.html 的指标磁贴占位，布局与配色全部由磁贴自身的 Tailwind
+   工具类（flex flex-col bg-* border rounded-xl 等）决定；沿用旧 !important
+   会压过这些工具类，导致「活跃卡槽」等磁贴布局错乱。 */
 
 /* 控制台/日志 — 现代极客玄黑终端风格 */
 .terminal-box {

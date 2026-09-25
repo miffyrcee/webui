@@ -141,10 +141,7 @@ pub async fn login_post_handler(
 
         push_log("INFO", "Auth", &format!("管理员登录成功 (来源: {})", ip));
 
-        let cookie = format!(
-            "auth_token={}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=604800",
-            token
-        );
+        let cookie = build_auth_cookie(&token, state.enable_https);
 
         Response::builder()
             .status(StatusCode::OK)
@@ -181,4 +178,36 @@ pub async fn logout_post_handler() -> Response {
         .header(header::CONTENT_TYPE, "application/json")
         .body(axum::body::Body::from(r#"{"success":true}"#))
         .unwrap()
+}
+
+/// 构造登录 Cookie。`Secure` 仅在 HTTPS 下可加：
+/// 纯 HTTP（含 TLS 初始化失败回退）时带 `Secure` 会被浏览器直接丢弃，
+/// 导致接口返回 200 却始终无法登录。
+fn build_auth_cookie(token: &str, secure: bool) -> String {
+    let secure_flag = if secure { " Secure;" } else { "" };
+    format!(
+        "auth_token={}; HttpOnly;{} Path=/; SameSite=Lax; Max-Age=604800",
+        token, secure_flag
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_auth_cookie;
+
+    #[test]
+    fn auth_cookie_sets_secure_over_https() {
+        let c = build_auth_cookie("tok", true);
+        assert!(c.contains("; Secure;"), "HTTPS 下必须带 Secure: {}", c);
+    }
+
+    #[test]
+    fn auth_cookie_omits_secure_over_http() {
+        let c = build_auth_cookie("tok", false);
+        assert!(
+            !c.contains("Secure"),
+            "纯 HTTP 下不得带 Secure，否则浏览器丢弃 Cookie: {}",
+            c
+        );
+    }
 }

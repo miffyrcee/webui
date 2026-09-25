@@ -7,6 +7,15 @@
  * 所有出站载荷必须经本模块构造，避免各处手写裸对象时踩类型陷阱。
  */
 
+/**
+ * 空中扫频（AT+COPS=?）的前端等待上限。
+ *
+ * 后端 `scan_available_networks` 的超时为 240s（见 src/backend/real.rs）。
+ * 前端若先于后端超时，会在模组仍被独占时解除加载态，用户此时点击其他控件，
+ * 指令只会堆在硬件 Actor 队列里继续超时。故此处必须留出余量。
+ */
+export const SCAN_TIMEOUT_MS = 250000;
+
 /** 客户端 → 服务端 action 名（与 src/main.rs 的 dispatch 一一对应） */
 export const ACTIONS = {
   MANUAL_AT: 'manual_at',

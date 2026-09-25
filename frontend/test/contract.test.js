@@ -15,7 +15,16 @@ import {
   extractPercent,
   extractSlashPercent,
   DIAG,
+  SCAN_TIMEOUT_MS,
 } from '../src/js/contract.js';
+
+test('扫频前端超时必须大于后端 AT+COPS=? 的 240s 上限', () => {
+  // 否则前端会先解除加载态，用户后续点击的指令全部堆在硬件 Actor 队列中
+  assert.ok(
+    SCAN_TIMEOUT_MS > 240000,
+    `SCAN_TIMEOUT_MS=${SCAN_TIMEOUT_MS} 必须 > 240000`,
+  );
+});
 
 test('parseAtResponse 规范化 CRLF 并去掉尾部空行', () => {
   assert.equal(parseAtResponse('OK\r\n\r\n'), 'OK');

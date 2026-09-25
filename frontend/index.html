@@ -23,6 +23,17 @@
         <span x-text="$store.ui.loadingText"></span>
     </div>
 
+    <!-- ================= 扫频独占期交互阻断 =================
+         AT+COPS=? 期间硬件 Actor 被独占（后端超时 240s），此遮罩阻断其余点击，
+         否则用户下发的指令只会堆在命令通道（容量 32）中逐一超时 -->
+    <div x-show="$store.net.scan.scanning" x-cloak
+        class="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-[1px] flex items-start justify-center pt-24 cursor-not-allowed">
+        <div class="mx-4 max-w-md bg-white dark:bg-[#111622] border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl px-5 py-4 text-center">
+            <p class="text-sm font-semibold text-slate-800 dark:text-slate-100">模组射频扫描中</p>
+            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">AT+COPS=? 最长约 240 秒，期间其他指令会被阻塞，请勿操作。</p>
+        </div>
+    </div>
+
     <!-- ========================== WebSocket 断连全屏遮罩 ========================== -->
     <div x-show="!$store.ws.connected" x-cloak class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center">
         <div class="bg-white dark:bg-[#111622] p-6 rounded-2xl shadow-xl text-center space-y-3">

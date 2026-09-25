@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::actor::action::DiagnosticType;
 use crate::actor::telemetry::TelemetryData;
 use crate::at::{
-    builder::{encode_ucs2_hex, needs_ucs2, sanitize_at_param},
+    builder::{sanitize_at_param, sanitize_sms_body, sms_hex_body_if_needed},
     format_bytes,
     parser::{
         ParsedLine, is_valid_data_apn, parse_cgpaddr, parse_cops_scan, parse_net_status,
@@ -145,64 +145,67 @@ impl HardwareBackend for RealBackend {
     }
 
     async fn send_sms_msg(&self, recipient: &str, message: &str) -> bool {
+        // 号码需完整过滤（含 \r\n）；正文仅剥离 0x1A，必须保留换行
         let recipient = sanitize_at_param(recipient);
-        let message = sanitize_at_param(message);
+        let message = sanitize_sms_body(message);
 
-        if !needs_ucs2(&message) {
-            // GSM 7-bit 默认编码（原有逻辑）
-            if send_at_command_inner(&self.serial_path, "AT+CMGF=1")
-                .await
-                .is_ok()
-            {
-                send_sms_command_inner(
-                    &self.serial_path,
-                    &format!("AT+CMGS=\"{}\"", recipient),
-                    &message,
-                    None,
-                )
-                .await
-                .is_ok()
-            } else {
-                false
+        match sms_hex_body_if_needed(&message) {
+            // GSM 7-bit：文本模式直接下发正文
+            None => {
+                if send_at_command_inner(&self.serial_path, "AT+CMGF=1")
+                    .await
+                    .is_ok()
+                {
+                    send_sms_command_inner(
+                        &self.serial_path,
+                        &format!("AT+CMGS=\"{}\"", recipient),
+                        &message,
+                        None,
+                    )
+                    .await
+                    .is_ok()
+                } else {
+                    false
+                }
             }
-        } else {
-            // UCS2 短信使用文本模式 + DCS=8 发送
+            // UCS2：以原始字节经 --hex-body 下发，避免 hex 文本被当作正文
             // Quectel 模块在 CSCS="UCS2" 文本模式下不支持 AT+CMGS，
             // 故保持 CSCS="GSM"（号码保持 ASCII），通过 CSMP DCS=8
-            // 指定消息体为 UCS2 编码，将 UCS2 hex 文本作为正文发送。
-            if send_at_command_inner(&self.serial_path, "AT+CMGF=1")
-                .await
-                .is_err()
-            {
-                return false;
-            }
-            if send_at_command_inner(&self.serial_path, "AT+CSCS=\"GSM\"")
-                .await
-                .is_err()
-            {
-                return false;
-            }
-            if send_at_command_inner(&self.serial_path, "AT+CSMP=17,167,0,8")
-                .await
-                .is_err()
-            {
-                return false;
-            }
+            // 指定消息体为 UCS2，并将正文以 UCS2 原始字节写入。
+            Some(hex_body) => {
+                if send_at_command_inner(&self.serial_path, "AT+CMGF=1")
+                    .await
+                    .is_err()
+                {
+                    return false;
+                }
+                if send_at_command_inner(&self.serial_path, "AT+CSCS=\"GSM\"")
+                    .await
+                    .is_err()
+                {
+                    return false;
+                }
+                if send_at_command_inner(&self.serial_path, "AT+CSMP=17,167,0,8")
+                    .await
+                    .is_err()
+                {
+                    return false;
+                }
 
-            let ucs2_hex_msg = encode_ucs2_hex(&message);
-            let result = send_sms_command_inner(
-                &self.serial_path,
-                &format!("AT+CMGS=\"{}\"", recipient),
-                &ucs2_hex_msg,
-                None,
-            )
-            .await
-            .is_ok();
+                let result = send_sms_command_inner(
+                    &self.serial_path,
+                    &format!("AT+CMGS=\"{}\"", recipient),
+                    "",
+                    Some(&hex_body),
+                )
+                .await
+                .is_ok();
 
-            // 复位 CSMP（DCS=0 默认编码）
-            let _ = send_at_command_inner(&self.serial_path, "AT+CSMP=17,167,0,0").await;
+                // 复位 CSMP（DCS=0 默认编码）
+                let _ = send_at_command_inner(&self.serial_path, "AT+CSMP=17,167,0,0").await;
 
-            result
+                result
+            }
         }
     }
 

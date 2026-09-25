@@ -7,7 +7,7 @@
  *   - 失败与超时一律保留用户输入与选中态，不做乐观清空；
  *   - 只有后端确认成功后才执行"清空/高亮"这类破坏性 UI 更新。
  */
-import { ACTIONS, TYPES, DIAG, payload } from './contract.js';
+import { ACTIONS, TYPES, DIAG, payload, SCAN_TIMEOUT_MS } from './contract.js';
 
 export const NR5G_BANDS = ['1', '3', '5', '7', '8', '20', '28', '38', '41', '71', '77', '78', '79'];
 export const LTE_BANDS = ['1', '3', '5', '7', '8', '20', '28', '34', '38', '39', '40', '41'];
@@ -66,8 +66,8 @@ export function createNetStore({ request, send, isPending, ui }) {
     // ---- 扫频 ----
     scan: {
       scanning: false,
-      btnText: '触发扫频 (15s+)',
-      statusText: '等待搜网。请确保射频已经开启，搜网操作大约会中断空口连接 15-30 秒。',
+      btnText: '触发扫频',
+      statusText: '等待搜网。请确保射频已开启；扫频期间空口连接会中断，最长约 240 秒。',
       networks: [],
     },
 
@@ -316,16 +316,16 @@ export function createNetStore({ request, send, isPending, ui }) {
     startNetworkScan() {
       if (this.scan.scanning) return;
       this.scan.scanning = true;
-      this.scan.btnText = '正在后台扫描中...';
-      this.scan.statusText = '正在扫描全网运营商公开基站频点（预计 15~30 秒，期间网络会短暂中断）...';
+      this.scan.btnText = '正在扫描中...';
+      this.scan.statusText = '模组射频扫描中（AT+COPS=?，最长约 240 秒），期间其他指令会被阻塞。';
       ui.showLoading('正在深度扫频搜网中，请耐心等待...');
 
       if (!request(ACTIONS.NETWORK_SCAN, payload.networkScan(), {
         expect: TYPES.SCAN_RESULT,
-        timeoutMs: 90000,
+        timeoutMs: SCAN_TIMEOUT_MS,
       }).ok) {
         this.scan.scanning = false;
-        this.scan.btnText = '触发扫频 (15s+)';
+        this.scan.btnText = '触发扫频';
         this.scan.statusText = '✗ 连接不可用，指令未下发';
         ui.hideLoading();
       }
@@ -486,7 +486,7 @@ export function createNetStore({ request, send, isPending, ui }) {
 
     onScanResult(data) {
       this.scan.scanning = false;
-      this.scan.btnText = '触发扫频 (15s+)';
+      this.scan.btnText = '触发扫频';
       this.scan.networks = Array.isArray(data?.networks) ? data.networks : [];
       this.scan.statusText = data?.status || '扫描结束。';
       ui.hideLoading();
@@ -551,7 +551,7 @@ export function createNetStore({ request, send, isPending, ui }) {
           return true;
         case TYPES.SCAN_RESULT:
           this.scan.scanning = false;
-          this.scan.btnText = '触发扫频 (15s+)';
+          this.scan.btnText = '触发扫频';
           this.scan.statusText = '✗ 扫频超时（后端未返回），请重试。';
           ui.hideLoading();
           return true;

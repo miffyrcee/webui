@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - RM520N 5G WebUI</title>
+    <meta name="theme-color" content="#f8f9fe" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#080b14" media="(prefers-color-scheme: dark)">
+    <link rel="stylesheet" href="./src/css/style.css">
+    <script type="module" src="./src/js/login.js"></script>
+</head>
+
+<body class="font-sans login-page" x-data="loginForm">
+
+    <!-- 背景几何渐变容器 -->
+    <div class="login-wallpaper-container"></div>
+
+    <!-- 主题切换按钮 -->
+    <button type="button" title="切换白天/夜晚模式" @click="toggleTheme()"
+        class="login-theme-toggle fixed top-5 right-5 z-50 p-2.5 rounded-xl bg-white/10 dark:bg-white/10 border border-white/15 dark:border-white/10 text-slate-300 dark:text-slate-400 hover:bg-white/20 hover:text-white transition-all duration-200 cursor-pointer">
+        <svg aria-hidden="true" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m12.728 12.728l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
+        </svg>
+        <svg aria-hidden="true" class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+        </svg>
+    </button>
+
+    <!-- 登录毛玻璃卡片 -->
+    <div class="argon-login-card mx-4">
+
+        <!-- Brand Header -->
+        <div class="text-center mb-7">
+            <div class="inline-flex items-center justify-center gap-2 mb-1.5">
+                <span class="text-[26px] font-black tracking-wider bg-gradient-to-r from-indigo-500 to-purple-500 bg-clip-text text-transparent">Argon</span>
+                <span class="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded bg-indigo-500/15 border border-indigo-500/30 text-indigo-400">RM520N</span>
+            </div>
+            <p class="text-[11px] font-semibold tracking-[1.5px] uppercase text-slate-400 dark:text-slate-400 m-0">5G NR CELLULAR CONTROL CENTER</p>
+        </div>
+
+        <!-- 登录表单 -->
+        <form @submit.prevent="submit()" class="space-y-5">
+            <div>
+                <label for="username" class="block text-[11px] font-semibold tracking-wider uppercase text-slate-300 dark:text-slate-400 mb-1.5">用户名</label>
+                <input id="username" type="text" x-model="username" required placeholder="请输入用户名"
+                    class="w-full box-border bg-[#1a202c] border border-[#2d3748] text-white rounded-xl px-3.5 py-3 text-[14px] outline-none transition-all duration-200 placeholder:text-[#525f7f] focus:border-indigo-500 focus:bg-[#20293a] focus:ring-2 focus:ring-indigo-500/20" />
+            </div>
+
+            <div>
+                <label for="password" class="block text-[11px] font-semibold tracking-wider uppercase text-slate-300 dark:text-slate-400 mb-1.5">密码</label>
+                <input id="password" type="password" x-model="password" required placeholder="••••••••"
+                    class="w-full box-border bg-[#1a202c] border border-[#2d3748] text-white rounded-xl px-3.5 py-3 text-[14px] outline-none transition-all duration-200 placeholder:text-[#525f7f] focus:border-indigo-500 focus:bg-[#20293a] focus:ring-2 focus:ring-indigo-500/20" />
+            </div>
+
+            <!-- 错误提示 -->
+            <div x-show="errorText" x-text="errorText" x-cloak
+                class="text-center text-[12px] py-2.5 px-3 rounded-lg bg-red-500/15 border border-red-500/30 text-red-400"></div>
+
+            <!-- 登录按钮 -->
+            <button type="submit" :disabled="submitting"
+                class="w-full h-[46px] bg-gradient-to-r from-indigo-600 to-purple-600 border-none rounded-xl text-white text-[14px] font-bold tracking-[2px] cursor-pointer shadow-lg shadow-indigo-600/35 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-indigo-600/50 active:translate-y-0 disabled:opacity-60 disabled:cursor-not-allowed mt-1"
+                x-text="submitting ? '正在验证...' : '解 锁 进 入'">
+            </button>
+        </form>
+
+        <!-- Footer -->
+        <div class="mt-6 pt-4 border-t border-white/10 text-center text-[11px] text-slate-400 leading-relaxed">
+            凭证通过环境变量 <code class="text-indigo-400 font-mono">WEBUI_USERNAME</code> / <code class="text-indigo-400 font-mono">WEBUI_PASSWORD</code> 配置<br>
+            用户名与密码均加密传输
+        </div>
+    </div>
+
+</body>
+
+</html>

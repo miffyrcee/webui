@@ -1681,13 +1681,51 @@ async fn send_at_get_line(serial_path: &str, cmd: &str) -> Option<String> {
         })
 }
 
-fn static_file_response(
-    body: &'static str,
-    content_type: &'static str,
-) -> Result<Response<axum::body::Body>, AppError> {
-    Ok(Response::builder()
-        .header(header::CONTENT_TYPE, content_type)
-        .body(axum::body::Body::from(body))?)
+// ============================================================================
+// 前端静态资源：dist/ 由 Vite 构建产出，编译期整体嵌入二进制
+// ============================================================================
+
+/// `dist/` 下的全部产物（index.html / login.html / assets/*）
+#[derive(rust_embed::RustEmbed)]
+#[folder = "dist/"]
+struct Asset;
+
+/// 读取嵌入资源并补齐 Content-Type 与缓存策略；未命中返回 None
+fn embedded_file(path: &str) -> Option<Response<axum::body::Body>> {
+    let file = Asset::get(path)?;
+    let mime = mime_guess::from_path(path).first_or_octet_stream();
+    // Vite 产物自带内容哈希，可长期强缓存；HTML 入口保持协商缓存以跟随版本更新
+    let cache_control = if path.starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    };
+
+    Response::builder()
+        .header(header::CONTENT_TYPE, mime.as_ref())
+        .header(header::CACHE_CONTROL, cache_control)
+        .body(axum::body::Body::from(file.data.into_owned()))
+        .ok()
+}
+
+/// 兜底静态资源处理器：命中嵌入资源则返回，否则 404
+async fn static_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    let path = if path.is_empty() { "index.html" } else { path };
+
+    // index.html 是唯一可被直接访问的 HTML 入口，必须与 `/` 享有同样的认证保护
+    if path == "index.html" && !is_authenticated(&headers, &state.jwt_secret) {
+        return Redirect::to("/login").into_response();
+    }
+
+    match embedded_file(path) {
+        Some(response) => response,
+        None => (StatusCode::NOT_FOUND, "404 Not Found").into_response(),
+    }
 }
 
 // ============================================================================
@@ -1767,14 +1805,16 @@ async fn index_handler(State(state): State<Arc<AppState>>, headers: HeaderMap) -
     if !is_authenticated(&headers, &state.jwt_secret) {
         return Ok(Redirect::to("/login").into_response());
     }
-    static_file_response(include_str!("index.html"), "text/html; charset=utf-8")
+    embedded_file("index.html")
+        .ok_or_else(|| AppError(anyhow::anyhow!("嵌入资源缺失: index.html")))
 }
 
 async fn login_get_handler(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<Response, AppError> {
     if is_authenticated(&headers, &state.jwt_secret) {
         return Ok(Redirect::to("/").into_response());
     }
-    static_file_response(include_str!("login.html"), "text/html; charset=utf-8")
+    embedded_file("login.html")
+        .ok_or_else(|| AppError(anyhow::anyhow!("嵌入资源缺失: login.html")))
 }
 
 async fn login_post_handler(
@@ -2572,7 +2612,7 @@ async fn main() {
         .route("/api/login", post(login_post_handler))
         .route("/api/logout", post(logout_post_handler))
         .route("/ws", get(ws_handler))
-        .route("/style.css", get(style_handler))
+        .fallback(static_handler)
         .with_state(app_state);
 
     // ========================================================================
@@ -2914,16 +2954,6 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     // _guard.drop() 自动根据 is_view_active 标志决定是否递减
 
     push_log("INFO", "WS", &format!("WebSocket 客户端已断开 (当前在线: {})", state.tx.receiver_count()));
-}
-
-async fn style_handler() -> impl IntoResponse {
-    static_file_response(
-        include_str!("../templates/style.css"),
-        "text/css; charset=utf-8",
-    )
-    .unwrap_or_else(|_| {
-        (StatusCode::INTERNAL_SERVER_ERROR, "CSS not found").into_response()
-    })
 }
 
 #[cfg(test)]

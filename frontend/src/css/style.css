@@ -8,9 +8,9 @@
 /* 深色模式变体 */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* 扫描源 */
-@source "./index.html";
-@source "./login.html";
+/* 扫描源：Vite root 为 frontend/，自动探测已覆盖，这里显式声明避免歧义 */
+@source "../../index.html";
+@source "../../login.html";
 
 /* ============================================================
    Argon 设计主题令牌
@@ -67,6 +67,10 @@
 html, body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
+
+/* Alpine 接管前的元素不应闪一下再隐藏 */
+[x-cloak] { display: none !important; }
+
 body {
     background-color: #f4f5f7;
 }
@@ -117,7 +121,7 @@ body {
 }
 
 /* 控制台/日志 — 现代极客玄黑终端风格 */
-#console_output, #diag_output, #settings_log {
+.terminal-box {
     background-color: #0a0d14 !important;
     border: 1px solid rgba(255, 255, 255, 0.08) !important;
     font-family: 'Fira Code', 'JetBrains Mono', 'Consolas', 'SFMono-Regular', 'Menlo', monospace !important;
@@ -128,8 +132,14 @@ body {
     padding: 16px !important;
     color: #e2e8f0 !important;
 }
-.dark #console_output, .dark #diag_output, .dark #settings_log {
+.dark .terminal-box {
     background-color: #06080f !important;
+}
+
+/* 诊断出错时的终端配色（旧版 color !important 导致错误样式从不生效） */
+.terminal-box-error {
+    border-color: rgba(245, 54, 92, 0.45) !important;
+    color: #fca5b5 !important;
 }
 
 /* Argon 开关 */
@@ -165,14 +175,14 @@ body {
 .dark ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
 
 /* 复制提示气泡 */
-#copy_toast {
+.copy-toast {
     background: linear-gradient(135deg, #5e72e4, #825ee4) !important;
     border-radius: 8px !important;
     box-shadow: 0 4px 20px rgba(94, 114, 228, 0.3) !important;
 }
 
 /* ============================================================
-   登录页专用背景（几何装饰）
+   登录页专用（背景几何装饰 + 毛玻璃卡片）
    ============================================================ */
 .login-wallpaper-container {
     position: fixed; inset: 0; z-index: -1; overflow: hidden;
@@ -189,4 +199,53 @@ body {
     position: absolute; bottom: -30%; left: -10%; width: 70%; height: 90%;
     background: radial-gradient(circle, rgba(130, 94, 228, 0.12) 0%, transparent 70%);
     pointer-events: none;
+}
+
+.login-page {
+    margin: 0; padding: 0;
+    width: 100vw; height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden; user-select: none;
+}
+
+.argon-login-card {
+    width: 100%;
+    max-width: 400px;
+    padding: 2rem;
+    border-radius: 1.5rem;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 40px rgba(94, 114, 228, 0.15);
+    transition: all 0.3s ease;
+}
+
+/* 亮色模式样式覆盖 */
+html:not(.dark) body { background: #f4f5f7; }
+html:not(.dark) .argon-login-card {
+    background: rgba(255, 255, 255, 0.85) !important;
+    border-color: rgba(0, 0, 0, 0.08) !important;
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.08), 0 0 60px rgba(94, 114, 228, 0.08) !important;
+}
+html:not(.dark) .argon-login-card input {
+    background-color: #ffffff !important;
+    border-color: #e2e8f0 !important;
+    color: #1e293b !important;
+}
+html:not(.dark) .argon-login-card input:focus {
+    border-color: #5e72e4 !important;
+    box-shadow: 0 0 0 3px rgba(94, 114, 228, 0.15) !important;
+}
+html:not(.dark) .argon-login-card input::placeholder { color: #94a3b8 !important; }
+html:not(.dark) .argon-login-card label { color: #64748b !important; }
+html:not(.dark) .argon-login-card .border-t { border-color: rgba(0, 0, 0, 0.06) !important; }
+html:not(.dark) .login-theme-toggle {
+    background: rgba(0, 0, 0, 0.05) !important;
+    border-color: rgba(0, 0, 0, 0.08) !important;
+    color: #64748b !important;
+}
+html:not(.dark) .login-theme-toggle:hover {
+    background: rgba(0, 0, 0, 0.1) !important;
+    color: #1e293b !important;
 }

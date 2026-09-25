@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RM520N 5G WebUI</title>
+    <meta name="theme-color" content="#f8f9fe" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#080a14" media="(prefers-color-scheme: dark)">
+    <link rel="stylesheet" href="./src/css/style.css">
+    <script type="module" src="./src/js/app.js"></script>
+</head>
+
+<body class="bg-slate-100 dark:bg-[#0c0f16] text-slate-800 dark:text-slate-200 font-sans min-h-screen flex overflow-hidden transition-colors duration-300" x-data>
+
+    <!-- ========================== 全局操作加载状态 Banner ========================== -->
+    <div x-show="$store.ui.globalLoading" x-cloak
+        class="fixed top-3 left-1/2 -translate-x-1/2 z-50 bg-indigo-600/90 text-white px-5 py-2 rounded-full shadow-lg backdrop-blur flex items-center space-x-2.5 text-xs font-semibold animate-pulse">
+        <svg class="animate-spin h-3.5 w-3.5 text-white shrink-0" viewBox="0 0 24 24" fill="none">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span x-text="$store.ui.loadingText"></span>
+    </div>
+
+    <!-- ========================== WebSocket 断连全屏遮罩 ========================== -->
+    <div x-show="!$store.ws.connected" x-cloak class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center">
+        <div class="bg-white dark:bg-[#111622] p-6 rounded-2xl shadow-xl text-center space-y-3">
+            <div class="animate-spin text-indigo-600 dark:text-indigo-400 w-8 h-8 mx-auto border-4 border-indigo-600 border-t-transparent rounded-full"></div>
+            <p class="text-sm font-semibold text-slate-700 dark:text-slate-200">与模组通信中断，正在尝试重连...</p>
+        </div>
+    </div>
+
+    <!-- ========================== 1. 左侧固定侧边栏 (Sidebar) ========================== -->
+    <aside class="fixed md:static inset-y-0 left-0 w-64 h-screen bg-white dark:bg-[#111622] border-r border-slate-200 dark:border-slate-800/60 flex flex-col justify-between shrink-0 z-30 transition-transform duration-300"
+        :class="$store.ui.mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
+        <div>
+            <!-- 标志与 WebSocket 连接指示灯 -->
+            <div class="p-6 border-b border-slate-100 dark:border-slate-800/40 flex items-center justify-between">
+                <div class="flex items-center space-x-2.5">
+                    <span class="text-xl font-black tracking-wider bg-gradient-to-r from-indigo-600 to-purple-500 bg-clip-text text-transparent">Argon</span>
+                    <span class="text-[9px] bg-indigo-500/10 dark:bg-indigo-400/10 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded font-bold tracking-wider border border-indigo-500/20">RM520N</span>
+                </div>
+                <div class="w-2.5 h-2.5 rounded-full shadow-lg transition-all duration-500"
+                    :class="$store.ws.connected ? 'bg-green-500 shadow-green-500/50 animate-pulse' : 'bg-red-500 shadow-red-500/30 animate-ping'"></div>
+            </div>
+
+            <!-- 垂直导航菜单区 -->
+            <nav role="tablist" class="py-2 space-y-0.5">
+                <button type="button" role="tab" :aria-selected="$store.ui.currentTab === 'dashboard'" @click="$store.ui.switchTab('dashboard')"
+                    class="w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer transition-colors duration-200"
+                    :class="$store.ui.currentTab === 'dashboard' ? 'bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border-l-2 border-indigo-500' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/40 border-l-2 border-transparent'">
+                    <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>
+                    <span>仪表盘 Dashboard</span>
+                </button>
+                <button type="button" role="tab" :aria-selected="$store.ui.currentTab === 'network'" @click="$store.ui.switchTab('network')"
+                    class="w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer transition-colors duration-200"
+                    :class="$store.ui.currentTab === 'network' ? 'bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border-l-2 border-indigo-500' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/40 border-l-2 border-transparent'">
+                    <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z"/></svg>
+                    <span>蜂窝与射频 Network &amp; RF</span>
+                </button>
+                <button type="button" role="tab" :aria-selected="$store.ui.currentTab === 'sms'" @click="$store.ui.switchTab('sms')"
+                    class="w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer transition-colors duration-200"
+                    :class="$store.ui.currentTab === 'sms' ? 'bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border-l-2 border-indigo-500' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/40 border-l-2 border-transparent'">
+                    <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
+                    <span>短信中心 SMS</span>
+                </button>
+                <button type="button" role="tab" :aria-selected="$store.ui.currentTab === 'usb'" @click="$store.ui.switchTab('usb')"
+                    class="w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer transition-colors duration-200"
+                    :class="$store.ui.currentTab === 'usb' ? 'bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border-l-2 border-indigo-500' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/40 border-l-2 border-transparent'">
+                    <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25"/></svg>
+                    <span>USB 配置</span>
+                </button>
+                <button type="button" role="tab" :aria-selected="$store.ui.currentTab === 'logs'" @click="$store.ui.switchTab('logs')"
+                    class="w-full flex items-center gap-3 px-6 py-2.5 text-sm font-medium cursor-pointer transition-colors duration-200"
+                    :class="$store.ui.currentTab === 'logs' ? 'bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border-l-2 border-indigo-500' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/40 border-l-2 border-transparent'">
+                    <svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+                    <span>系统日志 Logs</span>
+                </button>
+            </nav>
+        </div>
+
+        <!-- 侧边栏页脚底座 -->
+        <div class="p-6 border-t border-slate-100 dark:border-slate-800/40">
+            <div class="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest text-center">
+                固件版本: <span class="font-bold text-slate-700 dark:text-slate-300" x-text="$store.ui.firmwareVersion"></span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- 移动端侧边栏遮罩背景 -->
+    <div x-show="$store.ui.mobileMenuOpen" x-cloak @click="$store.ui.mobileMenuOpen = false"
+        class="fixed inset-0 bg-black/40 z-20 md:hidden transition-opacity duration-300"></div>
+
+    <!-- ========================== 2. 右侧主体内容容器 ========================== -->
+    <div class="flex-1 h-screen flex flex-col overflow-hidden transition-all duration-300"
+        :class="!$store.ws.connected && 'opacity-60 pointer-events-none'">
+
+        <!-- 顶部 Argon 毛玻璃 Header -->
+        <header class="h-16 shrink-0 backdrop-blur-xl bg-white/70 dark:bg-[#0c0f16]/80 flex items-center justify-between px-6 md:px-8 border-b border-black/5 dark:border-white/5 z-10 transition-colors duration-300">
+            <div class="flex items-center">
+                <!-- 汉堡折叠按钮 -->
+                <button type="button" @click.stop="$store.ui.mobileMenuOpen = !$store.ui.mobileMenuOpen"
+                    class="md:hidden p-2 -ml-2 mr-2 text-slate-600 dark:text-slate-400 hover:bg-black/5 dark:hover:bg-white/10 rounded-lg transition-colors cursor-pointer" title="展开菜单">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                </button>
+                <span class="text-xs font-bold tracking-widest uppercase text-slate-600 dark:text-slate-400" x-text="$store.ui.pageTitle"></span>
+            </div>
+
+            <div class="flex items-center space-x-3">
+                <span class="hidden sm:inline-block text-[10px] bg-indigo-500/10 dark:bg-indigo-400/10 text-indigo-600 dark:text-indigo-400 px-2.5 py-1 rounded-full font-bold tracking-wider uppercase border border-indigo-500/20 dark:border-indigo-400/20">Auto Refresh On</span>
+                <!-- 主题日光/月光转换开关 -->
+                <button type="button" @click="$store.ui.toggleTheme()" class="p-2 rounded-lg bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 transition-all active:scale-95 text-slate-600 dark:text-slate-400 cursor-pointer" title="切换白天/夜晚模式" aria-label="切换白天/夜晚模式">
+                    <svg aria-hidden="true" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m12.728 12.728l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
+                    </svg>
+                    <svg aria-hidden="true" class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                    </svg>
+                </button>
+                <!-- 退出登录按钮 -->
+                <button type="button" @click="logout()" class="p-2 rounded-lg bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 transition-all active:scale-95 text-slate-600 dark:text-slate-400 cursor-pointer" title="退出登录" aria-label="退出登录">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- 独立滚动渲染主体 (Main Container) -->
+        <main class="flex-1 overflow-y-auto scrollbar-thin p-6 md:p-8 space-y-6">
+
+            <!-- ==================== 2.1 Dashboard 仪表盘面板 ==================== -->
+            <div role="tabpanel" x-show="$store.ui.currentTab === 'dashboard'" x-cloak class="space-y-6">
+
+                <!-- 核心指标卡片 -->
+                <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 duration-300">
+                        <div class="flex justify-between items-start">
+                            <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">工作温度 Temp</span>
+                            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20">
+                                <svg aria-hidden="true" class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2V5a3 3 0 116 0v14zm0 0h6m-6-4h6m-6-4h4m-4-4h4"></path></svg>
+                            </div>
+                        </div>
+                        <div class="mt-3"><span class="text-2xl font-bold tracking-tight text-amber-500" x-text="$store.telemetry.temperature"></span></div>
+                    </div>
+
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 duration-300">
+                        <div class="flex justify-between items-start">
+                            <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">SIM 卡状态 SIM</span>
+                            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                                <svg aria-hidden="true" class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2" stroke-linejoin="round"></rect><path d="M12 9h4m-4 4h4m-4 4h4M8 7v10" stroke-linecap="round"></path></svg>
+                            </div>
+                        </div>
+                        <div class="mt-3"><span class="text-2xl font-bold tracking-tight text-indigo-600 dark:text-indigo-400" x-text="$store.telemetry.sim_status"></span></div>
+                    </div>
+
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 duration-300">
+                        <div class="flex justify-between items-start">
+                            <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">信号质量 Signal</span>
+                            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-400 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
+                                <svg aria-hidden="true" class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 10h.01M15 13h.01M12 16h.01M9 19h.01M21 6h.01"></path><path stroke-linecap="round" d="M12 18v2m3-5v5m3-8v8M9 20v-1"></path></svg>
+                            </div>
+                        </div>
+                        <div class="mt-3"><span class="text-2xl font-bold tracking-tight text-blue-600 dark:text-blue-400" x-text="$store.telemetry.signal_percentage"></span></div>
+                    </div>
+
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 duration-300">
+                        <div class="flex justify-between items-start">
+                            <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">因特网连接 Link</span>
+                            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-green-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                                <svg aria-hidden="true" class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path></svg>
+                            </div>
+                        </div>
+                        <div class="mt-3"><span class="text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400" x-text="$store.telemetry.internet_connection"></span></div>
+                    </div>
+
+                    <!-- CPU 使用率卡片 -->
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 duration-300">
+                        <div class="flex justify-between items-start">
+                            <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">CPU 负载 Usage</span>
+                            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-orange-500 flex items-center justify-center shadow-lg shadow-rose-500/20">
+                                <svg aria-hidden="true" class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3v1.5M4.5 8.25H3m3.75 0l-1.5-1.5M12 3l-.75 1.5m4.5 0L21 3m-3 7.5A5.25 5.25 0 006 10.5M21 3v3m-1.5 9.75v1.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V7.5a2.25 2.25 0 012.25-2.25h15a2.25 2.25 0 012.25 2.25v6.75z"/></svg>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <span class="text-2xl font-bold tracking-tight text-rose-500 dark:text-rose-400" x-text="$store.telemetry.cpu_usage"></span>
+                        </div>
+                        <div class="mt-2 w-full h-1 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
+                            <div class="bg-gradient-to-r from-rose-500 to-orange-400 h-full rounded-full transition-all duration-500" :style="`width: ${$store.telemetry.cpuPercent}%`"></div>
+                        </div>
+                    </div>
+
+                    <!-- 内存使用率卡片 -->
+                    <div class="bg-white dark:bg-[#131722] border border-slate-200/70 dark:border-white/5 rounded-2xl p-5 flex flex-col justify-between min-h-[110px] shadow-sm hover:shadow-lg hover:-translate-y-0.5 duration-300">
+                        <div class="flex justify-between items-start">
+                            <span class="text-[11px] font-semibold tracking-wider uppercase text-slate-400 dark:text-slate-500">内存使用 Memory</span>
+                            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 to-teal-500 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                                <svg aria-hidden="true" class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/></svg>
+                            </div>
+                        </div>
+                        <div class="mt-3 flex items-baseline gap-2">
+                            <span class="text-2xl font-bold tracking-tight text-cyan-500 dark:text-cyan-400" x-text="$store.telemetry.memory_usage"></span>
+                        </div>
+                        <div class="mt-2 w-full h-1 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
+                            <div class="bg-gradient-to-r from-cyan-400 to-teal-500 h-full rounded-full transition-all duration-500" :style="`width: ${$store.telemetry.memoryPercent}%`"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 核心双栏指标面板 -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                    <!-- 左栏: 网络信息 -->
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col justify-between shadow-sm overflow-hidden">
+                        <div>
+                            <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
+                                <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">网络架构参数 / Network Info</h2>
+                            </div>
+                            <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">活跃卡槽 Slot</span>
+                                    <div class="flex items-center gap-2 mt-1">
+                                        <template x-for="slot in [1, 2]" :key="slot">
+                                            <button type="button" @click="$store.net.setSimSlot(slot)"
+                                                class="flex-1 whitespace-nowrap min-w-[52px] font-semibold px-2 py-1 text-[11px] rounded transition-all active:scale-95 cursor-pointer border"
+                                                :class="String($store.telemetry.active_sim).includes(String(slot))
+                                                    ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-400 dark:border-indigo-500 text-indigo-700 dark:text-indigo-300'
+                                                    : 'bg-slate-100 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'"
+                                                x-text="`SIM ${slot}`"></button>
+                                        </template>
+                                    </div>
+                                    <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-1 min-h-[14px]" x-text="$store.net.simSlotStatusText"></div>
+                                </div>
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">运营商 Provider</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-semibold mt-1 truncate cursor-pointer" title="双击/单击可复制" @click="$store.ui.copyText($store.telemetry.network_provider)" x-text="$store.telemetry.network_provider"></span>
+                                </div>
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">MCCMNC</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-semibold mt-1 cursor-pointer" @click="$store.ui.copyText($store.telemetry.mccmnc)" x-text="$store.telemetry.mccmnc"></span>
+                                </div>
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">APN 接入点</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-semibold mt-1 select-all uppercase cursor-pointer" @click="$store.ui.copyText($store.telemetry.apn)" x-text="$store.telemetry.apn"></span>
+                                </div>
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">网络模式 Mode</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-semibold mt-1 cursor-pointer" @click="$store.ui.copyText($store.telemetry.network_mode)" x-text="$store.telemetry.network_mode"></span>
+                                </div>
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">可用载波总频宽</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-semibold mt-1 cursor-pointer" @click="$store.ui.copyText($store.telemetry.bandwidth)" x-text="$store.telemetry.bandwidth"></span>
+                                </div>
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 sm:col-span-2">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">当前工作频段 Bands</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-semibold mt-1 overflow-x-auto scrollbar-none whitespace-nowrap cursor-pointer" @click="$store.ui.copyText($store.telemetry.bands)" x-text="$store.telemetry.bands"></span>
+                                </div>
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">E/ARFCN 频点</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-semibold mt-1 cursor-pointer" @click="$store.ui.copyText($store.telemetry.earfcn)" x-text="$store.telemetry.earfcn"></span>
+                                </div>
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">PCI 小区编号</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-semibold mt-1 cursor-pointer" @click="$store.ui.copyText($store.telemetry.pci)" x-text="$store.telemetry.pci"></span>
+                                </div>
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">IPv4 地址</span>
+                                    <span class="text-indigo-600 dark:text-indigo-400 font-semibold mt-1 select-all cursor-pointer" @click="$store.ui.copyText($store.telemetry.ipv4)" x-text="$store.telemetry.ipv4"></span>
+                                </div>
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">运行时间 Uptime</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-semibold mt-1 cursor-pointer" @click="$store.ui.copyText($store.telemetry.uptime)" x-text="$store.telemetry.uptime"></span>
+                                </div>
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 sm:col-span-2">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">IPv6 地址</span>
+                                    <span class="text-indigo-600 dark:text-indigo-400 font-semibold mt-1 overflow-x-auto scrollbar-none whitespace-nowrap select-all cursor-pointer" @click="$store.ui.copyText($store.telemetry.ipv6)" x-text="$store.telemetry.ipv6"></span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-3 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-[#161d2b]/20 flex items-center justify-between">
+                            <span class="text-xs text-slate-400 dark:text-slate-500">实时轮询频率</span>
+                            <div class="flex space-x-2">
+                                <select x-model="$store.telemetry.refreshRate"
+                                    class="bg-white dark:bg-[#111622] border border-slate-200 dark:border-slate-800 text-xs rounded px-2 py-1 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                    <option value="3">3 秒一次</option>
+                                    <option value="5">5 秒一次</option>
+                                    <option value="10">10 秒一次</option>
+                                </select>
+                                <button type="button" @click="$store.telemetry.updateRefreshRate()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">更新</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 右栏: 信号空口轨道指标 -->
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col justify-between shadow-sm overflow-hidden">
+                        <div>
+                            <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
+                                <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">物理层空口指标 / Signal Info</h2>
+                            </div>
+                            <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm">
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">空口状况评估</span>
+                                    <span class="text-indigo-600 dark:text-indigo-400 font-semibold mt-1 cursor-pointer" @click="$store.ui.copyText($store.telemetry.assessment)" x-text="$store.telemetry.assessment"></span>
+                                </div>
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">累计下行/上行流量</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-semibold mt-1 cursor-pointer" @click="$store.ui.copyText($store.telemetry.traffic_stats)" x-text="$store.telemetry.traffic_stats"></span>
+                                </div>
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">CELL ID 小区标识</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-semibold mt-1 cursor-pointer" @click="$store.ui.copyText($store.telemetry.cell_id)" x-text="$store.telemetry.cell_id"></span>
+                                </div>
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">eNB ID 基站编号</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-semibold mt-1 cursor-pointer" @click="$store.ui.copyText($store.telemetry.enb_id)" x-text="$store.telemetry.enb_id"></span>
+                                </div>
+                                <div class="param-row p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200 sm:col-span-2">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider">TAC 追踪区编码</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-semibold mt-1 cursor-pointer" @click="$store.ui.copyText($store.telemetry.tac)" x-text="$store.telemetry.tac"></span>
+                                </div>
+                            </div>
+
+                            <!-- 信号电平与信噪比 -->
+                            <div class="px-4 pb-4 space-y-3.5 border-t border-slate-100/60 dark:border-slate-800/40 pt-4">
+                                <div class="space-y-1.5">
+                                    <div class="flex justify-between items-center px-1">
+                                        <span class="text-slate-500 dark:text-slate-400 text-xs font-semibold">RSRQ (信噪比质量) <span class="text-[9px] text-slate-400 ml-1">5G</span></span>
+                                        <span class="text-slate-800 dark:text-slate-200 text-xs font-bold font-mono cursor-pointer" @click="$store.ui.copyText($store.telemetry.ss_rsrq)" x-text="$store.telemetry.ss_rsrq"></span>
+                                    </div>
+                                    <div class="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
+                                        <div class="bg-gradient-to-r from-indigo-600 to-purple-500 h-full rounded-full transition-all duration-500" :style="`width: ${$store.telemetry.rsrqPercent}%`"></div>
+                                    </div>
+                                </div>
+
+                                <div class="space-y-1.5">
+                                    <div class="flex justify-between items-center px-1">
+                                        <span class="text-slate-500 dark:text-slate-400 text-xs font-semibold">RSRP (参考信号接收功率) <span class="text-[9px] text-slate-400 ml-1">5G</span></span>
+                                        <span class="text-slate-800 dark:text-slate-200 text-xs font-bold font-mono cursor-pointer" @click="$store.ui.copyText($store.telemetry.ss_rsrp)" x-text="$store.telemetry.ss_rsrp"></span>
+                                    </div>
+                                    <div class="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
+                                        <div class="h-full rounded-full transition-all duration-500" :class="$store.telemetry.rsrpColorClass" :style="`width: ${$store.telemetry.rsrpPercent}%`"></div>
+                                    </div>
+                                </div>
+
+                                <div class="space-y-1.5">
+                                    <div class="flex justify-between items-center px-1">
+                                        <span class="text-slate-500 dark:text-slate-400 text-xs font-semibold">SINR (信号与干扰加噪声比) <span class="text-[9px] text-slate-400 ml-1">5G</span></span>
+                                        <span class="text-slate-800 dark:text-slate-200 text-xs font-bold font-mono cursor-pointer" @click="$store.ui.copyText($store.telemetry.sinr)" x-text="$store.telemetry.sinr"></span>
+                                    </div>
+                                    <div class="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800/80 overflow-hidden">
+                                        <div class="h-full rounded-full transition-all duration-500" :class="$store.telemetry.sinrColorClass" :style="`width: ${$store.telemetry.sinrPercent}%`"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-4 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-[#161d2b]/20 flex justify-between items-center text-xs text-slate-400 dark:text-slate-500">
+                            <span>本地基准时间</span>
+                            <span class="text-slate-700 dark:text-slate-300 font-medium" x-text="$store.telemetry.updatedText"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 硬件资产折叠抽屉 -->
+                <details class="group bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl shadow-sm overflow-hidden transition-all duration-300"
+                    @toggle="$event.target.open && $store.net.refreshDeviceSpecs()">
+                    <summary class="flex justify-between items-center p-4 cursor-pointer select-none hover:bg-slate-50 dark:hover:bg-slate-900/20 transition-colors">
+                        <div class="flex items-center space-x-2">
+                            <svg aria-hidden="true" class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">硬件底层资产规格 &amp; 空口能力 (点击展开)</h2>
+                        </div>
+                        <svg aria-hidden="true" class="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                    </summary>
+
+                    <div class="p-4 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/30 dark:bg-[#161d2b]/10 text-xs text-slate-700 dark:text-slate-300">
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                            <template x-for="row in $store.telemetry.specsRows" :key="row[0]">
+                                <div class="p-3 bg-slate-50 dark:bg-[#161d2b]/40 border border-slate-100 dark:border-slate-800/40 rounded-xl flex flex-col justify-between hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200">
+                                    <span class="text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider" x-text="row[0]"></span>
+                                    <span class="font-semibold text-slate-800 dark:text-slate-200 mt-1 truncate cursor-pointer" title="双击/单击可复制" @click="$store.ui.copyText(row[1])" x-text="row[1]"></span>
+                                </div>
+                            </template>
+                        </div>
+                        <div class="flex flex-col py-3 px-3 mt-3 border-t border-slate-100/60 dark:border-slate-800/40">
+                            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">基站射频所支持的频段全集 Supported Bands</span>
+                            <span class="text-slate-700 dark:text-slate-300 break-words leading-relaxed text-xs font-semibold mt-1" x-text="$store.telemetry.deviceSpecs.bands"></span>
+                        </div>
+                        <div class="flex justify-end pt-3 px-2">
+                            <button type="button" @click="$store.net.refreshDeviceSpecs()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">手动拉取规格信息</button>
+                        </div>
+                    </div>
+                </details>
+            </div>
+
+            <!-- ==================== 2.2 蜂窝与射频整合面板 ==================== -->
+            <div role="tabpanel" x-show="$store.ui.currentTab === 'network'" x-cloak class="space-y-6">
+                <!-- 第一行：基础拨号 + 选网/SA-NSA 模式 -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                    <!-- APN 配置 + 拨号连接控制 -->
+                    <div class="space-y-6">
+                        <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                            <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
+                                <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">IMS / APN 配置管理</h2>
+                            </div>
+                            <div class="p-4 space-y-3">
+                                <div class="flex flex-col gap-1">
+                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">常用运营商预设</label>
+                                    <select x-model="$store.net.apnPreset" @change="$store.net.onApnPresetChange()"
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                        <option value="ctnet">中国电信 - ctnet (通用)</option>
+                                        <option value="ctlte">中国电信 - ctlte (4G/5G)</option>
+                                        <option value="3gnet">中国联通 - 3gnet (通用)</option>
+                                        <option value="wonet">中国联通 - wonet (5G)</option>
+                                        <option value="cmnet">中国移动 - cmnet (通用)</option>
+                                        <option value="cmiot">中国移动 - cmiot (物联网)</option>
+                                        <option value="cbnet">中国广电 - cbnet (5G)</option>
+                                        <option value="ims">IMS 专网 - ims</option>
+                                        <option value="custom">自定义输入 (Custom)...</option>
+                                    </select>
+                                </div>
+                                <div class="flex flex-col gap-1">
+                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">APN 接入点 (例如: ims 或 3gnet)</label>
+                                    <input type="text" x-model="$store.net.apnForm.apn" :placeholder="$store.net.apnPreset === 'custom' ? '请在此键入自定义 APN...' : 'e.g. ims'" maxlength="63"
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                                </div>
+                                <div class="flex flex-col gap-1">
+                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">拨号鉴权用户名 (可留空)</label>
+                                    <input type="text" x-model="$store.net.apnForm.user" placeholder="（可选）"
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                                </div>
+                                <div class="flex flex-col gap-1">
+                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">拨号鉴权密码 (可留空)</label>
+                                    <input type="password" x-model="$store.net.apnForm.pass" placeholder="（可选）" autocomplete="off"
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                                </div>
+                                <div class="flex flex-col gap-1">
+                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">安全鉴定类型</label>
+                                    <select x-model="$store.net.apnForm.auth"
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                        <option value="0">NONE (默认)</option>
+                                        <option value="1">PAP</option>
+                                        <option value="2">CHAP</option>
+                                        <option value="3">PAP or CHAP</option>
+                                    </select>
+                                </div>
+                                <button type="button" @click="$store.net.applyApn()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded transition-all active:scale-95 shadow-sm mt-2 cursor-pointer">应用 APN 保存</button>
+                            </div>
+                        </div>
+
+                        <!-- 拨号连接控制 -->
+                        <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                            <div class="p-4 space-y-3">
+                                <div class="flex space-x-2">
+                                    <button type="button" @click="$store.net.connectNetwork()" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">命令拨号连接</button>
+                                    <button type="button" @click="$store.net.disconnectNetwork()" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">断开拨号连接</button>
+                                </div>
+                                <div class="text-xs font-mono text-slate-500 dark:text-slate-400 min-h-[16px]" x-text="$store.net.netStatusText"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 射频选网偏好 & SA/NSA -->
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                        <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">射频选网 &amp; SA/NSA 融合控制</h2>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <select x-model="$store.net.networkMode"
+                                class="w-full bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                <option value="auto">全自动搜网模式 (AUTO)</option>
+                                <option value="nr5g">纯 5G 锁定模式 (NR5G Only)</option>
+                                <option value="lte">纯 4G 锁定模式 (LTE Only)</option>
+                                <option value="nr5g_lte">5G NR + LTE 协同工作模式</option>
+                                <option value="wcdma">3G WCDMA 留底搜网模式</option>
+                            </select>
+                            <button type="button" @click="$store.net.applyNetworkMode()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">更新选网偏好</button>
+
+                            <div class="border-t border-slate-100 dark:border-slate-800/40 pt-3 mt-1">
+                                <h3 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase mb-2">5G 组网类型重分配</h3>
+                                <div class="flex flex-wrap gap-2">
+                                    <button type="button" @click="$store.net.setModePref('disable_sa')" class="flex-1 min-w-[90px] bg-amber-600 hover:bg-amber-700 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">禁用 SA (NSA)</button>
+                                    <button type="button" @click="$store.net.setModePref('disable_nsa')" class="flex-1 min-w-[90px] bg-amber-600 hover:bg-amber-700 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">禁用 NSA (SA)</button>
+                                    <button type="button" @click="$store.net.setModePref('enable_all_5g')" class="flex-1 min-w-[90px] bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">全开启 (双模)</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- M.2 转网口 / IP 直通 / IMEI -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm space-y-4">
+                        <div class="border-b border-slate-100 dark:border-slate-800/60 pb-3 flex justify-between items-center">
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">M.2 转网口</h2>
+                            <span class="text-[10px] text-amber-500 font-semibold">修改后需热重启生效</span>
+                        </div>
+                        <div class="grid grid-cols-1 gap-3 text-xs">
+                            <div class="flex flex-col gap-1">
+                                <label class="text-slate-400 dark:text-slate-500 font-medium">网卡驱动 (Eth Driver)</label>
+                                <select x-model="$store.net.eth.driver" class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                    <option value="r8125">Realtek RTL8125 (2.5G 推荐)</option>
+                                    <option value="r8168">Realtek RTL8168/8111 (千兆)</option>
+                                    <option value="aqc107">Aquantia AQC107 (万兆)</option>
+                                </select>
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="text-slate-400 dark:text-slate-500 font-medium">PCIe 总线模式</label>
+                                <select x-model="$store.net.eth.pcieRc" class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                    <option value="1">RC 模式 (主机驱动外接网卡)</option>
+                                    <option value="0">EP 模式 (从机直通工控机)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button type="button" @click="$store.net.applyEthConfig()" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">应用网口配置</button>
+                        </div>
+                        <div class="text-xs font-mono text-slate-400 dark:text-slate-500 min-h-[16px]" x-text="$store.net.eth.statusText"></div>
+                    </div>
+
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm space-y-4">
+                        <div class="border-b border-slate-100 dark:border-slate-800/60 pb-3 flex justify-between items-center">
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">IP Passthrough (IP 直通)</h2>
+                            <span class="text-[10px] text-amber-500 font-semibold">修改后需热重启生效</span>
+                        </div>
+                        <div class="flex flex-col gap-3 text-xs">
+                            <div class="flex flex-col gap-1">
+                                <label class="text-slate-400 dark:text-slate-500 font-medium">网口直通 / 路由模式</label>
+                                <select x-model="$store.net.ippt.mode" class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                    <option value="dmz">DMZ 准直通 (推荐：消除双重NAT + 保留后台访问)</option>
+                                    <option value="nat">标准 NAT 路由 (多设备自动分配内网 IP)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button type="button" @click="$store.net.applyIpptConfig()" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">应用直通配置</button>
+                        </div>
+                        <div class="text-xs font-mono text-slate-400 dark:text-slate-500 min-h-[16px]" x-text="$store.net.ippt.statusText"></div>
+                    </div>
+
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 shadow-sm space-y-3">
+                        <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">IMEI 硬件识别码读取与修复 (AT+EGMR)</h2>
+                        <div class="flex flex-col gap-2">
+                            <input type="text" x-model="$store.net.imeiInput" maxlength="15" placeholder="输入 15 位新 IMEI 串号"
+                                class="w-full bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-700 rounded px-3 py-1.5 text-xs font-mono text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                            <div class="flex gap-2">
+                                <button type="button" @click="$store.net.readImei()" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">读取当前</button>
+                                <button type="button" @click="$store.net.writeImei()" class="flex-1 bg-amber-600 hover:bg-amber-500 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">写入修复</button>
+                            </div>
+                        </div>
+                        <div class="text-xs font-mono text-slate-400 dark:text-slate-500 min-h-[16px]" x-text="$store.net.imeiStatusText"></div>
+                    </div>
+                </div>
+
+                <!-- 第二行：高级锁频与锁物理小区 -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                    <!-- 工作频段锁定磁贴 -->
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                        <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">工作频段锁定 (Band Lock Grid)</h2>
+                        </div>
+                        <div class="p-4 space-y-4">
+                            <div class="flex space-x-4">
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="radio" name="band_rat" value="nr5g" x-model="$store.net.bandRat" class="accent-indigo-600">
+                                    <span class="text-xs text-slate-700 dark:text-slate-300 font-semibold">5G (NR5G)</span>
+                                </label>
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="radio" name="band_rat" value="lte" x-model="$store.net.bandRat" class="accent-indigo-600">
+                                    <span class="text-xs text-slate-700 dark:text-slate-300 font-semibold">4G (LTE)</span>
+                                </label>
+                            </div>
+
+                            <div class="space-y-1">
+                                <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">直接点击下方波段磁贴进行组合锁定：</label>
+
+                                <div x-show="$store.net.bandRat === 'nr5g'" class="grid grid-cols-4 sm:grid-cols-6 gap-2 pt-1">
+                                    <template x-for="b in $store.net.nr5gBands" :key="`nr-${b}`">
+                                        <button type="button" @click="$store.net.toggleBand(b)"
+                                            class="min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded border transition-all duration-150 cursor-pointer text-center"
+                                            :class="$store.net.isBandSelected(b) ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-400 dark:border-indigo-500 text-indigo-600 dark:text-indigo-400 font-bold' : 'bg-slate-50 dark:bg-[#161d2b]/60 border-slate-100 dark:border-slate-800/40 text-slate-600 dark:text-slate-300 hover:bg-slate-100/60 dark:hover:bg-slate-800'"
+                                            x-text="`n${b}`"></button>
+                                    </template>
+                                </div>
+
+                                <div x-show="$store.net.bandRat === 'lte'" class="grid grid-cols-4 sm:grid-cols-6 gap-2 pt-1">
+                                    <template x-for="b in $store.net.lteBands" :key="`lte-${b}`">
+                                        <button type="button" @click="$store.net.toggleBand(b)"
+                                            class="min-h-[32px] px-2.5 py-2 text-xs font-semibold rounded border transition-all duration-150 cursor-pointer text-center"
+                                            :class="$store.net.isBandSelected(b) ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-400 dark:border-indigo-500 text-indigo-600 dark:text-indigo-400 font-bold' : 'bg-slate-50 dark:bg-[#161d2b]/60 border-slate-100 dark:border-slate-800/40 text-slate-600 dark:text-slate-300 hover:bg-slate-100/60 dark:hover:bg-slate-800'"
+                                            x-text="`B${b}`"></button>
+                                    </template>
+                                </div>
+                            </div>
+
+                            <div class="p-3 bg-slate-50/50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800/40 rounded flex items-center justify-between text-xs sm:text-sm">
+                                <span class="text-slate-400 dark:text-slate-500 font-medium">当前选定编译预览</span>
+                                <span class="font-bold text-slate-800 dark:text-slate-200 select-all font-mono" x-text="$store.net.bandLockPreview"></span>
+                            </div>
+
+                            <div class="flex space-x-2">
+                                <button type="button" @click="$store.net.applyBandLock()" :disabled="$store.net.bandResetPending" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">应用频段强制锁定</button>
+                                <button type="button" @click="$store.net.resetBandLock()" :disabled="$store.net.bandResetPending" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">恢复所有出厂频段</button>
+                            </div>
+                            <div class="text-xs font-mono text-slate-400 dark:text-slate-500 pt-1" x-text="$store.net.bandLockStatusText"></div>
+                        </div>
+                    </div>
+
+                    <!-- 物理小区锁定卡 -->
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                        <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">物理小区频点锁定 (Cell Lock)</h2>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <div class="flex space-x-4">
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="radio" name="cell_tech" value="lte" x-model="$store.net.cellLock.tech" class="accent-indigo-600">
+                                    <span class="text-xs text-slate-700 dark:text-slate-300 font-semibold">4G (LTE)</span>
+                                </label>
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="radio" name="cell_tech" value="5g" x-model="$store.net.cellLock.tech" class="accent-indigo-600">
+                                    <span class="text-xs text-slate-700 dark:text-slate-300 font-semibold">5G (NR)</span>
+                                </label>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div class="flex flex-col gap-1">
+                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">目标 PCI</label>
+                                    <input type="number" x-model="$store.net.cellLock.pci" placeholder="PCI" min="0" max="1007"
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
+                                </div>
+                                <div class="flex flex-col gap-1">
+                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">绝对频点号 EARFCN</label>
+                                    <input type="number" x-model="$store.net.cellLock.earfcn" placeholder="EARFCN" min="0" max="262143"
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
+                                </div>
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">制式 Band 物理频段 (5G锁定必填)</label>
+                                <input type="number" x-model="$store.net.cellLock.band" placeholder="41" min="1" max="255"
+                                    class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
+                            </div>
+                            <div class="flex space-x-2">
+                                <button type="button" @click="$store.net.applyCellLock()" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">应用小区强制绑定</button>
+                                <button type="button" @click="$store.net.unlockCell()" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">解除物理小区锁</button>
+                            </div>
+                            <div class="text-xs text-slate-400 dark:text-slate-500 pt-1" x-text="$store.net.cellLock.statusText"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 扫频基站扫描 -->
+                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                    <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/10">
+                        <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">空中基站深度扫频扫描</h2>
+                        <button type="button" @click="$store.net.startNetworkScan()" :disabled="$store.net.scan.scanning" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                            <span x-text="$store.net.scan.btnText"></span>
+                        </button>
+                    </div>
+                    <div class="px-4 py-2 text-[11px] text-slate-400 dark:text-slate-500 bg-slate-50/30 dark:bg-black/10 border-b border-slate-100 dark:border-slate-800/40" x-text="$store.net.scan.statusText"></div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-xs sm:text-sm">
+                            <thead>
+                                <tr class="border-b border-slate-100 dark:border-slate-800/60 bg-slate-50 dark:bg-slate-900/20 text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider">
+                                    <th class="p-3 text-left font-semibold">索引</th>
+                                    <th class="p-3 text-left font-semibold">公共运营商</th>
+                                    <th class="p-3 text-left font-semibold">MCC/MNC</th>
+                                    <th class="p-3 text-left font-semibold">接入技术</th>
+                                    <th class="p-3 text-left font-semibold">可用状态</th>
+                                    <th class="p-3 text-left font-semibold">制式频点</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="(net, i) in $store.net.scan.networks" :key="`${net.mccmnc}-${net.band}-${i}`">
+                                    <tr class="border-b border-slate-100 dark:border-slate-800/20 hover:bg-slate-100/60 dark:hover:bg-slate-800/30 transition-colors">
+                                        <td class="p-3 text-slate-400" x-text="i + 1"></td>
+                                        <td class="p-3 text-slate-800 dark:text-slate-200 font-semibold" x-text="net.operator || '--'"></td>
+                                        <td class="p-3 text-slate-800 dark:text-slate-200" x-text="net.mccmnc || '--'"></td>
+                                        <td class="p-3">
+                                            <span class="px-2 py-0.5 rounded text-[10px] font-bold border"
+                                                :class="(net.technology || '') === 'NR5G' ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900/30' : 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border-blue-100 dark:border-blue-900/30'"
+                                                x-text="net.technology || '--'"></span>
+                                        </td>
+                                        <td class="p-3">
+                                            <span :class="(net.status || '') === 'Available' ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-slate-400'" x-text="net.status || '--'"></span>
+                                        </td>
+                                        <td class="p-3 text-slate-800 dark:text-slate-200" x-text="net.band || '--'"></td>
+                                    </tr>
+                                </template>
+                                <tr x-show="$store.net.scan.networks.length === 0">
+                                    <td colspan="6" class="p-8 text-center text-slate-400">目前暂无扫频历史。</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- 快捷诊断 / MBN -->
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                        <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">移远底层专线诊断 (Diagnostics)</h2>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <div class="flex flex-wrap gap-2">
+                                <button type="button" @click="$store.net.runDiag('neighbour')" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">邻区侦测 / Neighbour</button>
+                                <button type="button" @click="$store.net.runDiag('qlts')" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">时区校准 / Clock (QLTS)</button>
+                                <button type="button" @click="$store.net.runDiag('mbn_list')" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">MBN 列表 / MBN List</button>
+                                <button type="button" @click="$store.net.runDiag('autosel_query')" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">AutoSel 状态 / AutoSel Query</button>
+                            </div>
+                            <div class="flex flex-wrap gap-2">
+                                <button type="button" @click="$store.net.setMbnAutoSel(true)" class="flex-1 min-w-[100px] bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">启用 AutoSel / Enable AutoSel</button>
+                                <button type="button" @click="$store.net.setMbnAutoSel(false)" class="flex-1 min-w-[100px] bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">禁用 AutoSel / Disable AutoSel</button>
+                                <button type="button" @click="$store.net.deactivateMbn()" class="flex-1 min-w-[100px] bg-amber-600 hover:bg-amber-500 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">停用当前 MBN / Deactivate MBN</button>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <select x-model="$store.net.mbn.selected" class="flex-1 min-w-[140px] bg-white dark:bg-[#111622] border border-slate-200 dark:border-slate-700 text-xs rounded px-2 py-1.5 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500">
+                                    <option value="">请先刷新 MBN 列表</option>
+                                    <template x-for="item in $store.net.mbn.list" :key="item.name">
+                                        <option :value="String(item.name)" x-text="String(item.name) + (item.state === 1 ? '（当前）' : '')"></option>
+                                    </template>
+                                </select>
+                                <button type="button" @click="$store.net.refreshMbnList()" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">刷新列表 / Refresh</button>
+                                <button type="button" @click="$store.net.applyMbn()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1.5 text-xs rounded transition-all active:scale-95 cursor-pointer">应用 MBN / Apply</button>
+                            </div>
+                            <div class="text-[11px] text-slate-400 dark:text-slate-500 min-h-[16px]" x-text="$store.net.mbn.statusText"></div>
+                            <pre class="terminal-box max-h-[250px] overflow-y-auto whitespace-pre-wrap text-indigo-400"
+                                :class="$store.net.diag.isError && 'terminal-box-error'" x-text="$store.net.diag.outputText"></pre>
+                        </div>
+                    </div>
+
+                    <!-- 重置与中断控制 -->
+                    <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                        <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">模组硬件硬中断复位</h2>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <div class="flex space-x-2">
+                                <button type="button" @click="$store.net.rebootModule()" class="flex-1 bg-yellow-600 hover:bg-yellow-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">全热重启模组 (Reboot)</button>
+                                <button type="button" @click="$store.net.factoryResetModule()" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">恢复出厂配置 (Reset)</button>
+                            </div>
+                            <div class="flex space-x-2">
+                                <button type="button" @click="$store.net.setFlightMode(true)" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">启动飞行模式</button>
+                                <button type="button" @click="$store.net.setFlightMode(false)" class="flex-1 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold px-4 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">退出飞行模式</button>
+                            </div>
+                            <p class="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed pt-1">
+                                重启、恢复出厂与飞行模式均由后端执行完毕后回传日志，界面不做提前断言。执行结果请在「系统日志」面板查看。
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AT 命令行控制台 -->
+                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden min-h-[300px]">
+                    <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
+                        <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">高通底层 AT 命令控制交互终端 (Console)</h2>
+                    </div>
+                    <div x-ref="consoleOut" x-effect="void $store.logs.history.length; $nextTick(() => $refs.consoleOut.scrollTop = $refs.consoleOut.scrollHeight)"
+                        class="terminal-box flex-1 overflow-y-auto max-h-[250px] space-y-1 whitespace-pre-wrap text-indigo-400">
+                        <template x-for="(line, i) in $store.logs.history" :key="i">
+                            <div class="text-slate-300" x-text="line"></div>
+                        </template>
+                    </div>
+                    <div class="p-4 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-[#161d2b]/20 flex space-x-2">
+                        <input type="text" x-model="$store.logs.input" @keydown.enter="$store.logs.sendAt()" placeholder="AT+CGMI" autocomplete="off" spellcheck="false"
+                            class="flex-1 bg-white dark:bg-[#111622] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
+                        <button type="button" @click="$store.logs.sendAt()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-5 py-2 text-xs sm:text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">命令发送</button>
+                    </div>
+                    <div class="px-4 pb-4 pt-2 space-y-2 text-xs">
+                        <!-- 快捷指令板 -->
+                        <div class="flex flex-wrap items-center gap-1.5">
+                            <span class="text-slate-400 dark:text-slate-500 font-bold mr-1 shrink-0">快捷指令板 / Quick:</span>
+                            <button type="button" data-cmd="AT+CGMI" @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium">制造商信息 / Mfr (CGMI)</button>
+                            <button type="button" data-cmd="AT+CGSN" @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium">IMEI 串号 / Serial (CGSN)</button>
+                            <button type="button" data-cmd="AT+CSQ" @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium">信号质量 / Signal (CSQ)</button>
+                            <button type="button" data-cmd="AT+COPS?" @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium">当前运营商 / Operator (COPS?)</button>
+                            <button type="button" data-cmd="AT+CGPADDR" @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium">PDP IP 地址 / IP Addr (CGPADDR)</button>
+                            <button type="button" data-cmd='AT+QENG="servingcell"' @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium">服务小区 / Serving Cell (QENG)</button>
+                            <button type="button" data-cmd="AT+CGDCONT?" @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium">APN 接入点配置 / APN List (CGDCONT?)</button>
+                        </div>
+                        <!-- 排错指令板 -->
+                        <div class="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/40">
+                            <span class="text-amber-500/90 dark:text-amber-400/90 font-bold mr-1 shrink-0">排错指令板 / Troubleshoot:</span>
+                            <button type="button" data-cmd="AT+CFUN=1,1" @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-900/40 border border-amber-200 dark:border-amber-800/60 rounded px-2.5 py-1 text-amber-700 dark:text-amber-300 cursor-pointer font-medium">热重启 / Reboot (CFUN=1,1)</button>
+                            <button type="button" data-cmd="AT+CFUN=0" @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium">关射频 / RF Off (CFUN=0)</button>
+                            <button type="button" data-cmd="AT+CFUN=1" @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium">开射频 / RF On (CFUN=1)</button>
+                            <button type="button" data-cmd="AT+QSIMSTAT?" @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium">SIM 在位检测 / SIM Status (QSIMSTAT?)</button>
+                            <button type="button" data-cmd='AT+QMAP="WWAN"' @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium">查看分配 IP / WWAN IP (QMAP)</button>
+                            <button type="button" data-cmd='AT+QENG="servingcell"' @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium">服务小区详情 / Cell Detail (QENG)</button>
+                            <button type="button" data-cmd="AT+EGMR=0,7" @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1 text-slate-600 dark:text-slate-300 cursor-pointer font-medium">读取 IMEI / Read IMEI (EGMR)</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== 2.4 SMS 短信中心面板 ==================== -->
+            <div role="tabpanel" x-show="$store.ui.currentTab === 'sms'" x-cloak class="space-y-4">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <!-- 卡内短信收件箱 -->
+                    <div class="lg:col-span-1 bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden max-h-[600px]">
+                        <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/10">
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">短信收件箱 (Inbox)</h2>
+                            <button type="button" @click="$store.sms.refresh()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">读取列表</button>
+                        </div>
+                        <div class="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/30">
+                            <template x-for="(msg, i) in $store.sms.messages" :key="`${msg.index}-${i}`">
+                                <div @click="$store.sms.showDetail(msg)" class="p-3 hover:bg-slate-100/80 dark:hover:bg-slate-900/40 transition-colors cursor-pointer">
+                                    <div class="flex justify-between items-center mb-1">
+                                        <span class="text-slate-800 dark:text-slate-200 text-xs font-semibold" x-text="msg.sender || 'Unknown'"></span>
+                                        <span class="text-slate-400 text-[10px]" x-text="msg.timestamp || ''"></span>
+                                    </div>
+                                    <div class="text-slate-500 dark:text-slate-400 text-xs truncate" x-text="msg.text || ''"></div>
+                                </div>
+                            </template>
+                            <div x-show="$store.sms.messages.length === 0" class="p-4 text-center text-xs text-slate-400">目前卡内无短信。</div>
+                        </div>
+                    </div>
+
+                    <!-- 短信详情与发送 -->
+                    <div class="lg:col-span-2 space-y-4 overflow-y-auto max-h-[600px] scrollbar-none">
+                        <!-- 阅读器卡 -->
+                        <div x-show="$store.sms.hasDetail" x-cloak class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden transition-all duration-300">
+                            <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/10">
+                                <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">短信阅读器 (SMS Reader)</h2>
+                                <button type="button" @click="$store.sms.clearDetail()" class="text-xs text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white border border-slate-200 dark:border-slate-700 rounded px-2 py-0.5 hover:bg-slate-100 dark:hover:bg-white/10 cursor-pointer">关闭阅读</button>
+                            </div>
+                            <div class="p-4 space-y-3">
+                                <div class="flex justify-between items-center text-xs text-slate-400 dark:text-slate-500">
+                                    <span>发件人：<strong class="text-slate-800 dark:text-slate-200 select-text font-semibold" x-text="$store.sms.selectedMsg?.sender || '--'"></strong></span>
+                                    <span class="font-medium" x-text="$store.sms.selectedMsg?.timestamp || '--'"></span>
+                                </div>
+                                <div class="p-3 bg-slate-50 dark:bg-slate-900/40 rounded border border-slate-200/60 dark:border-slate-800/40 text-xs sm:text-sm select-text break-words leading-relaxed whitespace-pre-wrap text-slate-700 dark:text-slate-300"
+                                    x-text="$store.sms.selectedMsg?.text || '--'"></div>
+                                <div class="flex space-x-2 pt-1 justify-end">
+                                    <button type="button" @click="$store.sms.replyToSelected()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">快捷回复</button>
+                                    <button type="button" @click="$store.ui.copyText($store.sms.selectedMsg?.text)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-4 py-1.5 text-xs rounded transition-all active:scale-95 shadow-sm cursor-pointer">无损复制文本</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 发送中心 -->
+                        <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                            <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
+                                <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">短信发送引擎 (Send SMS)</h2>
+                            </div>
+                            <div class="p-4 space-y-3">
+                                <div class="flex flex-col gap-1">
+                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">发件目标号码 (Recipient)</label>
+                                    <input type="tel" x-model="$store.sms.recipient" placeholder="+8613800138000" maxlength="20" pattern="[+\d]{7,20}"
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500">
+                                </div>
+                                <div class="flex flex-col gap-1">
+                                    <label class="text-xs text-slate-400 dark:text-slate-500 font-medium">发信正文 (支持多载波，最大 160 字符)</label>
+                                    <textarea x-model="$store.sms.message" rows="4" maxlength="160" placeholder="键入需要发送的正文..."
+                                        class="bg-slate-50 dark:bg-[#161d2b] border border-slate-200 dark:border-slate-800 text-xs sm:text-sm rounded px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
+                                    <div class="flex justify-between items-center text-xs text-slate-400 dark:text-slate-500">
+                                        <span>输入计数器: <span x-text="$store.sms.charCount"></span> / 160 字符</span>
+                                    </div>
+                                </div>
+                                <button type="button" @click="$store.sms.send()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded transition-all active:scale-95 shadow-sm cursor-pointer">立刻发信</button>
+                            </div>
+                            <div class="px-4 pb-4 text-xs text-slate-400 dark:text-slate-500" x-text="$store.sms.statusText"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== 2.5 USB 配置面板 ==================== -->
+            <div role="tabpanel" x-show="$store.ui.currentTab === 'usb'" x-cloak class="space-y-6">
+                <!-- USB 网络模式控制卡 -->
+                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                    <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
+                        <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase flex items-center gap-2">
+                            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.75 9.75a3.375 3.375 0 010-4.5 3.375 3.375 0 014.5 0L9.75 6M6 12L9.75 9.75m-3.75 0L9 6.75M9.75 9.75L18 18m-6-6l3-3m-3 3l3 3"/></svg>
+                            USB 网络模式 / USB Net Mode
+                        </h2>
+                    </div>
+                    <div class="p-4 space-y-3">
+                        <p class="text-xs text-slate-400 dark:text-slate-500 leading-relaxed">
+                            选择模组在 USB 总线上的网卡协议。修改后<strong class="text-amber-500">必须重启模组</strong>方可生效。
+                        </p>
+
+                        <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                            <template x-for="m in $store.usb.modes" :key="m.value">
+                                <button type="button" @click="$store.usb.selectMode(m.value)"
+                                    class="min-h-[36px] px-2 py-2 text-xs font-semibold rounded-xl border-2 transition-all duration-200 cursor-pointer text-center"
+                                    :class="$store.usb.mode === m.value
+                                        ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-400 dark:border-indigo-500 text-indigo-700 dark:text-indigo-300 font-bold'
+                                        : 'bg-slate-50 dark:bg-[#161d2b]/60 border-slate-100 dark:border-slate-800/40 text-slate-600 dark:text-slate-300 hover:bg-slate-100/60 dark:hover:bg-slate-800'">
+                                    <span class="block text-xs" x-text="m.name"></span>
+                                    <span class="block text-[9px] text-slate-400 dark:text-slate-500 font-normal mt-0.5" x-text="m.desc"></span>
+                                </button>
+                            </template>
+                        </div>
+
+                        <button type="button" @click="$store.usb.apply()" :disabled="$store.usb.applying"
+                            class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2 text-sm rounded-xl transition-all active:scale-95 shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                            应用 USB 模式并提示重启
+                        </button>
+                        <div class="text-xs font-mono text-slate-400 dark:text-slate-500" x-text="$store.usb.statusText"></div>
+                    </div>
+                </div>
+
+                <!-- USB 状态摘要卡片 -->
+                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                    <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10 flex items-center justify-between">
+                        <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase flex items-center gap-2">
+                            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.25 2.25 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z"/></svg>
+                            当前 USB 配置摘要
+                        </h2>
+                        <button type="button" @click="$store.usb.refresh()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-1.5 text-xs rounded-lg transition-all active:scale-95 shadow-sm cursor-pointer flex items-center gap-1.5">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg>
+                            刷新查询
+                        </button>
+                    </div>
+                    <div class="p-5">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                            <div class="p-4 bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 rounded-xl text-center">
+                                <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">当前 USB 模式</span>
+                                <span class="block text-lg font-bold text-indigo-600 dark:text-indigo-400" x-text="$store.usb.current.name"></span>
+                                <span class="block text-xs text-slate-400 dark:text-slate-500 mt-1" x-text="$store.usb.current.desc"></span>
+                            </div>
+                            <div class="p-4 bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 rounded-xl text-center">
+                                <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">USB 模式数值</span>
+                                <span class="block text-lg font-bold font-mono text-slate-700 dark:text-slate-200" x-text="$store.usb.current.num"></span>
+                            </div>
+                            <div class="p-4 bg-slate-50 dark:bg-[#161d2b]/60 border border-slate-100 dark:border-slate-800/40 rounded-xl text-center">
+                                <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">状态更新时间</span>
+                                <span class="block text-sm font-mono text-slate-700 dark:text-slate-200" x-text="$store.usb.current.updated"></span>
+                            </div>
+                        </div>
+                        <div class="mt-4 p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-800/30 rounded-xl text-xs text-amber-700 dark:text-amber-400 flex items-start gap-2">
+                            <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
+                            <span><strong>重要提醒：</strong> 修改 USB 模式后，必须执行模组重启（AT+CFUN=1,1）配置方可生效。请在「蜂窝与射频 Network &amp; RF」面板中使用重启功能。</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- USB 快捷 AT 指令板 -->
+                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden">
+                    <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/10">
+                        <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">USB 快捷 AT 指令板</h2>
+                    </div>
+                    <div class="p-4 flex flex-wrap gap-2 text-xs">
+                        <button type="button" data-cmd='AT+QCFG="usbnet"' @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium">查询 USB 模式</button>
+                        <button type="button" data-cmd='AT+QCFG="usbnet",1' @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium">切换到 ECM</button>
+                        <button type="button" data-cmd='AT+QCFG="usbnet",2' @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium">切换到 MBIM</button>
+                        <button type="button" data-cmd='AT+QCFG="usbnet",5' @click="$store.logs.quickAt($el.dataset.cmd)" class="bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-slate-600 dark:text-slate-300 cursor-pointer transition-all font-medium">切换到 NCM (RM520N)</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== 2.6 Logs 独立内存日志面板 ==================== -->
+            <div role="tabpanel" x-show="$store.ui.currentTab === 'logs'" x-cloak class="space-y-6">
+                <div class="bg-white dark:bg-[#111622] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl flex flex-col shadow-sm overflow-hidden min-h-[450px]">
+                    <div class="p-4 border-b border-slate-100 dark:border-slate-800/60 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/10">
+                        <div class="flex items-center space-x-2">
+                            <svg aria-hidden="true" class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+                            </svg>
+                            <h2 class="text-xs font-bold tracking-wider text-indigo-600 dark:text-indigo-400 uppercase">系统内存环形日志控制台</h2>
+                        </div>
+                        <button type="button" @click="$store.logs.refreshBackend()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 text-xs font-semibold rounded transition-all active:scale-95 shadow-sm cursor-pointer">手动刷新日志</button>
+                    </div>
+                    <div x-ref="logOut" x-effect="void $store.logs.backend.length; $nextTick(() => $refs.logOut.scrollTop = $refs.logOut.scrollHeight)"
+                        class="terminal-box flex-1 overflow-y-auto max-h-[500px] space-y-1">
+                        <template x-for="(line, i) in $store.logs.backend" :key="i">
+                            <div x-text="line"
+                                :class="line.includes('[ERROR]') ? 'text-red-400 dark:text-red-300 font-semibold'
+                                    : line.includes('[WARN]') ? 'text-amber-500 dark:text-amber-400 font-semibold'
+                                    : line.includes('[INFO]') ? 'text-cyan-600 dark:text-cyan-300'
+                                    : 'text-slate-300 dark:text-slate-200'"></div>
+                        </template>
+                        <div x-show="$store.logs.backend.length === 0" class="text-slate-500 dark:text-slate-400">加载中... 请在进入该诊断面板时手动刷新。</div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- 复制气泡 -->
+    <div x-show="$store.ui.copyToast.show" x-cloak x-transition.opacity
+        @click="$store.ui.copyToast.show = false"
+        class="copy-toast fixed bottom-8 left-1/2 -translate-x-1/2 text-white text-xs sm:text-sm px-4 py-2 rounded shadow-xl z-50 cursor-pointer select-none">
+        已复制: <span x-text="$store.ui.copyToast.text"></span>
+    </div>
+
+</body>
+
+</html>

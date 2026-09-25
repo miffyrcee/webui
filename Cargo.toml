@@ -24,3 +24,5 @@ rustls = { version = "0.23", default-features = false, features = ["std", "tls12
 rustls-rustcrypto = "0.0.2-alpha"
 # 纯 Rust 内存证书生成（仅 p256 特性，零 C 代码）
 certkit = { version = "0.2", default-features = false, features = ["p256"] }
+rust-embed = "8.12.0"
+mime_guess = "2.0.5"

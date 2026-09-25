@@ -68,7 +68,8 @@ ode_ggv
 templates/style.css
 /templates/
 
-# 忽略本地开发可能产生的 Node 临时模块（如果你没用 Standalone CLI 的话）
+# 忽略依赖库
 /node_modules/
-package-lock.json
-package.json
+
+# 注意: package.json 与 package-lock.json 必须入库，
+# 否则 Vite 构建链无法在其它机器/clone 上复现。

@@ -205,7 +205,7 @@ ws.request(action, payload, { expect: TYPES.BAND_LOCK_RES, timeoutMs: 30000, int
 1. **依赖纯净性**：`cargo tree --target armv7-unknown-linux-musleabihf` 确认 `rust-embed`、`mime_guess` 未引入 `cc`/`ring`/`openssl`。
 2. **交叉编译**：`cargo build --release --target armv7-unknown-linux-musleabihf` 通过。
 3. **自包含验证**：本机 release 二进制拷到仓库外临时目录（无 `dist/`）运行，确认 `/`、`/login`、`/assets/*` 均正常 —— 证明资源已真正嵌入而非读盘。
-4. **静态托管 smoke**：未登录 `GET /` → 302 `/login`；登录后 `GET /` → 200；`/assets/*.js` → 200 且带 `immutable`；`GET /style.css` → 404（反向证明旧链路已移除）。
+4. **静态托管 smoke**：未登录 `GET /` → 3xx `/login`（axum `Redirect::to` 实际返回 303，与旧版一致）；登录后 `GET /` → 200；`/assets/*.js` → 200 且带 `immutable`；`GET /style.css` → 404（反向证明旧链路已移除）。
 5. **契约单元测试**：`frontend/test/contract.test.js`，用 Node 内置 `node --test`（零新依赖），覆盖 `parseCmgl`（含多段、空文本、乱序）、`parseAtResponse`、以及各出站载荷的值类型断言。
 6. **功能 1:1 验收清单**：逐面板打勾，重点覆盖 14 条快捷 AT、USB 快捷 AT 板、SMS 收件箱解析、IMEI 读写文案、USB 摘要由后端 `config` 驱动、频段重置确认后才清空。
 7. **反假成功专项**：断网 / 拔卡 / 错误参数下逐一点击各操作按钮，确认无假 ✓、无永久 ⏳、用户输入不被吞。

@@ -2,21 +2,20 @@ mod at;
 mod device;
 
 use axum::{
-    Router,
+    Json, Router,
     extract::{
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
-    Json,
 };
+use base64::Engine;
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
-use base64::Engine;
 use hex;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -25,22 +24,21 @@ type HmacSha256 = Hmac<Sha256>;
 use axum_server::tls_rustls::RustlsConfig;
 use std::path::Path;
 
+use std::collections::VecDeque;
+use std::fs;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-use std::fs;
-use std::collections::VecDeque;
-use std::sync::OnceLock;
 
 use std::{env, sync::Arc};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
-use at::{
-    parse_cgpaddr, parse_cops_scan, parse_net_status, parse_qcainfo,
-    parse_qeng, parse_qeng_neighbour, parse_qtemp_temperature,
-    parse_signal_quality,
-    decode_cmgl_body, decode_hex_ucs2, format_bytes, normalize_at_command,
-};
 use at::parser::ParsedLine;
+use at::{
+    decode_cmgl_body, decode_hex_ucs2, format_bytes, normalize_at_command, parse_cgpaddr,
+    parse_cops_scan, parse_net_status, parse_qcainfo, parse_qeng, parse_qeng_neighbour,
+    parse_qtemp_temperature, parse_signal_quality,
+};
 
 /// AT 命令参数安全过滤（去除双引号、反斜杠与控制字符，防止 AT 注入）
 pub fn sanitize_at_param(input: &str) -> String {
@@ -87,7 +85,13 @@ impl ActiveViewGuard {
     fn new(state: Arc<AppState>) -> (Self, Arc<AtomicBool>) {
         state.active_views.fetch_add(1, Ordering::SeqCst);
         let is_active = Arc::new(AtomicBool::new(true));
-        (Self { state: state.clone(), is_active: is_active.clone() }, is_active)
+        (
+            Self {
+                state: state.clone(),
+                is_active: is_active.clone(),
+            },
+            is_active,
+        )
     }
 }
 
@@ -107,9 +111,7 @@ const IDLE_INTERVAL_SECS: u64 = 15;
 fn get_uptime_mins() -> u64 {
     fs::read_to_string("/proc/uptime")
         .ok()
-        .and_then(|content| {
-            content.split_whitespace().next()?.parse::<f64>().ok()
-        })
+        .and_then(|content| content.split_whitespace().next()?.parse::<f64>().ok())
         .map(|secs| (secs / 60.0) as u64)
         .unwrap_or(0)
 }
@@ -123,7 +125,11 @@ fn get_soc_temperature() -> Option<String> {
     for path in &paths {
         if let Ok(content) = fs::read_to_string(path) {
             if let Ok(milli_c) = content.trim().parse::<f32>() {
-                let val = if milli_c > 1000.0 { milli_c / 1000.0 } else { milli_c };
+                let val = if milli_c > 1000.0 {
+                    milli_c / 1000.0
+                } else {
+                    milli_c
+                };
                 return Some(format!("{:.0} °C", val));
             }
         }
@@ -156,8 +162,8 @@ fn get_cpu_usage(prev: &mut Option<CpuSnapshot>) -> Option<String> {
     {
         total += val;
         match i {
-            3 => idle += val,     // idle
-            4 => idle += val,     // iowait (也计入空闲)
+            3 => idle += val, // idle
+            4 => idle += val, // iowait (也计入空闲)
             _ => {}
         }
     }
@@ -171,7 +177,8 @@ fn get_cpu_usage(prev: &mut Option<CpuSnapshot>) -> Option<String> {
             let idle_delta = idle.wrapping_sub(prev_snap.idle);
             *prev = Some(CpuSnapshot { total, idle });
             if total_delta > 0 {
-                let usage = total_delta.saturating_sub(idle_delta) as f64 / total_delta as f64 * 100.0;
+                let usage =
+                    total_delta.saturating_sub(idle_delta) as f64 / total_delta as f64 * 100.0;
                 Some(format!("{:.1}%", usage))
             } else {
                 None
@@ -283,8 +290,7 @@ fn jwt_encode(claims: &Claims, secret: &str) -> Result<String, String> {
     let payload_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload);
     let signing_input = format!("{}.{}", header_b64, payload_b64);
 
-    let mut mac =
-        HmacSha256::new_from_slice(secret.as_bytes()).map_err(|e| e.to_string())?;
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|e| e.to_string())?;
     mac.update(signing_input.as_bytes());
     let sig_b64 =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
@@ -305,8 +311,7 @@ fn jwt_decode(token: &str, secret: &str) -> Result<Claims, String> {
         .decode(parts[2])
         .map_err(|e| format!("Base64 解码失败: {}", e))?;
 
-    let mut mac =
-        HmacSha256::new_from_slice(secret.as_bytes()).map_err(|e| e.to_string())?;
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|e| e.to_string())?;
     mac.update(signing_input.as_bytes());
     mac.verify_slice(&sig_bytes)
         .map_err(|_| "JWT 签名验证失败".to_string())?;
@@ -315,8 +320,7 @@ fn jwt_decode(token: &str, secret: &str) -> Result<Claims, String> {
         .decode(parts[1])
         .map_err(|e| format!("Base64 解码失败: {}", e))?;
 
-    let claims: Claims =
-        serde_json::from_slice(&payload_bytes).map_err(|e| e.to_string())?;
+    let claims: Claims = serde_json::from_slice(&payload_bytes).map_err(|e| e.to_string())?;
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -430,9 +434,18 @@ enum AtAction {
     /// true=ON, false=OFF
     FlightMode(bool),
     /// (is_nr5g, bands) — true=NR5G, false=LTE; "all" 或 "" 恢复所有频段
-    SetBandLock { is_nr5g: bool, bands: String },
+    SetBandLock {
+        is_nr5g: bool,
+        bands: String,
+    },
     /// (tech, pci, earfcn, band, enable) — enable=false 解除锁定
-    SetCellLock { tech: String, pci: u32, earfcn: u32, band: Option<u32>, enable: bool },
+    SetCellLock {
+        tech: String,
+        pci: u32,
+        earfcn: u32,
+        band: Option<u32>,
+        enable: bool,
+    },
     /// 诊断子命令
     GetDiagnostics(DiagnosticType),
     /// (mode_num) — 0:RMNET, 1:ECM, 2:MBIM, 3:RNDIS, 4:NCM(SDX55), 5:NCM(SDX62)
@@ -454,9 +467,14 @@ enum AtAction {
     /// (imei) — 写入 IMEI（AT+EGMR=1,7,"<imei>"）
     WriteImei(String),
     /// (driver, pcie_rc) — M.2 网口配置：加载网卡驱动 + 配置 PCIe/数据通道，原子执行
-    SetEthConfig { driver: String, pcie_rc: bool },
+    SetEthConfig {
+        driver: String,
+        pcie_rc: bool,
+    },
     /// (mode) — IP Passthrough 配置：dmz 准直通 / nat 标准路由，原子执行
-    SetIpptConfig { mode: String },
+    SetIpptConfig {
+        mode: String,
+    },
 }
 
 struct AtRequest {
@@ -514,7 +532,12 @@ struct GlobalTelemetry {
 
 impl GlobalTelemetry {
     /// 从 TelemetryData（解析器填充）和当前全局状态合并构造 GlobalTelemetry。
-    fn from_telemetry_and_global(t: &TelemetryData, g: &GlobalTelemetry, uptime: Option<String>, updated: Option<String>) -> Self {
+    fn from_telemetry_and_global(
+        t: &TelemetryData,
+        g: &GlobalTelemetry,
+        uptime: Option<String>,
+        updated: Option<String>,
+    ) -> Self {
         fn keep_valid(new: &Option<String>, old: &Option<String>) -> Option<String> {
             match new {
                 Some(val) if !val.is_empty() => {
@@ -644,7 +667,13 @@ struct DeviceInfoData {
 trait HardwareBackend: Send + Sync {
     async fn exec_raw_at(&self, cmd: &str) -> String;
     async fn read_sms_list(&self) -> String;
-    async fn configure_apn(&self, apn: &str, user: &str, pass: &str, auth_type: u8) -> Result<String, String>;
+    async fn configure_apn(
+        &self,
+        apn: &str,
+        user: &str,
+        pass: &str,
+        auth_type: u8,
+    ) -> Result<String, String>;
     async fn set_network_mode_pref(&self, mode: &str) -> Result<String, String>;
     async fn set_data_session(&self, connect: bool) -> Result<String, String>;
     async fn scan_available_networks(&self) -> Vec<serde_json::Value>;
@@ -654,7 +683,14 @@ trait HardwareBackend: Send + Sync {
     async fn send_factory_reset(&self);
     async fn set_airplane_mode(&self, on: bool);
     async fn set_band_lock(&self, is_nr5g: bool, bands: &str) -> Result<String, String>;
-    async fn set_cell_lock(&self, tech: &str, pci: u32, earfcn: u32, band: Option<u32>, enable: bool) -> Result<String, String>;
+    async fn set_cell_lock(
+        &self,
+        tech: &str,
+        pci: u32,
+        earfcn: u32,
+        band: Option<u32>,
+        enable: bool,
+    ) -> Result<String, String>;
     async fn get_diagnostics(&self, diag: &DiagnosticType) -> Result<String, String>;
     async fn set_usb_net_mode(&self, mode: u8) -> Result<String, String>;
     async fn get_usb_config(&self) -> Result<serde_json::Value, String>;
@@ -685,11 +721,11 @@ impl RealBackend {
         if std::path::Path::new(&backend.serial_path).exists() {
             if let Some(cgmm) = send_at_get_line(&backend.serial_path, "AT+CGMM").await {
                 let detected = device::lookup_profile(&cgmm);
-                push_log("INFO", "Device", &format!(
-                    "检测到模组: {} → Profile: {}",
-                    cgmm.trim(),
-                    detected.name,
-                ));
+                push_log(
+                    "INFO",
+                    "Device",
+                    &format!("检测到模组: {} → Profile: {}", cgmm.trim(), detected.name,),
+                );
                 backend.profile = detected;
             } else {
                 push_log("WARN", "Device", "AT+CGMM 无响应，使用通用 Quectel Profile");
@@ -718,7 +754,13 @@ impl HardwareBackend for RealBackend {
             .unwrap_or_else(|_| "+CMGL: 0 messages\r\nOK\r\n".to_string())
     }
 
-    async fn configure_apn(&self, apn: &str, user: &str, pass: &str, auth_type: u8) -> Result<String, String> {
+    async fn configure_apn(
+        &self,
+        apn: &str,
+        user: &str,
+        pass: &str,
+        auth_type: u8,
+    ) -> Result<String, String> {
         let apn = sanitize_at_param(apn);
         let user = sanitize_at_param(user);
         let pass = sanitize_at_param(pass);
@@ -754,12 +796,13 @@ impl HardwareBackend for RealBackend {
 
     async fn set_data_session(&self, connect: bool) -> Result<String, String> {
         let action_val = if connect { "1" } else { "0" };
-        send_at_command_inner(
-            &self.serial_path,
-            &format!("AT+CGACT={},1", action_val),
-        )
-        .await?;
-        Ok(if connect { "拨号连接指令已下发" } else { "拨号断开指令已下发" }.to_string())
+        send_at_command_inner(&self.serial_path, &format!("AT+CGACT={},1", action_val)).await?;
+        Ok(if connect {
+            "拨号连接指令已下发"
+        } else {
+            "拨号断开指令已下发"
+        }
+        .to_string())
     }
 
     async fn scan_available_networks(&self) -> Vec<serde_json::Value> {
@@ -773,7 +816,11 @@ impl HardwareBackend for RealBackend {
         {
             Ok(resp) => {
                 let networks = parse_cops_scan(&resp);
-                push_log("INFO", "Scan", &format!("网络扫描完成，发现 {} 个网络", networks.len()));
+                push_log(
+                    "INFO",
+                    "Scan",
+                    &format!("网络扫描完成，发现 {} 个网络", networks.len()),
+                );
                 networks
             }
             Err(e) => {
@@ -789,7 +836,10 @@ impl HardwareBackend for RealBackend {
 
         if !needs_ucs2(&message) {
             // GSM 7-bit 默认编码（原有逻辑）
-            if send_at_command_inner(&self.serial_path, "AT+CMGF=1").await.is_ok() {
+            if send_at_command_inner(&self.serial_path, "AT+CMGF=1")
+                .await
+                .is_ok()
+            {
                 send_sms_command_inner(
                     &self.serial_path,
                     &format!("AT+CMGS=\"{}\"", recipient),
@@ -806,13 +856,22 @@ impl HardwareBackend for RealBackend {
             // Quectel 模块在 CSCS="UCS2" 文本模式下不支持 AT+CMGS，
             // 故保持 CSCS="GSM"（号码保持 ASCII），通过 CSMP DCS=8
             // 指定消息体为 UCS2 编码，将 UCS2 hex 文本作为正文发送。
-            if send_at_command_inner(&self.serial_path, "AT+CMGF=1").await.is_err() {
+            if send_at_command_inner(&self.serial_path, "AT+CMGF=1")
+                .await
+                .is_err()
+            {
                 return false;
             }
-            if send_at_command_inner(&self.serial_path, "AT+CSCS=\"GSM\"").await.is_err() {
+            if send_at_command_inner(&self.serial_path, "AT+CSCS=\"GSM\"")
+                .await
+                .is_err()
+            {
                 return false;
             }
-            if send_at_command_inner(&self.serial_path, "AT+CSMP=17,167,0,8").await.is_err() {
+            if send_at_command_inner(&self.serial_path, "AT+CSMP=17,167,0,8")
+                .await
+                .is_err()
+            {
                 return false;
             }
 
@@ -851,41 +910,31 @@ impl HardwareBackend for RealBackend {
         let module_type = model.clone();
         let sim_status = send_at_get_line(&self.serial_path, "AT+CPIN?")
             .await
-            .and_then(|r| {
-                match at::parser::parse_single_line(&r) {
-                    Some(at::parser::ParsedLine::Cpin(cpin)) => Some(cpin.status),
-                    _ => None,
-                }
+            .and_then(|r| match at::parser::parse_single_line(&r) {
+                Some(at::parser::ParsedLine::Cpin(cpin)) => Some(cpin.status),
+                _ => None,
             })
             .unwrap_or_else(|| "Unknown".to_string());
         let imsi = send_at_get_line(&self.serial_path, "AT+CIMI")
             .await
-            .and_then(|r| {
-                match at::parser::parse_single_line(&r) {
-                    Some(at::parser::ParsedLine::Cimi(imsi)) => Some(imsi),
-                    Some(at::parser::ParsedLine::Other(val)) => {
-                        Some(val.trim().to_string())
-                    }
-                    _ => None,
-                }
+            .and_then(|r| match at::parser::parse_single_line(&r) {
+                Some(at::parser::ParsedLine::Cimi(imsi)) => Some(imsi),
+                Some(at::parser::ParsedLine::Other(val)) => Some(val.trim().to_string()),
+                _ => None,
             })
             .unwrap_or_default();
         let iccid = send_at_get_line(&self.serial_path, "AT+QCCID")
             .await
-            .and_then(|r| {
-                match at::parser::parse_single_line(&r) {
-                    Some(at::parser::ParsedLine::Qccid(iccid)) => Some(iccid),
-                    _ => None,
-                }
+            .and_then(|r| match at::parser::parse_single_line(&r) {
+                Some(at::parser::ParsedLine::Qccid(iccid)) => Some(iccid),
+                _ => None,
             })
             .unwrap_or_else(|| "Unknown".to_string());
         let phone = send_at_get_line(&self.serial_path, "AT+CNUM")
             .await
-            .and_then(|r| {
-                match at::parser::parse_single_line(&r) {
-                    Some(at::parser::ParsedLine::Cnum(cnum)) => Some(cnum.number),
-                    _ => None,
-                }
+            .and_then(|r| match at::parser::parse_single_line(&r) {
+                Some(at::parser::ParsedLine::Cnum(cnum)) => Some(cnum.number),
+                _ => None,
             })
             .unwrap_or_default();
         let net_status = send_at_get_line(&self.serial_path, "AT+CREG?")
@@ -954,7 +1003,14 @@ impl HardwareBackend for RealBackend {
         send_at_command_inner(&self.serial_path, &cmd).await
     }
 
-    async fn set_cell_lock(&self, tech: &str, pci: u32, earfcn: u32, band: Option<u32>, enable: bool) -> Result<String, String> {
+    async fn set_cell_lock(
+        &self,
+        tech: &str,
+        pci: u32,
+        earfcn: u32,
+        band: Option<u32>,
+        enable: bool,
+    ) -> Result<String, String> {
         if !enable {
             if tech.eq_ignore_ascii_case("5g") {
                 send_at_command_inner(&self.serial_path, "AT+QNWLOCK=\"common/5g\",0").await
@@ -964,33 +1020,49 @@ impl HardwareBackend for RealBackend {
         } else if tech.eq_ignore_ascii_case("5g") {
             let b = band.ok_or_else(|| "5G 锁小区必须提供 Band".to_string())?;
             // 低频段 FDD (<=28) 常用 15kHz，高频段 TDD 常用 30kHz
-            let scs = if b <= self.profile.nr_cell_lock_scs_threshold { 15 } else { 30 };
-            send_at_command_inner(&self.serial_path, &format!("AT+QNWLOCK=\"common/5g\",{},{},{},{}", pci, earfcn, scs, b)).await
+            let scs = if b <= self.profile.nr_cell_lock_scs_threshold {
+                15
+            } else {
+                30
+            };
+            send_at_command_inner(
+                &self.serial_path,
+                &format!("AT+QNWLOCK=\"common/5g\",{},{},{},{}", pci, earfcn, scs, b),
+            )
+            .await
         } else {
-            send_at_command_inner(&self.serial_path, &format!("AT+QNWLOCK=\"common/lte\",1,{},{}", earfcn, pci)).await
+            send_at_command_inner(
+                &self.serial_path,
+                &format!("AT+QNWLOCK=\"common/lte\",1,{},{}", earfcn, pci),
+            )
+            .await
         }
     }
 
     async fn get_diagnostics(&self, diag: &DiagnosticType) -> Result<String, String> {
         match diag {
-            DiagnosticType::Neighbour => send_at_command_inner(&self.serial_path, "AT+QENG=\"neighbourcell\"").await,
+            DiagnosticType::Neighbour => {
+                send_at_command_inner(&self.serial_path, "AT+QENG=\"neighbourcell\"").await
+            }
             DiagnosticType::Qlts => {
                 match send_at_command_inner(&self.serial_path, "AT+QLTS=2").await {
                     Ok(res) => Ok(res),
                     Err(_) => send_at_command_inner(&self.serial_path, "AT+QLTS").await,
                 }
             }
-            DiagnosticType::MbnList => send_at_command_inner(&self.serial_path, "AT+QMBNCFG=\"List\"").await,
-            DiagnosticType::AutoSelQuery => send_at_command_inner(&self.serial_path, "AT+QMBNCFG=\"AutoSel\"").await,
+            DiagnosticType::MbnList => {
+                send_at_command_inner(&self.serial_path, "AT+QMBNCFG=\"List\"").await
+            }
+            DiagnosticType::AutoSelQuery => {
+                send_at_command_inner(&self.serial_path, "AT+QMBNCFG=\"AutoSel\"").await
+            }
         }
     }
 
     async fn poll_telemetry(&self) -> TelemetryData {
         let mut telemetry = TelemetryData::default();
 
-        if let Ok(cgpaddr_resp) =
-            send_at_command_inner(&self.serial_path, "AT+CGPADDR").await
-        {
+        if let Ok(cgpaddr_resp) = send_at_command_inner(&self.serial_path, "AT+CGPADDR").await {
             parse_cgpaddr(&cgpaddr_resp, &mut telemetry);
         }
         if let Ok(qeng_resp) =
@@ -998,24 +1070,20 @@ impl HardwareBackend for RealBackend {
         {
             parse_qeng(&qeng_resp, &mut telemetry);
         }
-        if let Ok(qcainfo_resp) =
-            send_at_command_inner(&self.serial_path, "AT+QCAINFO").await
-        {
+        if let Ok(qcainfo_resp) = send_at_command_inner(&self.serial_path, "AT+QCAINFO").await {
             parse_qcainfo(&qcainfo_resp, &mut telemetry);
         }
-        if let Ok(cpin_resp) =
-            send_at_command_inner(&self.serial_path, "AT+CPIN?").await
-        {
-            if let Some(status) = cpin_resp.lines().find_map(|l| {
-                match at::parser::parse_single_line(l) {
-                    Some(at::parser::ParsedLine::Cpin(cpin))
-                        if !cpin.status.is_empty() =>
-                    {
-                        Some(cpin.status)
-                    }
-                    _ => None,
-                }
-            }) {
+        if let Ok(cpin_resp) = send_at_command_inner(&self.serial_path, "AT+CPIN?").await {
+            if let Some(status) =
+                cpin_resp
+                    .lines()
+                    .find_map(|l| match at::parser::parse_single_line(l) {
+                        Some(at::parser::ParsedLine::Cpin(cpin)) if !cpin.status.is_empty() => {
+                            Some(cpin.status)
+                        }
+                        _ => None,
+                    })
+            {
                 telemetry.sim_status = Some(status);
             }
         }
@@ -1029,36 +1097,30 @@ impl HardwareBackend for RealBackend {
             .await
             .ok()
             .and_then(|r| {
-                r.lines().find_map(|l| {
-                    match at::parser::parse_single_line(l) {
-                        Some(at::parser::ParsedLine::TrafficStats(stats)) => {
-                            Some(format!(
-                                "TX {} / RX {}",
-                                format_bytes(stats.tx_bytes),
-                                format_bytes(stats.rx_bytes)
-                            ))
-                        }
+                r.lines()
+                    .find_map(|l| match at::parser::parse_single_line(l) {
+                        Some(at::parser::ParsedLine::TrafficStats(stats)) => Some(format!(
+                            "TX {} / RX {}",
+                            format_bytes(stats.tx_bytes),
+                            format_bytes(stats.rx_bytes)
+                        )),
                         _ => None,
-                    }
-                })
+                    })
             });
         if telemetry.traffic_stats.is_none() {
             telemetry.traffic_stats = send_at_command_inner(&self.serial_path, "AT+QGDAT?")
                 .await
                 .ok()
                 .and_then(|r| {
-                    r.lines().find_map(|l| {
-                        match at::parser::parse_single_line(l) {
-                            Some(at::parser::ParsedLine::TrafficStats(stats)) => {
-                                Some(format!(
-                                    "TX {} / RX {}",
-                                    format_bytes(stats.tx_bytes),
-                                    format_bytes(stats.rx_bytes)
-                                ))
-                            }
+                    r.lines()
+                        .find_map(|l| match at::parser::parse_single_line(l) {
+                            Some(at::parser::ParsedLine::TrafficStats(stats)) => Some(format!(
+                                "TX {} / RX {}",
+                                format_bytes(stats.tx_bytes),
+                                format_bytes(stats.rx_bytes)
+                            )),
                             _ => None,
-                        }
-                    })
+                        })
                 });
         }
 
@@ -1078,14 +1140,15 @@ impl HardwareBackend for RealBackend {
 
         push_log("INFO", "System", "[2/5] 获取 SIM 槽位 (AT+QUIMSLOT?)...");
         if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+QUIMSLOT?").await {
-            if let Some(slot_name) = resp.lines().find_map(|l| {
-                match at::parser::parse_single_line(l) {
+            if let Some(slot_name) = resp
+                .lines()
+                .find_map(|l| match at::parser::parse_single_line(l) {
                     Some(at::parser::ParsedLine::Quimslot(slot_resp)) => {
                         Some(format!("SIM {}", slot_resp.slot))
                     }
                     _ => None,
-                }
-            }) {
+                })
+            {
                 active_sim = slot_name;
             }
         }
@@ -1101,21 +1164,18 @@ impl HardwareBackend for RealBackend {
         if let Ok(resp) = send_at_command_inner(&self.serial_path, "AT+CGDCONT?").await {
             let cgdcont_entries: Vec<_> = resp
                 .lines()
-                .filter_map(|l| {
-                    match at::parser::parse_single_line(l) {
-                        Some(at::parser::ParsedLine::Cgdcont(entry))
-                            if !entry.apn.is_empty() =>
-                        {
-                            Some(entry)
-                        }
-                        _ => None,
+                .filter_map(|l| match at::parser::parse_single_line(l) {
+                    Some(at::parser::ParsedLine::Cgdcont(entry)) if !entry.apn.is_empty() => {
+                        Some(entry)
                     }
+                    _ => None,
                 })
                 .collect();
 
-            if let Some(entry) = cgdcont_entries.iter().find(|e| {
-                at::parser::is_valid_data_apn(&e.apn)
-            }) {
+            if let Some(entry) = cgdcont_entries
+                .iter()
+                .find(|e| at::parser::is_valid_data_apn(&e.apn))
+            {
                 apn = entry.apn.clone();
             }
 
@@ -1129,7 +1189,14 @@ impl HardwareBackend for RealBackend {
             apn = "N/A".to_string();
         }
 
-        push_log("INFO", "System", &format!("静态信息已获取: FW={}, SIM={}, Provider={}, APN={}", firmware_version, active_sim, network_provider, apn));
+        push_log(
+            "INFO",
+            "System",
+            &format!(
+                "静态信息已获取: FW={}, SIM={}, Provider={}, APN={}",
+                firmware_version, active_sim, network_provider, apn
+            ),
+        );
 
         (firmware_version, active_sim, network_provider, apn)
     }
@@ -1152,13 +1219,16 @@ impl HardwareBackend for RealBackend {
         // 解析 usbnet（指令失败时 usbnet_supported = false）
         let (usbnet_mode, usbnet_supported) = match &usbnet_resp {
             Ok(resp) => {
-                let mode = resp.lines().find_map(|l| {
-                    if l.contains("+QCFG: \"usbnet\",") {
-                        l.split(',').nth(1)?.trim().parse::<u8>().ok()
-                    } else {
-                        None
-                    }
-                }).unwrap_or(0);
+                let mode = resp
+                    .lines()
+                    .find_map(|l| {
+                        if l.contains("+QCFG: \"usbnet\",") {
+                            l.split(',').nth(1)?.trim().parse::<u8>().ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0);
                 (mode, true)
             }
             Err(_) => (0, false),
@@ -1196,13 +1266,11 @@ impl HardwareBackend for RealBackend {
         let resp = send_at_command_inner(&self.serial_path, "AT+QMBNCFG=\"List\"").await?;
         let entries: Vec<serde_json::Value> = resp
             .lines()
-            .filter_map(|line| {
-                match at::parser::parse_single_line(line.trim()) {
-                    Some(at::parser::ParsedLine::Qmbncfg(e)) => {
-                        Some(serde_json::json!({ "index": e.index, "state": e.state, "name": e.name }))
-                    }
-                    _ => None,
+            .filter_map(|line| match at::parser::parse_single_line(line.trim()) {
+                Some(at::parser::ParsedLine::Qmbncfg(e)) => {
+                    Some(serde_json::json!({ "index": e.index, "state": e.state, "name": e.name }))
                 }
+                _ => None,
             })
             .collect();
         if entries.is_empty() {
@@ -1217,7 +1285,11 @@ impl HardwareBackend for RealBackend {
         if name.is_empty() {
             return Err("MBN 名称不能为空".to_string());
         }
-        send_at_command_inner(&self.serial_path, &format!("AT+QMBNCFG=\"Select\",\"{}\"", name)).await
+        send_at_command_inner(
+            &self.serial_path,
+            &format!("AT+QMBNCFG=\"Select\",\"{}\"", name),
+        )
+        .await
     }
 }
 
@@ -1237,7 +1309,13 @@ impl HardwareBackend for MockBackend {
         "+CMGL: 0 messages\r\nOK\r\n".to_string()
     }
 
-    async fn configure_apn(&self, apn: &str, _user: &str, _pass: &str, _auth_type: u8) -> Result<String, String> {
+    async fn configure_apn(
+        &self,
+        apn: &str,
+        _user: &str,
+        _pass: &str,
+        _auth_type: u8,
+    ) -> Result<String, String> {
         push_log("MOCK", "APN", &format!("Mock: 配置 APN"));
         Ok(format!("APN {} 设置已应用 (Mock)", apn))
     }
@@ -1248,8 +1326,17 @@ impl HardwareBackend for MockBackend {
     }
 
     async fn set_data_session(&self, connect: bool) -> Result<String, String> {
-        push_log("MOCK", "Net", &format!("Mock: 数据会话 {}", if connect { "连接" } else { "断开" }));
-        Ok(if connect { "拨号连接指令已下发 (Mock)" } else { "拨号断开指令已下发 (Mock)" }.to_string())
+        push_log(
+            "MOCK",
+            "Net",
+            &format!("Mock: 数据会话 {}", if connect { "连接" } else { "断开" }),
+        );
+        Ok(if connect {
+            "拨号连接指令已下发 (Mock)"
+        } else {
+            "拨号断开指令已下发 (Mock)"
+        }
+        .to_string())
     }
 
     async fn scan_available_networks(&self) -> Vec<serde_json::Value> {
@@ -1261,7 +1348,11 @@ impl HardwareBackend for MockBackend {
     }
 
     async fn send_sms_msg(&self, recipient: &str, message: &str) -> bool {
-        push_log("MOCK", "SMS", &format!("Mock: 发送短信至 {}: {}", recipient, message));
+        push_log(
+            "MOCK",
+            "SMS",
+            &format!("Mock: 发送短信至 {}: {}", recipient, message),
+        );
         true
     }
 
@@ -1294,16 +1385,38 @@ impl HardwareBackend for MockBackend {
     }
 
     async fn set_airplane_mode(&self, on: bool) {
-        push_log("MOCK", "System", &format!("Mock: 飞行模式 {}", if on { "开启" } else { "关闭" }));
+        push_log(
+            "MOCK",
+            "System",
+            &format!("Mock: 飞行模式 {}", if on { "开启" } else { "关闭" }),
+        );
     }
 
     async fn set_band_lock(&self, is_nr5g: bool, bands: &str) -> Result<String, String> {
-        push_log("MOCK", "Band", &format!("Mock: 频段锁定 is_nr5g={}, bands={}", is_nr5g, bands));
+        push_log(
+            "MOCK",
+            "Band",
+            &format!("Mock: 频段锁定 is_nr5g={}, bands={}", is_nr5g, bands),
+        );
         Ok("OK\r\n".to_string())
     }
 
-    async fn set_cell_lock(&self, tech: &str, pci: u32, earfcn: u32, band: Option<u32>, enable: bool) -> Result<String, String> {
-        push_log("MOCK", "Cell", &format!("Mock: 小区锁定 tech={}, pci={}, earfcn={}, band={:?}, enable={}", tech, pci, earfcn, band, enable));
+    async fn set_cell_lock(
+        &self,
+        tech: &str,
+        pci: u32,
+        earfcn: u32,
+        band: Option<u32>,
+        enable: bool,
+    ) -> Result<String, String> {
+        push_log(
+            "MOCK",
+            "Cell",
+            &format!(
+                "Mock: 小区锁定 tech={}, pci={}, earfcn={}, band={:?}, enable={}",
+                tech, pci, earfcn, band, enable
+            ),
+        );
         Ok("OK\r\n".to_string())
     }
 
@@ -1339,7 +1452,11 @@ impl HardwareBackend for MockBackend {
     }
 
     async fn set_usb_net_mode(&self, mode: u8) -> Result<String, String> {
-        push_log("MOCK", "USB", &format!("Mock: 设置 USB 网络模式为 {}", mode));
+        push_log(
+            "MOCK",
+            "USB",
+            &format!("Mock: 设置 USB 网络模式为 {}", mode),
+        );
         Ok("OK\r\n".to_string())
     }
 
@@ -1385,7 +1502,6 @@ impl HardwareBackend for MockBackend {
     }
 }
 
-
 // ============================================================================
 // 通用工具函数
 // ============================================================================
@@ -1393,50 +1509,61 @@ impl HardwareBackend for MockBackend {
 /// 三段式回退获取运营商名称：QSPN → COPS → QENG MCC/MNC
 async fn fetch_network_provider(serial_path: &str) -> String {
     if let Ok(resp) = send_at_command_inner(serial_path, "AT+QSPN").await {
-        if let Some(provider) = resp.lines().find_map(|l| {
-            match at::parser::parse_single_line(l) {
+        if let Some(provider) = resp
+            .lines()
+            .find_map(|l| match at::parser::parse_single_line(l) {
                 Some(at::parser::ParsedLine::Qspn(qspn))
                     if !qspn.fnn.is_empty() && qspn.fnn != "????" =>
                 {
                     let decoded = decode_hex_ucs2(&qspn.fnn);
-                    Some(if decoded.is_empty() { qspn.fnn } else { decoded })
+                    Some(if decoded.is_empty() {
+                        qspn.fnn
+                    } else {
+                        decoded
+                    })
                 }
                 _ => None,
-            }
-        }) {
+            })
+        {
             return provider;
         }
     }
 
     if let Ok(resp) = send_at_command_inner(serial_path, "AT+COPS?").await {
-        if let Some(provider) = resp.lines().find_map(|l| {
-            match at::parser::parse_single_line(l) {
+        if let Some(provider) = resp
+            .lines()
+            .find_map(|l| match at::parser::parse_single_line(l) {
                 Some(at::parser::ParsedLine::Cops(cops)) => {
                     if let Some(oper) = cops.oper {
                         let trimmed = oper.trim();
                         if !trimmed.is_empty() && trimmed != "????" {
                             let decoded = decode_hex_ucs2(trimmed);
-                            return Some(if decoded.is_empty() { trimmed.to_string() } else { decoded });
+                            return Some(if decoded.is_empty() {
+                                trimmed.to_string()
+                            } else {
+                                decoded
+                            });
                         }
                     }
                     None
                 }
                 _ => None,
-            }
-        }) {
+            })
+        {
             return provider;
         }
     }
 
     if let Ok(resp) = send_at_command_inner(serial_path, "AT+QENG=\"servingcell\"").await {
-        if let Some(mccmnc) = resp.lines().find_map(|l| {
-            match at::parser::parse_single_line(l) {
+        if let Some(mccmnc) = resp
+            .lines()
+            .find_map(|l| match at::parser::parse_single_line(l) {
                 Some(at::parser::ParsedLine::QengServingCell(cell)) => {
                     Some(format!("{}{}", cell.mcc, cell.mnc))
                 }
                 _ => None,
-            }
-        }) {
+            })
+        {
             return match mccmnc.as_str() {
                 "46000" | "46002" | "46007" => "中国移动".to_string(),
                 "46001" => "中国联通".to_string(),
@@ -1488,25 +1615,38 @@ struct ImeiParseResult {
 fn extract_egmr_imei(raw: &str) -> Option<String> {
     let marker = "+EGMR:";
     let pos = raw.find(marker)?;
-    let rest = raw[pos + marker.len()..].trim_start().trim_start_matches('"');
+    let rest = raw[pos + marker.len()..]
+        .trim_start()
+        .trim_start_matches('"');
     let imei: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
     if imei.is_empty() { None } else { Some(imei) }
 }
 
 /// 解析 AT+EGMR 响应（读取/写入 IMEI），返回 None 表示非 EGMR 响应
 fn parse_egmr_response(raw: &str) -> Option<ImeiParseResult> {
-    if !raw.contains("AT+EGMR") { return None; }
+    if !raw.contains("AT+EGMR") {
+        return None;
+    }
     let is_write = raw.contains("AT+EGMR=1,7");
     let kind = if is_write { "write" } else { "read" };
     if let Some(imei) = extract_egmr_imei(raw) {
-        return Some(ImeiParseResult { kind: "read".to_string(), success: true, imei: Some(imei) });
+        return Some(ImeiParseResult {
+            kind: "read".to_string(),
+            success: true,
+            imei: Some(imei),
+        });
     }
     let success = raw.contains("OK");
-    Some(ImeiParseResult { kind: kind.to_string(), success, imei: None })
+    Some(ImeiParseResult {
+        kind: kind.to_string(),
+        success,
+        imei: None,
+    })
 }
 
 fn at_response_has_error(raw: &str) -> bool {
-    raw.lines().any(|line| matches!(at::parser::parse_single_line(line), Some(ParsedLine::Error)))
+    raw.lines()
+        .any(|line| matches!(at::parser::parse_single_line(line), Some(ParsedLine::Error)))
 }
 
 /// 判断 `exec_raw_at` 的返回值是否表示命令执行失败。
@@ -1521,7 +1661,10 @@ fn at_response_preview(raw: &str) -> &str {
         .find(|line| {
             let trimmed = line.trim();
             !trimmed.is_empty()
-                && !matches!(at::parser::parse_single_line(trimmed), Some(ParsedLine::Ok | ParsedLine::Error))
+                && !matches!(
+                    at::parser::parse_single_line(trimmed),
+                    Some(ParsedLine::Ok | ParsedLine::Error)
+                )
                 && !trimmed.starts_with("AT+")
         })
         .unwrap_or(raw)
@@ -1557,13 +1700,26 @@ async fn send_at_command_inner_with_options(
 
     if at_response_has_error(&raw) {
         let elapsed = start.elapsed();
-        push_log("WARN", "AT", &format!("[AT] {} 返回 ERROR ({}ms)", cmd, elapsed.as_millis()));
+        push_log(
+            "WARN",
+            "AT",
+            &format!("[AT] {} 返回 ERROR ({}ms)", cmd, elapsed.as_millis()),
+        );
         return Err(format!("AT命令返回错误: {}", raw.trim()));
     }
 
     let elapsed = start.elapsed();
     let preview = at_response_preview(&raw);
-    push_log("INFO", "AT", &format!("{} 成功 ({}ms): {}", cmd, elapsed.as_millis(), preview.trim()));
+    push_log(
+        "INFO",
+        "AT",
+        &format!(
+            "{} 成功 ({}ms): {}",
+            cmd,
+            elapsed.as_millis(),
+            preview.trim()
+        ),
+    );
     Ok(raw)
 }
 
@@ -1579,11 +1735,27 @@ async fn send_at_command_inner(serial_path: &str, cmd: &str) -> Result<String, S
     send_at_command_inner_with_timeout(serial_path, cmd, Duration::from_secs(10)).await
 }
 
-async fn send_sms_command_inner(serial_path: &str, cmd: &str, message: &str, hex_body: Option<&str>) -> Result<String, String> {
+async fn send_sms_command_inner(
+    serial_path: &str,
+    cmd: &str,
+    message: &str,
+    hex_body: Option<&str>,
+) -> Result<String, String> {
     // 当使用 hex_body（UCS2 原始字节）时，不传递 sms_message，
     // 避免 atcmd_rs 的 --message 抢占 `>` prompt 导致 hex_body 被跳过
-    let sms_message = if hex_body.is_some() { None } else { Some(message) };
-    send_at_command_inner_with_options(serial_path, cmd, Duration::from_secs(30), sms_message, hex_body).await
+    let sms_message = if hex_body.is_some() {
+        None
+    } else {
+        Some(message)
+    };
+    send_at_command_inner_with_options(
+        serial_path,
+        cmd,
+        Duration::from_secs(30),
+        sms_message,
+        hex_body,
+    )
+    .await
 }
 
 async fn query_device_bands(serial_path: &str) -> String {
@@ -1638,12 +1810,8 @@ async fn query_device_bands(serial_path: &str) -> String {
         }
     }
 
-    nr_bands.sort_by_key(|b| {
-        b.trim_start_matches('n').parse::<u32>().unwrap_or(999)
-    });
-    lte_bands.sort_by_key(|b| {
-        b.trim_start_matches('B').parse::<u32>().unwrap_or(999)
-    });
+    nr_bands.sort_by_key(|b| b.trim_start_matches('n').parse::<u32>().unwrap_or(999));
+    lte_bands.sort_by_key(|b| b.trim_start_matches('B').parse::<u32>().unwrap_or(999));
 
     let mut result = Vec::new();
     if !nr_bands.is_empty() {
@@ -1737,7 +1905,8 @@ fn serialize_global(global: &GlobalTelemetry, update_type: &str) -> String {
     serde_json::json!({
         "update_type": update_type,
         "data": global
-    }).to_string()
+    })
+    .to_string()
 }
 
 /// 从请求头中提取客户端 IP
@@ -1801,20 +1970,24 @@ async fn get_nonce_handler(State(state): State<Arc<AppState>>) -> Json<NonceResp
     Json(NonceResponse { nonce })
 }
 
-async fn index_handler(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<Response, AppError> {
+async fn index_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
     if !is_authenticated(&headers, &state.jwt_secret) {
         return Ok(Redirect::to("/login").into_response());
     }
-    embedded_file("index.html")
-        .ok_or_else(|| AppError(anyhow::anyhow!("嵌入资源缺失: index.html")))
+    embedded_file("index.html").ok_or_else(|| AppError(anyhow::anyhow!("嵌入资源缺失: index.html")))
 }
 
-async fn login_get_handler(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<Response, AppError> {
+async fn login_get_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
     if is_authenticated(&headers, &state.jwt_secret) {
         return Ok(Redirect::to("/").into_response());
     }
-    embedded_file("login.html")
-        .ok_or_else(|| AppError(anyhow::anyhow!("嵌入资源缺失: login.html")))
+    embedded_file("login.html").ok_or_else(|| AppError(anyhow::anyhow!("嵌入资源缺失: login.html")))
 }
 
 async fn login_post_handler(
@@ -1826,16 +1999,26 @@ async fn login_post_handler(
 
     // 无状态校验 Nonce（无需锁，无需 HashMap 查找）
     if !verify_stateless_nonce(&payload.nonce, &state.jwt_secret) {
-        push_log("WARN", "Auth", &format!(
-            "登录失败(随机数无效或过期): 用户 '{}' 从 {}",
-            payload.username, ip
-        ));
-        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"success": false, "msg": "随机数失效，请刷新页面重试"}))).into_response();
+        push_log(
+            "WARN",
+            "Auth",
+            &format!(
+                "登录失败(随机数无效或过期): 用户 '{}' 从 {}",
+                payload.username, ip
+            ),
+        );
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"success": false, "msg": "随机数失效，请刷新页面重试"})),
+        )
+            .into_response();
     }
 
     // SHA256(nonce + username + SHA256(admin_password))
-    let expected_response =
-        hash_password_sha256(&format!("{}{}{}", payload.nonce, state.admin_username, state.admin_pass_sha));
+    let expected_response = hash_password_sha256(&format!(
+        "{}{}{}",
+        payload.nonce, state.admin_username, state.admin_pass_sha
+    ));
 
     if payload.response.eq_ignore_ascii_case(&expected_response) {
         let now = std::time::SystemTime::now()
@@ -1853,7 +2036,11 @@ async fn login_post_handler(
             Ok(t) => t,
             Err(e) => {
                 push_log("ERROR", "Auth", &format!("JWT 签名生成失败: {}", e));
-                return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "msg": "服务器内部错误，登录失败"}))).into_response();
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"success": false, "msg": "服务器内部错误，登录失败"})),
+                )
+                    .into_response();
             }
         };
 
@@ -1868,21 +2055,34 @@ async fn login_post_handler(
             .status(StatusCode::OK)
             .header(header::SET_COOKIE, cookie)
             .header(header::CONTENT_TYPE, "application/json")
-            .body(axum::body::Body::from(r#"{"success":true,"msg":"登录成功"}"#))
+            .body(axum::body::Body::from(
+                r#"{"success":true,"msg":"登录成功"}"#,
+            ))
             .unwrap()
     } else {
-        push_log("WARN", "Auth", &format!(
-            "登录失败(密码错误): 用户 '{}' 从 {} 尝试",
-            payload.username, ip
-        ));
-        (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"success": false, "msg": "密码错误，请重试"}))).into_response()
+        push_log(
+            "WARN",
+            "Auth",
+            &format!(
+                "登录失败(密码错误): 用户 '{}' 从 {} 尝试",
+                payload.username, ip
+            ),
+        );
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"success": false, "msg": "密码错误，请重试"})),
+        )
+            .into_response()
     }
 }
 
 async fn logout_post_handler() -> Response {
     Response::builder()
         .status(StatusCode::OK)
-        .header(header::SET_COOKIE, "auth_token=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0")
+        .header(
+            header::SET_COOKIE,
+            "auth_token=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0",
+        )
         .header(header::CONTENT_TYPE, "application/json")
         .body(axum::body::Body::from(r#"{"success":true}"#))
         .unwrap()
@@ -1922,7 +2122,9 @@ async fn handle_at_request(
             let cmd = normalize_at_command(&cmd);
             push_log("INFO", "Actor", &format!("顺序执行手动 AT: {}", cmd));
             let response = backend.exec_raw_at(&cmd).await;
-            let _ = req.resp_tx.send(serde_json::json!({ "type": "at_res", "data": response }));
+            let _ = req
+                .resp_tx
+                .send(serde_json::json!({ "type": "at_res", "data": response }));
         }
         AtAction::SetInterval(secs) => {
             let new_secs = secs.max(3);
@@ -1931,7 +2133,11 @@ async fn handle_at_request(
             *interval = tokio::time::interval(Duration::from_secs(*interval_secs));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             interval.tick().await;
-            push_log("INFO", "Settings", &format!("轮询间隔已调整为 {} 秒", new_secs));
+            push_log(
+                "INFO",
+                "Settings",
+                &format!("轮询间隔已调整为 {} 秒", new_secs),
+            );
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "settings_log",
                 "data": { "msg": format!("轮询间隔已调整为 {} 秒", new_secs) }
@@ -1941,7 +2147,9 @@ async fn handle_at_request(
             push_log("INFO", "Actor", "读取短信列表...");
             let resp = backend.read_sms_list().await;
             let decoded = decode_cmgl_body(&resp);
-            let _ = req.resp_tx.send(serde_json::json!({ "type": "sms_list", "data": decoded }));
+            let _ = req
+                .resp_tx
+                .send(serde_json::json!({ "type": "sms_list", "data": decoded }));
         }
         AtAction::SetApn(apn, user, pass, auth_type) => {
             push_log("INFO", "Actor", &format!("配置 APN: {}", apn));
@@ -1969,7 +2177,11 @@ async fn handle_at_request(
             }));
         }
         AtAction::NetConnect(connect) => {
-            push_log("INFO", "Actor", &format!("拨号控制: {}", if connect { "连接" } else { "断开" }));
+            push_log(
+                "INFO",
+                "Actor",
+                &format!("拨号控制: {}", if connect { "连接" } else { "断开" }),
+            );
             let res = backend.set_data_session(connect).await;
             let (success, msg) = match res {
                 Ok(m) => (true, m),
@@ -2044,7 +2256,11 @@ async fn handle_at_request(
             }));
         }
         AtAction::FlightMode(on) => {
-            push_log("INFO", "System", &format!("飞行模式状态改变: {}", if on { "开启" } else { "关闭" }));
+            push_log(
+                "INFO",
+                "System",
+                &format!("飞行模式状态改变: {}", if on { "开启" } else { "关闭" }),
+            );
             backend.set_airplane_mode(on).await;
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "settings_log",
@@ -2052,16 +2268,35 @@ async fn handle_at_request(
             }));
         }
         AtAction::SetBandLock { is_nr5g, bands } => {
-            push_log("INFO", "Actor", &format!("设置频段锁定: is_nr5g={}, bands={}", is_nr5g, bands));
+            push_log(
+                "INFO",
+                "Actor",
+                &format!("设置频段锁定: is_nr5g={}, bands={}", is_nr5g, bands),
+            );
             let res = backend.set_band_lock(is_nr5g, &bands).await;
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "band_lock_res",
                 "data": { "success": res.is_ok(), "msg": res.unwrap_or_else(|e| e) }
             }));
         }
-        AtAction::SetCellLock { tech, pci, earfcn, band, enable } => {
-            push_log("INFO", "Actor", &format!("设置小区锁定: tech={}, pci={}, earfcn={}, band={:?}, enable={}", tech, pci, earfcn, band, enable));
-            let res = backend.set_cell_lock(&tech, pci, earfcn, band, enable).await;
+        AtAction::SetCellLock {
+            tech,
+            pci,
+            earfcn,
+            band,
+            enable,
+        } => {
+            push_log(
+                "INFO",
+                "Actor",
+                &format!(
+                    "设置小区锁定: tech={}, pci={}, earfcn={}, band={:?}, enable={}",
+                    tech, pci, earfcn, band, enable
+                ),
+            );
+            let res = backend
+                .set_cell_lock(&tech, pci, earfcn, band, enable)
+                .await;
             let _ = req.resp_tx.send(serde_json::json!({
                 "type": "cell_lock_res",
                 "data": { "success": res.is_ok(), "msg": res.unwrap_or_else(|e| e) }
@@ -2087,7 +2322,11 @@ async fn handle_at_request(
                     }));
                 }
                 _ => {
-                    let data = res.as_ref().ok().map(|r| serde_json::Value::String(r.clone())).unwrap_or(serde_json::Value::Null);
+                    let data = res
+                        .as_ref()
+                        .ok()
+                        .map(|r| serde_json::Value::String(r.clone()))
+                        .unwrap_or(serde_json::Value::Null);
                     let _ = req.resp_tx.send(serde_json::json!({
                         "type": "diagnostics_res",
                         "data": { "success": res.is_ok(), "msg": res.unwrap_or_else(|e| e), "data": data }
@@ -2104,7 +2343,11 @@ async fn handle_at_request(
                 match backend.get_usb_config().await {
                     Ok(c) => Some(c),
                     Err(e) => {
-                        push_log("WARN", "Actor", &format!("设置 USB 模式后回读配置失败: {}", e));
+                        push_log(
+                            "WARN",
+                            "Actor",
+                            &format!("设置 USB 模式后回读配置失败: {}", e),
+                        );
                         None
                     }
                 }
@@ -2190,7 +2433,11 @@ async fn handle_at_request(
             }));
         }
         AtAction::SetMbnAutoSel(on) => {
-            push_log("INFO", "Actor", &format!("MBN AutoSel 切换: {}", if on { "启用" } else { "禁用" }));
+            push_log(
+                "INFO",
+                "Actor",
+                &format!("MBN AutoSel 切换: {}", if on { "启用" } else { "禁用" }),
+            );
             let cmd = format!("AT+QMBNCFG=\"AutoSel\",{}", if on { 1 } else { 0 });
             let res = backend.exec_raw_at(&cmd).await;
             let ok = !at_exec_failed(&res);
@@ -2221,24 +2468,40 @@ async fn handle_at_request(
             push_log("INFO", "Actor", "读取 IMEI...");
             let raw = backend.exec_raw_at("AT+EGMR=0,7").await;
             let parsed = parse_egmr_response(&raw).unwrap_or(ImeiParseResult {
-                kind: "read".to_string(), success: false, imei: None,
+                kind: "read".to_string(),
+                success: false,
+                imei: None,
             });
-            let _ = req.resp_tx.send(serde_json::json!({ "type": "imei_res", "data": parsed }));
+            let _ = req
+                .resp_tx
+                .send(serde_json::json!({ "type": "imei_res", "data": parsed }));
         }
         AtAction::WriteImei(imei) => {
             let imei = sanitize_at_param(&imei);
             push_log("INFO", "Actor", &format!("写入 IMEI: {}", imei));
-            let raw = backend.exec_raw_at(&format!("AT+EGMR=1,7,\"{}\"", imei)).await;
+            let raw = backend
+                .exec_raw_at(&format!("AT+EGMR=1,7,\"{}\"", imei))
+                .await;
             let parsed = parse_egmr_response(&raw).unwrap_or(ImeiParseResult {
-                kind: "write".to_string(), success: false, imei: None,
+                kind: "write".to_string(),
+                success: false,
+                imei: None,
             });
-            let _ = req.resp_tx.send(serde_json::json!({ "type": "imei_res", "data": parsed }));
+            let _ = req
+                .resp_tx
+                .send(serde_json::json!({ "type": "imei_res", "data": parsed }));
         }
         AtAction::SetEthConfig { driver, pcie_rc } => {
-            push_log("INFO", "Actor", &format!("开始原子配置网口: driver={}, pcie_rc={}", driver, pcie_rc));
+            push_log(
+                "INFO",
+                "Actor",
+                &format!("开始原子配置网口: driver={}, pcie_rc={}", driver, pcie_rc),
+            );
 
             // 步骤 1: 加载网卡 PHY 驱动
-            let r1 = backend.exec_raw_at(&format!("AT+QETH=\"eth_driver\",\"{}\",1", driver)).await;
+            let r1 = backend
+                .exec_raw_at(&format!("AT+QETH=\"eth_driver\",\"{}\",1", driver))
+                .await;
             if at_exec_failed(&r1) {
                 let _ = req.resp_tx.send(serde_json::json!({
                     "type": "eth_res",
@@ -2248,7 +2511,12 @@ async fn handle_at_request(
             }
 
             // 步骤 2: 配置 PCIe 总线模式
-            let r2 = backend.exec_raw_at(&format!("AT+QCFG=\"pcie/mode\",{}", if pcie_rc { 1 } else { 0 })).await;
+            let r2 = backend
+                .exec_raw_at(&format!(
+                    "AT+QCFG=\"pcie/mode\",{}",
+                    if pcie_rc { 1 } else { 0 }
+                ))
+                .await;
             if at_exec_failed(&r2) {
                 let _ = req.resp_tx.send(serde_json::json!({
                     "type": "eth_res",
@@ -2275,7 +2543,11 @@ async fn handle_at_request(
             }));
         }
         AtAction::SetIpptConfig { mode } => {
-            push_log("INFO", "Actor", &format!("开始原子配置 IP 直通: mode={}", mode));
+            push_log(
+                "INFO",
+                "Actor",
+                &format!("开始原子配置 IP 直通: mode={}", mode),
+            );
 
             // 步骤 1: 开启网口自动拨号
             let r1 = backend.exec_raw_at("AT+QMAPWAC=1").await;
@@ -2466,11 +2738,19 @@ async fn load_or_generate_tls_config() -> Result<RustlsConfig, Box<dyn std::erro
     let key_path = env::var("SSL_KEY_PATH").unwrap_or_else(|_| "key.pem".to_string());
 
     if Path::new(&cert_path).exists() && Path::new(&key_path).exists() {
-        push_log("INFO", "TLS", &format!("从文件加载 SSL 证书: {} / {}", cert_path, key_path));
+        push_log(
+            "INFO",
+            "TLS",
+            &format!("从文件加载 SSL 证书: {} / {}", cert_path, key_path),
+        );
         return Ok(RustlsConfig::from_pem_file(cert_path, key_path).await?);
     }
 
-    push_log("WARN", "TLS", "未检测到外部 SSL 证书，正在通过 RustCrypto 内存动态签发证书 (开箱即用)...");
+    push_log(
+        "WARN",
+        "TLS",
+        "未检测到外部 SSL 证书，正在通过 RustCrypto 内存动态签发证书 (开箱即用)...",
+    );
 
     // 纯 Rust 生成 ECC P-256 密钥对
     let key_pair = certkit::key::KeyPair::generate_ecdsa_p256();
@@ -2496,7 +2776,9 @@ async fn load_or_generate_tls_config() -> Result<RustlsConfig, Box<dyn std::erro
     let cert_info = certkit::cert::params::CertificateParams::builder()
         .subject(subject)
         .subject_public_key(certkit::key::PublicKey::from_key_pair(&key_pair))
-        .extensions(vec![certkit::cert::params::ExtensionParam::from_extension(san, false)?])
+        .extensions(vec![certkit::cert::params::ExtensionParam::from_extension(
+            san, false,
+        )?])
         .build();
 
     let cert = certkit::cert::Certificate::new_self_signed(&cert_info, &key_pair)?;
@@ -2549,7 +2831,11 @@ async fn main() {
 
     let serial_path =
         env::var("AT_SERIAL_PORT").unwrap_or_else(|_| DEFAULT_SERIAL_PORT.to_string());
-    push_log("INFO", "System", &format!("正在初始化串口设备: {}", serial_path));
+    push_log(
+        "INFO",
+        "System",
+        &format!("正在初始化串口设备: {}", serial_path),
+    );
 
     let (tx, _) = broadcast::channel(100);
     let (command_tx, command_rx) = mpsc::channel(32);
@@ -2564,17 +2850,23 @@ async fn main() {
         let mut hasher = Sha256::new();
         hasher.update(format!("jwt_rand_{}_{}", nanos, pid));
         let key = hex::encode(hasher.finalize());
-        push_log("WARN", "Auth", "未检测到 JWT_SECRET 环境变量，已在内存中生成随机密钥（零文件落盘）");
+        push_log(
+            "WARN",
+            "Auth",
+            "未检测到 JWT_SECRET 环境变量，已在内存中生成随机密钥（零文件落盘）",
+        );
         key
     });
-    let admin_password =
-        env::var("WEBUI_PASSWORD").unwrap_or_else(|_| "admin123".to_string());
-    let admin_username =
-        env::var("WEBUI_USERNAME").unwrap_or_else(|_| "admin".to_string());
+    let admin_password = env::var("WEBUI_PASSWORD").unwrap_or_else(|_| "admin123".to_string());
+    let admin_username = env::var("WEBUI_USERNAME").unwrap_or_else(|_| "admin".to_string());
 
     let admin_pass_sha = hash_password_sha256(&admin_password);
 
-    push_log("INFO", "System", &format!("密码哈希算法: SHA256 (质询-响应)"));
+    push_log(
+        "INFO",
+        "System",
+        &format!("密码哈希算法: SHA256 (质询-响应)"),
+    );
 
     let app_state = Arc::new(AppState {
         tx: tx.clone(),
@@ -2590,7 +2882,11 @@ async fn main() {
     let backend: Arc<dyn HardwareBackend> = if std::path::Path::new(&serial_path).exists() {
         Arc::new(RealBackend::new(serial_path.clone()).await)
     } else {
-        push_log("WARN", "System", "未检测到串口设备，已自动开启模拟测试模式 (MockBackend)");
+        push_log(
+            "WARN",
+            "System",
+            "未检测到串口设备，已自动开启模拟测试模式 (MockBackend)",
+        );
         Arc::new(MockBackend)
     };
 
@@ -2648,31 +2944,64 @@ async fn main() {
                     let redirect_app = create_http_redirect_app(https_port);
                     tokio::spawn(async move {
                         if let Ok(listener) = tokio::net::TcpListener::bind(http_addr).await {
-                            push_log("INFO", "System", &format!("🔀 HTTP 自动重定向服务已在 http://{} 监听 (-> https://...:{})", http_addr, https_port));
+                            push_log(
+                                "INFO",
+                                "System",
+                                &format!(
+                                    "🔀 HTTP 自动重定向服务已在 http://{} 监听 (-> https://...:{})",
+                                    http_addr, https_port
+                                ),
+                            );
                             let _ = axum::serve(listener, redirect_app).await;
                         } else {
-                            push_log("WARN", "System", &format!("HTTP 重定向端口 {} 绑定失败，跳过重定向服务", http_port));
+                            push_log(
+                                "WARN",
+                                "System",
+                                &format!("HTTP 重定向端口 {} 绑定失败，跳过重定向服务", http_port),
+                            );
                         }
                     });
                 }
 
-                push_log("INFO", "System", &format!("🔒 {} WebUI HTTPS 服务已在 https://{} 启动", device_name, https_addr));
+                push_log(
+                    "INFO",
+                    "System",
+                    &format!(
+                        "🔒 {} WebUI HTTPS 服务已在 https://{} 启动",
+                        device_name, https_addr
+                    ),
+                );
                 axum_server::bind_rustls(https_addr, tls_config)
                     .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
                     .await
                     .unwrap();
             }
             Err(e) => {
-                push_log("ERROR", "TLS", &format!("TLS 初始化失败 ({})，回退到纯 HTTP 模式", e));
+                push_log(
+                    "ERROR",
+                    "TLS",
+                    &format!("TLS 初始化失败 ({})，回退到纯 HTTP 模式", e),
+                );
                 let listener = tokio::net::TcpListener::bind(http_addr).await.unwrap();
-                push_log("INFO", "System", &format!("{} WebUI 服务已在 http://{} 监听", device_name, http_addr));
+                push_log(
+                    "INFO",
+                    "System",
+                    &format!("{} WebUI 服务已在 http://{} 监听", device_name, http_addr),
+                );
                 axum::serve(listener, app).await.unwrap();
             }
         }
     } else {
         // 纯 HTTP 模式
         let listener = tokio::net::TcpListener::bind(http_addr).await.unwrap();
-        push_log("INFO", "System", &format!("{} WebUI 服务已在 http://{} 监听 (纯 HTTP 模式)", device_name, http_addr));
+        push_log(
+            "INFO",
+            "System",
+            &format!(
+                "{} WebUI 服务已在 http://{} 监听 (纯 HTTP 模式)",
+                device_name, http_addr
+            ),
+        );
         axum::serve(listener, app).await.unwrap();
     }
 }
@@ -2692,10 +3021,7 @@ async fn ws_handler(
 
     if let (Some(host_val), Some(origin_val)) = (host, origin) {
         // 使用 :// 正确切割协议头，避免 trim_start_matches 链式调用的缺陷
-        let origin_host = origin_val
-            .split("://")
-            .nth(1)
-            .unwrap_or(origin_val);
+        let origin_host = origin_val.split("://").nth(1).unwrap_or(origin_val);
         // 仅对默认 HTTP/HTTPS 端口剥离，显式其他端口保留参与比对
         let origin_compare = origin_host
             .strip_suffix(":80")
@@ -2706,19 +3032,31 @@ async fn ws_handler(
             .or_else(|| host_val.strip_suffix(":443"))
             .unwrap_or(host_val);
         if origin_compare != host_compare {
-            push_log("WARN", "WS", &format!("拦截跨站 WebSocket 劫持: Origin {} != Host {}", origin_val, host_val));
+            push_log(
+                "WARN",
+                "WS",
+                &format!(
+                    "拦截跨站 WebSocket 劫持: Origin {} != Host {}",
+                    origin_val, host_val
+                ),
+            );
             return (StatusCode::FORBIDDEN, "Cross-Site WebSocket Request Denied").into_response();
         }
     }
 
-    ws.on_upgrade(|socket| handle_ws(socket, state)).into_response()
+    ws.on_upgrade(|socket| handle_ws(socket, state))
+        .into_response()
 }
 
 async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     // 收到 Arc<String> 预序列化广播，零反序列化/序列化开销
     let mut broadcast_rx = state.tx.subscribe();
     let online_count = state.tx.receiver_count();
-    push_log("INFO", "WS", &format!("新的 WebSocket 客户端已连接 (当前在线: {})", online_count));
+    push_log(
+        "INFO",
+        "WS",
+        &format!("新的 WebSocket 客户端已连接 (当前在线: {})", online_count),
+    );
 
     // RAII Guard：离开作用域自动递减 active_views（Panic/Cancel 安全）
     let (_guard, is_view_active) = ActiveViewGuard::new(state.clone());
@@ -2732,7 +3070,11 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
         let guard = state.telemetry_rx.borrow();
         serialize_global(&guard, "full")
     };
-    if ws_sender.send(Message::Text(full_json.into())).await.is_err() {
+    if ws_sender
+        .send(Message::Text(full_json.into()))
+        .await
+        .is_err()
+    {
         return; // _guard.drop() 自动递减
     }
 
@@ -2953,7 +3295,14 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
 
     // _guard.drop() 自动根据 is_view_active 标志决定是否递减
 
-    push_log("INFO", "WS", &format!("WebSocket 客户端已断开 (当前在线: {})", state.tx.receiver_count()));
+    push_log(
+        "INFO",
+        "WS",
+        &format!(
+            "WebSocket 客户端已断开 (当前在线: {})",
+            state.tx.receiver_count()
+        ),
+    );
 }
 
 #[cfg(test)]

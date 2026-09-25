@@ -112,13 +112,15 @@ export function createTelemetryStore({ send }) {
       return DEVICE_SPEC_LABELS.map(([label, key]) => [label, this.deviceSpecs[key]]);
     },
 
-    /** 后端的 `updated` 是 UTC 字符串，展示前转成本地时间；缺失则退回渲染时刻 */
+    /**
+     * 后端下发的 `updated` 已是按服务器本地时区格式化好的 `YYYY/MM/DD HH:mm:ss`，
+     * 直接原样展示即可。切勿再补 'Z' 交给 Date 解析：那等于把它当成 UTC，
+     * 随后的本地化渲染会再叠加一次时区偏移（东八区下凭空多出 8 小时）。
+     */
     get updatedText() {
       const raw = this.updated;
       if (!raw || raw === PLACEHOLDER) return localStamp();
-      const iso = String(raw).trim().replace(/\//g, '-').replace(' ', 'T') + 'Z';
-      const date = new Date(iso);
-      return Number.isNaN(date.getTime()) ? String(raw) : localStamp(date);
+      return String(raw);
     },
 
     get rsrpColorClass() {
@@ -136,12 +138,15 @@ export function createTelemetryStore({ send }) {
       if (!data || typeof data !== 'object') return;
 
       for (const [key, value] of Object.entries(data)) {
-        if (value === undefined || value === null) continue;
-        if (key === 'firmware_version' && this.onFirmware) {
-          this.onFirmware(value);
+        // undefined = 该帧不含此字段，保持现状；
+        // null = 后端本轮未采到，必须回落为占位符，否则断网后
+        // 界面会一直保留掉线前的 IP / 小区 / 信号值。
+        if (value === undefined) continue;
+        if (key === 'firmware_version' && value) {
+          this.onFirmware?.(value);
         }
         if (key in this) {
-          this[key] = value;
+          this[key] = value === null ? PLACEHOLDER : value;
         }
       }
 

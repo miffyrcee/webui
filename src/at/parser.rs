@@ -159,8 +159,10 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
         }));
     }
     if let Some(values) = fields_after_prefix(trimmed, "+QENG:") {
-        if values.first().map(String::as_str) == Some("servingcell") {
-            let get = |i: usize| values.get(i).cloned().unwrap_or_default();
+        let tag = values.first().map(String::as_str).unwrap_or_default();
+        let get = |i: usize| values.get(i).cloned().unwrap_or_default();
+
+        if tag == "servingcell" {
             let mut cell = QengServingCell::default();
             // RAT 决定字段布局：LTE 无 TAC 且带宽分 UL/DL 两段
             let is_nr = get(2).contains("NR5G");
@@ -197,17 +199,58 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
             }
             return Some(ParsedLine::QengServingCell(cell));
         }
-        if values.first().map(String::as_str) == Some("neighbourcell") {
+
+        // 5G NSA (EN-DC) 下模组会额外返回两行 servingcell 数据，二者都以 RAT 作为
+        // 首个字段、没有 "servingcell" 前缀，字段布局也与 SA 不同，需单独解析：
+        //   +QENG: "LTE",<is_tdd>,<mcc>,<mnc>,<cellid>,<pci>,<earfcn>,<band>,<ul_bw>,<dl_bw>,<tac>,<rsrp>,<rsrq>,<rssi>,<sinr>,<srxlev>
+        //   +QENG: "NR5G-NSA",<mcc>,<mnc>,<pci>,<rsrp>,<sinr>,<rsrq>,<arfcn>,<band>,<bw>
+        if tag == "LTE" {
+            return Some(ParsedLine::QengServingCell(QengServingCell {
+                rat: "LTE".to_string(),
+                opmode: get(1),
+                mcc: get(2),
+                mnc: get(3),
+                cell_id: get(4),
+                pci: get(5),
+                earfcn: get(6),
+                band: get(7),
+                bandwidth: get(9),
+                tac: get(10),
+                rsrp: get(11),
+                rsrq: get(12),
+                rssi: get(13),
+                sinr: get(14),
+                srxlev: get(15),
+                ..Default::default()
+            }));
+        }
+        if tag == "NR5G-NSA" {
+            return Some(ParsedLine::QengServingCell(QengServingCell {
+                rat: "NR5G-NSA".to_string(),
+                mcc: get(1),
+                mnc: get(2),
+                pci: get(3),
+                rsrp: get(4),
+                sinr: get(5),
+                rsrq: get(6),
+                earfcn: get(7),
+                band: get(8),
+                bandwidth: get(9),
+                ..Default::default()
+            }));
+        }
+
+        if tag == "neighbourcell" {
             return Some(ParsedLine::QengNeighbourCell(QengNeighbourCell {
-                rat: values.get(1).cloned().unwrap_or_default(),
-                mcc: values.get(2).cloned().unwrap_or_default(),
-                mnc: values.get(3).cloned().unwrap_or_default(),
-                pci: values.get(4).cloned().unwrap_or_default(),
-                earfcn: values.get(5).cloned().unwrap_or_default(),
-                rsrp: values.get(6).cloned().unwrap_or_default(),
-                rsrq: values.get(7).cloned().unwrap_or_default(),
-                sinr: values.get(8).cloned().unwrap_or_default(),
-                srxlev: values.get(9).cloned().unwrap_or_default(),
+                rat: get(1),
+                mcc: get(2),
+                mnc: get(3),
+                pci: get(4),
+                earfcn: get(5),
+                rsrp: get(6),
+                rsrq: get(7),
+                sinr: get(8),
+                srxlev: get(9),
             }));
         }
     }
@@ -322,15 +365,16 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::actor::telemetry::Telem
         return;
     }
 
-    // Collect all servingcell lines (carrier aggregation can have multiple)
+    // Collect all servingcell lines (carrier aggregation can have multiple)。
+    // 无 RAT 的行（如 NSA 的 `+QENG: "servingcell","NOCONN"` 状态行）不含任何小区
+    // 数据，必须剔除，否则会被当成主小区把其余字段全部覆盖成空值。
     let serving_cells: Vec<QengServingCell> = qeng_res
         .lines()
         .filter_map(|line| {
             let trimmed = line.trim();
-            if let Some(ParsedLine::QengServingCell(cell)) = parse_single_line(trimmed) {
-                Some(cell)
-            } else {
-                None
+            match parse_single_line(trimmed) {
+                Some(ParsedLine::QengServingCell(cell)) if !cell.rat.is_empty() => Some(cell),
+                _ => None,
             }
         })
         .collect();
@@ -343,16 +387,29 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::actor::telemetry::Telem
     // Use first line (PCC/main carrier) for base fields
     let pcc = &serving_cells[0];
 
-    telemetry.network_mode = Some(format!("{} {}", pcc.rat, pcc.opmode));
+    // 5G NSA (EN-DC) 下 PCC 是 LTE 锚点，若照搬 pcc.rat 会显示成 "LTE FDD"，
+    // 用户会误以为自己没连上 5G，因此检测到 NR 从载波时显式标注组网形态。
+    let has_nsa_carrier = serving_cells.iter().any(|c| c.rat == "NR5G-NSA");
+    telemetry.network_mode = Some(if has_nsa_carrier && pcc.rat == "LTE" {
+        "NR5G-NSA (LTE 锚点)".to_string()
+    } else {
+        format!("{} {}", pcc.rat, pcc.opmode)
+    });
     telemetry.mccmnc = Some(format!("{}{}", pcc.mcc, pcc.mnc));
     telemetry.cell_id = Some(pcc.cell_id.clone());
+    // 3GPP 规范：LTE ECI 为 28-bit（最多 7 位 Hex，末 2 位是 8-bit Sector ID），
+    // NR NCI 为 36-bit（最多 9 位 Hex，末 3 位是 12-bit Sector ID），
+    // 因此基站编号的截断长度必须随制式变化 —— 写死 -3 会算错 LTE 的 eNB ID。
     // cell_id 来自模组 AT 响应，通常为 ASCII 十六进制字符串；
-    // 先整体判断 is_ascii() 再切片，避免多字节 UTF-8 乱码导致 [..len-3] 边界 panic
-    if pcc.cell_id.is_ascii() && pcc.cell_id.len() >= 6 {
-        telemetry.enb_id = Some(pcc.cell_id[..pcc.cell_id.len() - 3].to_string());
+    // 先整体判断 is_ascii() 再切片，避免多字节 UTF-8 乱码导致切片边界 panic
+    let sector_hex_len = if pcc.rat.contains("NR5G") { 3 } else { 2 };
+    telemetry.enb_id = if pcc.cell_id.is_empty() {
+        None
+    } else if pcc.cell_id.is_ascii() && pcc.cell_id.len() > sector_hex_len {
+        Some(pcc.cell_id[..pcc.cell_id.len() - sector_hex_len].to_string())
     } else {
-        telemetry.enb_id = Some(pcc.cell_id.clone());
-    }
+        Some(pcc.cell_id.clone())
+    };
     telemetry.tac = if pcc.tac.is_empty() {
         None
     } else {
@@ -1137,6 +1194,63 @@ mod tests {
         assert_eq!(telemetry.sinr, Some("19 / 78%".to_string()));
         // 不得把十六进制 TAC 当作 RSRP 导致信号跌为 0%
         assert_eq!(telemetry.signal_percentage, Some("78%".to_string()));
+    }
+
+    #[test]
+    fn test_parse_qeng_lte_enb_id_is_20bit() {
+        // LTE ECI 为 28-bit / 7 位 Hex，前 5 位是 eNB ID（此处 5F1EA）。
+        // 旧实现统一砍掉末尾 3 位会得到 "5F1E"，基站编号整体算错。
+        let raw = "+QENG: \"servingcell\",\"CONNECT\",\"LTE\",\"FDD\",460,01,5F1EA15,12,1650,3,20,20,DE10,-65,-11,-70,19";
+        let mut telemetry = crate::actor::telemetry::TelemetryData::default();
+        parse_qeng(raw, &mut telemetry);
+
+        assert_eq!(telemetry.cell_id, Some("5F1EA15".to_string()));
+        assert_eq!(telemetry.enb_id, Some("5F1EA".to_string()));
+    }
+
+    #[test]
+    fn test_parse_qeng_nsa_en_dc_three_lines() {
+        // 真实 EN-DC 输出：状态行 + LTE 锚点行 + NR5G-NSA 从载波行。
+        // 旧实现只认首字段为 "servingcell" 的行，后两行全部被丢弃，
+        // NSA 下界面所有信号/频段/小区指标都会变成 --。
+        let raw = "+QENG: \"servingcell\",\"NOCONN\"\n\
+                   +QENG: \"LTE\",\"FDD\",460,01,5F1EA15,12,1650,3,20,20,DE10,-99,-12,-67,11,9\n\
+                   +QENG: \"NR5G-NSA\",460,01,747,-71,13,-11,627264,78,12,1";
+        let mut telemetry = crate::actor::telemetry::TelemetryData::default();
+        parse_qeng(raw, &mut telemetry);
+
+        // 主小区仍是 LTE 锚点，但组网形态必须标注为 NSA
+        assert_eq!(telemetry.network_mode, Some("NR5G-NSA (LTE 锚点)".to_string()));
+        assert_eq!(telemetry.mccmnc, Some("46001".to_string()));
+        assert_eq!(telemetry.cell_id, Some("5F1EA15".to_string()));
+        assert_eq!(telemetry.enb_id, Some("5F1EA".to_string()));
+        assert_eq!(telemetry.tac, Some("DE10".to_string()));
+
+        // 信号取 LTE 锚点：rsrp=-99 → 42%，rsrq=-12 → 47%，sinr=11 → 62%
+        assert_eq!(telemetry.signal_percentage, Some("42%".to_string()));
+        assert_eq!(telemetry.ss_rsrp, Some("-99 / 42%".to_string()));
+        assert_eq!(telemetry.ss_rsrq, Some("-12 / 47%".to_string()));
+        assert_eq!(telemetry.sinr, Some("11 / 62%".to_string()));
+
+        // 锚点与从载波都进聚合列表：LTE B3 20MHz + NR n78 100MHz
+        assert_eq!(telemetry.bands, Some("LTE BAND 3, NR5G BAND 78".to_string()));
+        assert_eq!(telemetry.bandwidth, Some("120 MHz (20+100)".to_string()));
+        assert_eq!(telemetry.earfcn, Some("1650, 627264".to_string()));
+        assert_eq!(telemetry.pci, Some("12, 747".to_string()));
+    }
+
+    #[test]
+    fn test_parse_qeng_state_only_line_leaves_telemetry_untouched() {
+        // 脱网时模组只回状态行，不含 RAT/小区数据，不得用它覆盖出空值字段
+        let raw = "+QENG: \"servingcell\",\"SEARCH\"";
+        let mut telemetry = crate::actor::telemetry::TelemetryData::default();
+        parse_qeng(raw, &mut telemetry);
+
+        assert!(telemetry.network_mode.is_none());
+        assert!(telemetry.cell_id.is_none());
+        assert!(telemetry.enb_id.is_none());
+        assert!(telemetry.signal_percentage.is_none());
+        assert!(telemetry.bands.is_none());
     }
 
     #[test]

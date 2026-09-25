@@ -185,14 +185,15 @@ pub fn parse_single_line(line: &str) -> Option<ParsedLine> {
                 cell.srxlev = get(15);
                 cell.rssi = get(16);
             } else {
-                // LTE: pci,earfcn,band,ul_bw,dl_bw,rsrp,rsrq,rssi,sinr（无 TAC，取 DL 带宽）
+                // LTE: pci,earfcn,band,ul_bw,dl_bw,tac,rsrp,rsrq,rssi,sinr（带宽取 DL 段）
                 cell.earfcn = get(8);
                 cell.band = get(9);
                 cell.bandwidth = get(11);
-                cell.rsrp = get(12);
-                cell.rsrq = get(13);
-                cell.rssi = get(14);
-                cell.sinr = get(15);
+                cell.tac = get(12);
+                cell.rsrp = get(13);
+                cell.rsrq = get(14);
+                cell.rssi = get(15);
+                cell.sinr = get(16);
             }
             return Some(ParsedLine::QengServingCell(cell));
         }
@@ -571,11 +572,18 @@ pub fn parse_cops_scan(resp: &str) -> Vec<serde_json::Value> {
                             let entry = &body[s..i];
                             let parts: Vec<&str> = entry.split(',').map(|s| s.trim().trim_matches('"')).collect();
                             if parts.len() >= 5 {
+                                // 3GPP TS 27.007 <AcT> 定义：
+                                // 0/1 GSM, 2 UTRAN, 3 GSM w/ EGPRS,
+                                // 4/5/6 UTRAN w/ HSDPA/HSUPA, 7 E-UTRAN(LTE),
+                                // 8 EC-GSM-IoT(eMTC), 9 NB-IoT,
+                                // 10/11/12/13 5GC 相关(NR5G / EN-DC)
                                 let tech = match parts[4].trim() {
-                                    "0" | "1" => "GSM",
-                                    "2" => "WCDMA",
-                                    "3" => "LTE",
-                                    "4" | "5" | "6" => "NR5G",
+                                    "0" | "1" | "3" => "GSM",
+                                    "2" | "4" | "5" | "6" => "WCDMA",
+                                    "7" => "LTE",
+                                    "8" => "eMTC",
+                                    "9" => "NB-IoT",
+                                    "10" | "11" | "12" | "13" => "NR5G",
                                     _ => "Unknown",
                                 };
                                 let stat = match parts[0] {
@@ -1109,9 +1117,9 @@ mod tests {
 
     #[test]
     fn test_parse_qeng_lte_servingcell() {
-        // LTE servingcell 布局：无 TAC，且频宽分 UL/DL 两段
-        // "servingcell",state,LTE,FDD,mcc,mnc,cellid,pci,earfcn,band,ul_bw,dl_bw,rsrp,rsrq,rssi,sinr
-        let raw = "+QENG: \"servingcell\",\"CONNECT\",\"LTE\",\"FDD\",460,00,39074C001,751,6300,3,20,20,-65,-11,-70,19";
+        // 移远 LTE servingcell 标准布局（含 TAC，频宽分 UL/DL 两段）
+        // "servingcell",state,LTE,FDD,mcc,mnc,cellid,pci,earfcn,band,ul_bw,dl_bw,tac,rsrp,rsrq,rssi,sinr
+        let raw = "+QENG: \"servingcell\",\"CONNECT\",\"LTE\",\"FDD\",460,00,39074C001,751,6300,3,20,20,DE10,-65,-11,-70,19";
         let mut telemetry = crate::actor::telemetry::TelemetryData::default();
         parse_qeng(raw, &mut telemetry);
 
@@ -1121,12 +1129,33 @@ mod tests {
         assert_eq!(telemetry.bandwidth, Some("20 MHz".to_string()));
         assert_eq!(telemetry.earfcn, Some("6300".to_string()));
         assert_eq!(telemetry.pci, Some("751".to_string()));
-        // LTE 无 TAC 字段
-        assert_eq!(telemetry.tac, None);
-        // sinr 取 [15]，不可误取 RSSI(-70)
-        assert_eq!(telemetry.sinr, Some("19 / 78%".to_string()));
+        // 下标 12 为 TAC
+        assert_eq!(telemetry.tac, Some("DE10".to_string()));
+        // 下表 13/14/15/16 分别为 RSRP/RSRQ/RSSI/SINR
         assert_eq!(telemetry.ss_rsrp, Some("-65 / 78%".to_string()));
         assert_eq!(telemetry.ss_rsrq, Some("-11 / 52%".to_string()));
+        assert_eq!(telemetry.sinr, Some("19 / 78%".to_string()));
+        // 不得把十六进制 TAC 当作 RSRP 导致信号跌为 0%
+        assert_eq!(telemetry.signal_percentage, Some("78%".to_string()));
+    }
+
+    #[test]
+    fn test_parse_cops_scan_act_mapping() {
+        // 真实扫频：LTE 基站 AcT=7，NR5G 基站 AcT=11/12/13，2G/3G 为 0/2
+        let raw = "+COPS: (2,\"CHN-UNICOM\",\"UNICOM\",\"46001\",7),\
+                   (1,\"CHN-MOBILE\",\"CMCC\",\"46000\",7),\
+                   (1,\"CHN-UNICOM\",\"UNICOM\",\"46001\",11),\
+                   (3,\"CHN-MOBILE\",\"CMCC\",\"46000\",12),\
+                   (1,\"CMCC\",\"CMCC\",\"46000\",2),\
+                   (3,\"CMCC\",\"CMCC\",\"46000\",0)";
+        let nets = parse_cops_scan(raw);
+        assert_eq!(nets.len(), 6);
+        assert_eq!(nets[0]["technology"], "LTE");
+        assert_eq!(nets[1]["technology"], "LTE");
+        assert_eq!(nets[2]["technology"], "NR5G");
+        assert_eq!(nets[3]["technology"], "NR5G");
+        assert_eq!(nets[4]["technology"], "WCDMA");
+        assert_eq!(nets[5]["technology"], "GSM");
     }
 
     #[test]

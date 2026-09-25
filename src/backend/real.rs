@@ -240,10 +240,12 @@ impl HardwareBackend for RealBackend {
                 _ => None,
             })
             .unwrap_or_default();
+        // 部分固件直接返回裸数字 ICCID（无 +QCCID: 前缀），需 Other 兜底
         let iccid = send_at_get_line(&self.serial_path, "AT+QCCID")
             .await
             .and_then(|r| match parse_single_line(&r) {
                 Some(ParsedLine::Qccid(iccid)) => Some(iccid),
+                Some(ParsedLine::Other(val)) => Some(val.trim().to_string()),
                 _ => None,
             })
             .unwrap_or_else(|| "Unknown".to_string());
@@ -262,8 +264,11 @@ impl HardwareBackend for RealBackend {
             .await
             .map(|r| parse_signal_quality(&r))
             .unwrap_or_else(|| "Unknown".to_string());
-        let temperature = send_at_get_line(&self.serial_path, "AT+QTEMP")
+        // AT+QTEMP 返回多行传感器列表，必须用完整响应（send_at_get_line 只取首行，
+        // 而 cpuss/mdmss 通常不在首行，会导致温度恒为 "-- °C"）
+        let temperature = send_at_command_inner(&self.serial_path, "AT+QTEMP")
             .await
+            .ok()
             .and_then(|r| parse_qtemp_temperature(&r))
             .unwrap_or_else(|| "-- °C".to_string());
 

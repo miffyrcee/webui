@@ -254,6 +254,30 @@ pub async fn fetch_network_provider(serial_path: &str) -> String {
     "Unknown".to_string()
 }
 
+/// 将 QCAINFO 的 band 字段分类为 (NR 频段号, LTE 频段号)。
+/// 兼容三种固件输出：`"NR5G BAND 41"`、`"LTE BAND 3"`、裸数字（>100 视为 NR）。
+fn classify_qcainfo_band(band: &str) -> (Option<u32>, Option<u32>) {
+    if let Some(num) = band
+        .strip_prefix("NR5G BAND ")
+        .and_then(|s| s.trim().parse::<u32>().ok())
+    {
+        (Some(num), None)
+    } else if let Some(num) = band
+        .strip_prefix("LTE BAND ")
+        .and_then(|s| s.trim().parse::<u32>().ok())
+    {
+        (None, Some(num))
+    } else if let Ok(band_num) = band.parse::<u32>() {
+        if band_num > 100 {
+            (Some(band_num), None)
+        } else {
+            (None, Some(band_num))
+        }
+    } else {
+        (None, None)
+    }
+}
+
 pub async fn query_device_bands(serial_path: &str) -> String {
     let mut nr_bands: Vec<String> = Vec::new();
     let mut lte_bands: Vec<String> = Vec::new();
@@ -284,18 +308,16 @@ pub async fn query_device_bands(serial_path: &str) -> String {
             if let Some(ParsedLine::Qcainfo(entry)) =
                 crate::at::parser::parse_single_line(trimmed)
             {
-                if entry.band.starts_with("NR5G BAND ") {
-                    let num = entry.band.strip_prefix("NR5G BAND ").unwrap_or("").trim();
-                    if !num.is_empty() && !nr_bands.contains(&format!("n{}", num)) {
-                        nr_bands.push(format!("n{}", num));
+                let (nr, lte) = classify_qcainfo_band(&entry.band);
+                if let Some(num) = nr {
+                    let label = format!("n{}", num);
+                    if !nr_bands.contains(&label) {
+                        nr_bands.push(label);
                     }
-                } else if let Ok(band_num) = entry.band.parse::<u32>() {
-                    if band_num > 100 {
-                        if !nr_bands.contains(&format!("n{}", band_num)) {
-                            nr_bands.push(format!("n{}", band_num));
-                        }
-                    } else if !lte_bands.contains(&format!("B{}", band_num)) {
-                        lte_bands.push(format!("B{}", band_num));
+                } else if let Some(num) = lte {
+                    let label = format!("B{}", num);
+                    if !lte_bands.contains(&label) {
+                        lte_bands.push(label);
                     }
                 }
             }
@@ -430,5 +452,17 @@ mod tests {
     fn parse_egmr_non_egmr_returns_none() {
         let raw = "AT+CSQ\r\r\n+CSQ: 25,99\r\n\r\nOK\r\n";
         assert_eq!(parse_egmr_response(raw), None);
+    }
+
+    #[test]
+    fn classify_qcainfo_band_variants() {
+        assert_eq!(classify_qcainfo_band("NR5G BAND 41"), (Some(41), None));
+        // 部分固件带 "LTE BAND " 前缀，不可因 parse::<u32>() 失败而丢失
+        assert_eq!(classify_qcainfo_band("LTE BAND 3"), (None, Some(3)));
+        // 裸数字默认按 LTE 处理（NR 输出带 "NR5G BAND " 前缀，避免 n41/B41 歧义）
+        assert_eq!(classify_qcainfo_band("3"), (None, Some(3)));
+        // 仅超大数值（>100，如 mmWave n257）才回退判定为 NR
+        assert_eq!(classify_qcainfo_band("257"), (Some(257), None));
+        assert_eq!(classify_qcainfo_band("-"), (None, None));
     }
 }

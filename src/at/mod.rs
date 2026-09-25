@@ -1,24 +1,12 @@
+//! AT 协议层：解析响应、构造命令与通用工具。
+
+pub mod builder;
 pub mod parser;
 pub mod response;
 pub mod utils;
 
-// 重新导出解析函数，简化 main.rs 的导入
-// 重新导出 main.rs 需要的解析函数
-pub use parser::{
-    parse_cgpaddr,
-    parse_cops_scan,
-    parse_net_status,
-    parse_qcainfo,
-    parse_qeng,
-    parse_qeng_neighbour,
-    parse_qtemp_temperature,
-    parse_signal_quality,
-};
-
-// 重新导出 main.rs 需要的工具函数
-pub use utils::{
-    decode_cmgl_body,
-    decode_hex_ucs2,
-    format_bytes,
-    normalize_at_command,
-};
+// 重新导出各子模块接口，简化调用方的导入路径
+pub use self::builder::*;
+pub use self::parser::*;
+pub use self::response::*;
+pub use self::utils::*;

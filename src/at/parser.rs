@@ -276,7 +276,7 @@ fn set_carrier_telemetry(
     earfcns: &[String],
     pcis: &[String],
     is_nr: bool,
-    telemetry: &mut crate::TelemetryData,
+    telemetry: &mut crate::actor::telemetry::TelemetryData,
 ) {
     if !bands.is_empty() {
         telemetry.bands = Some(bands.join(", "));
@@ -298,7 +298,7 @@ fn set_carrier_telemetry(
 }
 
 /// Parse +QENG "servingcell" response string and populate TelemetryData
-pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
+pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::actor::telemetry::TelemetryData) {
     if qeng_res.is_empty() {
         println!("未找到 +QENG 响应");
         return;
@@ -384,7 +384,7 @@ pub fn parse_qeng(qeng_res: &str, telemetry: &mut crate::TelemetryData) {
 }
 
 /// Parse +QCAINFO response and populate TelemetryData
-pub fn parse_qcainfo(qca_res: &str, telemetry: &mut crate::TelemetryData) {
+pub fn parse_qcainfo(qca_res: &str, telemetry: &mut crate::actor::telemetry::TelemetryData) {
     if qca_res.is_empty() {
         return;
     }
@@ -434,14 +434,14 @@ pub fn parse_qcainfo(qca_res: &str, telemetry: &mut crate::TelemetryData) {
     let is_nr_agg = entries.iter().any(|e| e.band.starts_with("NR5G"));
     set_carrier_telemetry(&bands, &bw_parts, total_bw, &earfcns, &pcis, is_nr_agg, telemetry);
 
-    crate::push_log("INFO", "QCAINFO", &format!(
+    crate::logger::push_log("INFO", "QCAINFO", &format!(
         "QCAINFO parsed: bands={:?} bw={:?} earfcn={:?} pci={:?}",
         telemetry.bands, telemetry.bandwidth, telemetry.earfcn, telemetry.pci
     ));
 }
 
 /// Parse +CGPADDR response and populate TelemetryData
-pub fn parse_cgpaddr(gpad_res: &str, telemetry: &mut crate::TelemetryData) {
+pub fn parse_cgpaddr(gpad_res: &str, telemetry: &mut crate::actor::telemetry::TelemetryData) {
     use crate::at::utils::{convert_dotted_ipv6_to_standard, is_valid_ipv4, is_valid_ipv6};
 
     for line in gpad_res.lines() {
@@ -815,7 +815,7 @@ mod tests {
              +CGPADDR: 3,\"0.0.0.0\",\"0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0\"\n\
              +CGPADDR: 4,\"0.0.0.0\",\"0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0\"\n\
              +CGPADDR: 5,\"0.0.0.0\",\"0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0\"";
-        let mut telemetry = crate::TelemetryData::default();
+        let mut telemetry = crate::actor::telemetry::TelemetryData::default();
         parse_cgpaddr(raw, &mut telemetry);
         assert_eq!(telemetry.ipv4, Some("10.172.99.214".to_string()));
         assert_eq!(telemetry.ipv6, Some("2409:8970:b68:1d9c:18be:3323:1cfc:5996".to_string()));
@@ -825,7 +825,7 @@ mod tests {
     fn test_parse_cgpaddr_all_zero() {
         // 所有 CID 均为 0.0.0.0，应回退为 "--"
         let raw = "+CGPADDR: 1,\"0.0.0.0\",\"0.0.0.0\"\n+CGPADDR: 2,\"0.0.0.0\"";
-        let mut telemetry = crate::TelemetryData::default();
+        let mut telemetry = crate::actor::telemetry::TelemetryData::default();
         parse_cgpaddr(raw, &mut telemetry);
         assert!(telemetry.ipv4.is_none());
         assert!(telemetry.ipv6.is_none());
@@ -835,7 +835,7 @@ mod tests {
     fn test_parse_qeng_real_nr5g_sa() {
         // 真实 NR5G-SA 服务小区数据：NOCONN, TDD, 46000, cell=39074C001
         let raw = "+QENG: \"servingcell\",\"NOCONN\",\"NR5G-SA\",\"TDD\",460,00,39074C001,751,72002F,504990,41,12,-65,-11,19,1,-";
-        let mut telemetry = crate::TelemetryData::default();
+        let mut telemetry = crate::actor::telemetry::TelemetryData::default();
         parse_qeng(raw, &mut telemetry);
 
         assert_eq!(telemetry.network_mode, Some("NR5G-SA TDD".to_string()));
@@ -865,7 +865,7 @@ mod tests {
         // 固件异常输出非 ASCII 乱码 cell_id（"abéé" 含 2 字节 UTF-8 字符），
         // 旧代码 `cell_id[..len-3]` 切片边界 len-3=3 会落在 é(字节 2-3) 中间导致 panic。
         let raw = "+QENG: \"servingcell\",\"NOCONN\",\"NR5G-SA\",\"TDD\",460,00,abéé,751,72002F,504990,41,12,-65,-11,19,1,-";
-        let mut telemetry = crate::TelemetryData::default();
+        let mut telemetry = crate::actor::telemetry::TelemetryData::default();
         parse_qeng(raw, &mut telemetry);
         // 不应 panic，非 ASCII 时 enb_id 回退为完整 cell_id
         assert_eq!(telemetry.cell_id, Some("abéé".to_string()));
@@ -878,7 +878,7 @@ mod tests {
         let raw =
             "+QCAINFO: \"PCC\",504990,12,\"NR5G BAND 41\",751\n\
              +QCAINFO: \"SCC\",156490,3,\"NR5G BAND 28\",1,250,0,-,-";
-        let mut telemetry = crate::TelemetryData::default();
+        let mut telemetry = crate::actor::telemetry::TelemetryData::default();
         parse_qcainfo(raw, &mut telemetry);
 
         assert_eq!(telemetry.bands, Some("NR5G BAND 41, NR5G BAND 28".to_string()));
@@ -892,7 +892,7 @@ mod tests {
     fn test_parse_qcainfo_single_carrier() {
         // 单载波场景：QCAINFO 仅返回一行 PCC，频宽不应有冗余括号
         let raw = "+QCAINFO: \"PCC\",504990,12,\"NR5G BAND 41\",751";
-        let mut telemetry = crate::TelemetryData::default();
+        let mut telemetry = crate::actor::telemetry::TelemetryData::default();
         parse_qcainfo(raw, &mut telemetry);
 
         assert_eq!(telemetry.bands, Some("NR5G BAND 41".to_string()));
@@ -903,7 +903,7 @@ mod tests {
 
     #[test]
     fn test_parse_qcainfo_empty() {
-        let mut telemetry = crate::TelemetryData::default();
+        let mut telemetry = crate::actor::telemetry::TelemetryData::default();
         parse_qcainfo("", &mut telemetry);
         // 空响应不应改动 telemetry
         assert!(telemetry.bands.is_none());
@@ -975,7 +975,7 @@ mod tests {
              +QTEMP:\"modem-lte-sub6-pa2\",\"40\"\n\
              +QTEMP:\"modem-ambient-usr\",\"41\"";
 
-        let mut telemetry = crate::TelemetryData::default();
+        let mut telemetry = crate::actor::telemetry::TelemetryData::default();
 
         // 第 1 步：CGPADDR → ipv4 / ipv6
         parse_cgpaddr(cgpaddr_raw, &mut telemetry);
@@ -1026,7 +1026,7 @@ mod tests {
         let raw =
             "+QENG: \"servingcell\",\"CONNECT\",\"NR5G-SA\",\"TDD\",460,00,39074C001,751,72002F,504990,41,12,-65,-11,19,1,-\n\
              +QENG: \"servingcell\",\"CONNECT\",\"NR5G-SA\",\"TDD\",460,00,39074C001,250,72002F,156490,28,3,-70,-12,15,1,-";
-        let mut telemetry = crate::TelemetryData::default();
+        let mut telemetry = crate::actor::telemetry::TelemetryData::default();
         parse_qeng(raw, &mut telemetry);
 
         assert_eq!(telemetry.bands, Some("NR5G BAND 41, NR5G BAND 28".to_string()));

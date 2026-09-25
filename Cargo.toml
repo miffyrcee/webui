@@ -3,6 +3,18 @@ name = "quectel-webui"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "quectel_webui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "quectel-webui"
+path = "src/main.rs"
+
+[[bin]]
+name = "atcmd_rs"
+path = "src/bin/atcmd_rs.rs"
+
 [dependencies]
 axum = { version = "0.8.9", features = ["ws", "macros"] }
 sha2 = "0.11.0"

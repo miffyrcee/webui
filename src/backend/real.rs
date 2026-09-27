@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::actor::action::DiagnosticType;
 use crate::actor::telemetry::TelemetryData;
 use crate::at::{
-    builder::{sanitize_at_param, sanitize_sms_body, sms_hex_body_if_needed},
+    builder::{encode_ucs2_hex, sanitize_at_param, sanitize_sms_body, sms_hex_body_if_needed},
     format_bytes,
     parser::{
         ParsedLine, is_valid_data_apn, parse_cgpaddr, parse_cops_scan, parse_net_status,
@@ -145,63 +145,89 @@ impl HardwareBackend for RealBackend {
     }
 
     async fn send_sms_msg(&self, recipient: &str, message: &str) -> bool {
-        // 号码需完整过滤（含 \r\n）；正文仅剥离 0x1A，必须保留换行
-        let recipient = sanitize_at_param(recipient);
+        // 号码去除危险控制字符并清理首尾空白；正文仅剥离 0x1A，保留合法换行
+        let recipient = sanitize_at_param(recipient).trim().to_string();
         let message = sanitize_sms_body(message);
 
+        if recipient.is_empty() || message.is_empty() {
+            push_log("WARN", "SMS", "收件人号码或正文为空，取消发送");
+            return false;
+        }
+
         match sms_hex_body_if_needed(&message) {
-            // GSM 7-bit：文本模式直接下发正文
+            // GSM 7-bit：全英文字符，直接文本模式下发
             None => {
-                if send_at_command_inner(&self.serial_path, "AT+CMGF=1")
-                    .await
-                    .is_ok()
-                {
-                    send_sms_command_inner(
-                        &self.serial_path,
-                        &format!("AT+CMGS=\"{}\"", recipient),
-                        &message,
-                        None,
-                    )
-                    .await
-                    .is_ok()
-                } else {
-                    false
-                }
-            }
-            // UCS2：以原始字节经 --hex-body 下发，避免 hex 文本被当作正文
-            // Quectel 模块在 CSCS="UCS2" 文本模式下不支持 AT+CMGS，
-            // 故保持 CSCS="GSM"（号码保持 ASCII），通过 CSMP DCS=8
-            // 指定消息体为 UCS2，并将正文以 UCS2 原始字节写入。
-            Some(hex_body) => {
                 if send_at_command_inner(&self.serial_path, "AT+CMGF=1")
                     .await
                     .is_err()
                 {
                     return false;
                 }
-                if send_at_command_inner(&self.serial_path, "AT+CSCS=\"GSM\"")
+                let _ = send_at_command_inner(&self.serial_path, "AT+CSCS=\"GSM\"").await;
+                let _ = send_at_command_inner(&self.serial_path, "AT+CSMP=17,167,0,0").await;
+
+                send_sms_command_inner(
+                    &self.serial_path,
+                    &format!("AT+CMGS=\"{}\"", recipient),
+                    &message,
+                    None,
+                )
+                .await
+                .is_ok()
+            }
+            // UCS2：包含中文或非 GSM 7-bit Unicode 字符
+            // 移远模组在文本模式 (AT+CMGF=1) 下发送 UCS2 短信的规范要求：
+            // 1. 设置 AT+CSCS="UCS2" 与 AT+CSMP=17,167,0,8 (DCS=8 指定 16-bit UCS2)；
+            // 2. 在 CSCS="UCS2" 下，AT+CMGS="<recipient>" 中的手机号必须同时转换为 UCS2 Hex 格式；
+            // 3. '>' 提示符后写入正文的 UCS2 十六进制 ASCII 文本字符串（如 "4F60597D"），不可写原始二进制字节；
+            // 4. 发送完成后无论成功与否，必须将模组复位回 AT+CSCS="GSM" 与 AT+CSMP=17,167,0,0。
+            Some(hex_body) => {
+                push_log(
+                    "INFO",
+                    "SMS",
+                    &format!(
+                        "检测到非 GSM 字符（如中文），启用 UCS2 编码发送至: {}",
+                        recipient
+                    ),
+                );
+
+                if send_at_command_inner(&self.serial_path, "AT+CMGF=1")
                     .await
                     .is_err()
                 {
+                    return false;
+                }
+                if send_at_command_inner(&self.serial_path, "AT+CSCS=\"UCS2\"")
+                    .await
+                    .is_err()
+                {
+                    push_log("ERROR", "SMS", "设置 AT+CSCS=\"UCS2\" 失败");
                     return false;
                 }
                 if send_at_command_inner(&self.serial_path, "AT+CSMP=17,167,0,8")
                     .await
                     .is_err()
                 {
+                    push_log("ERROR", "SMS", "设置 AT+CSMP=17,167,0,8 失败");
+                    let _ = send_at_command_inner(&self.serial_path, "AT+CSCS=\"GSM\"").await;
                     return false;
                 }
 
+                // 关键点：CSCS="UCS2" 下号码参数也必须编码为 UCS2 Hex 格式字符串
+                let ucs2_recipient = encode_ucs2_hex(&recipient);
+
+                // 关键点：正文以 UCS2 Hex ASCII 字符串经由 --message 写入串口，避免原始字节 NUL/Ctrl+Z 截断
                 let result = send_sms_command_inner(
                     &self.serial_path,
-                    &format!("AT+CMGS=\"{}\"", recipient),
-                    "",
-                    Some(&hex_body),
+                    &format!("AT+CMGS=\"{}\"", ucs2_recipient),
+                    &hex_body,
+                    None,
                 )
                 .await
                 .is_ok();
 
-                // 复位 CSMP（DCS=0 默认编码）
+                // 无论成功还是失败，均复位字符集与短信参数为 GSM 默认状态
+                let _ = send_at_command_inner(&self.serial_path, "AT+CSCS=\"GSM\"").await;
                 let _ = send_at_command_inner(&self.serial_path, "AT+CSMP=17,167,0,0").await;
 
                 result

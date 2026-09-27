@@ -14,7 +14,7 @@ pub fn needs_ucs2(s: &str) -> bool {
 }
 
 /// 将字符串转换为 UCS2 十六进制文本（UTF-16 BE → hex ASCII）
-/// 例如 "你好" → "4F60597D"
+/// 例如 "你好" → "4F60597D"，"10086" → "00310030003000380036"
 pub fn encode_ucs2_hex(s: &str) -> String {
     s.encode_utf16()
         .flat_map(|c| c.to_be_bytes())
@@ -31,8 +31,8 @@ pub fn sanitize_sms_body(input: &str) -> String {
     input.chars().filter(|&c| c != '\u{1A}').collect()
 }
 
-/// 判断短信正文需要以 UCS2 原始字节下发（非 GSM 7-bit），返回其 hex 编码。
-/// 返回 `None` 表示按普通文本（`--message`）发送。
+/// 判断短信正文是否包含非 GSM 7-bit 字符（如中文等需要 UCS2 编码）。
+/// 若需要，返回其十六进制字符串表示；返回 `None` 表示可按普通 GSM 7-bit 文本直接发送。
 pub fn sms_hex_body_if_needed(message: &str) -> Option<String> {
     if needs_ucs2(message) {
         Some(encode_ucs2_hex(message))
@@ -66,5 +66,15 @@ mod tests {
     #[test]
     fn sms_hex_body_ucs2_for_chinese() {
         assert_eq!(sms_hex_body_if_needed("你好").as_deref(), Some("4F60597D"));
+    }
+
+    #[test]
+    fn encode_ucs2_hex_recipients() {
+        // 验证收件人手机号码在 UCS2 模式下的 Hex 编码转换
+        assert_eq!(encode_ucs2_hex("10086"), "00310030003000380036");
+        assert_eq!(
+            encode_ucs2_hex("+8610086"),
+            "002B0038003600310030003000380036"
+        );
     }
 }

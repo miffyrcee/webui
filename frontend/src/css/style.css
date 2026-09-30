@@ -5,12 +5,20 @@
 
 @import "tailwindcss";
 
+/* 组件库：控制台模板大量使用 btn / card / badge / progress / collapse 等组件类。
+   主题名固定为 light / dark —— App.vue 直接以这两个名字设置 data-theme。 */
+@plugin "daisyui" {
+    themes: light --default, dark --prefersdark;
+}
+
 /* 深色模式变体 */
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* 扫描源：Vite root 为 frontend/，自动探测已覆盖，这里显式声明避免歧义 */
 @source "../../index.html";
 @source "../../login.html";
+/* src/ 下的 .vue 组件（控制台的类名全部写在 App.vue 里，漏扫会把组件类整片裁掉） */
+@source "../";
 
 /* ============================================================
    Argon 设计主题令牌
@@ -67,9 +75,6 @@
 html, body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
-
-/* Alpine 接管前的元素不应闪一下再隐藏 */
-[x-cloak] { display: none !important; }
 
 body {
     background-color: #f4f5f7;
@@ -169,6 +174,11 @@ body {
     width: 100vw; height: 100vh;
     display: flex; align-items: center; justify-content: center;
     overflow: hidden; user-select: none;
+    /* 让本容器自成层叠上下文，使内部 z-index:-1 的几何背景被限制在其内部绘制。
+       否则它会落到根层叠上下文里，被 body 的不透明底色（daisyUI 接管后 html 也
+       有了底色，body 背景不再传播到 canvas，于是变成普通元素背景）盖住，
+       表现为登录页只剩一片纯色、渐变背景消失。 */
+    isolation: isolate;
 }
 
 .argon-login-card {
@@ -211,4 +221,20 @@ html:not(.dark) .login-theme-toggle {
 html:not(.dark) .login-theme-toggle:hover {
     background: rgba(0, 0, 0, 0.1) !important;
     color: #1e293b !important;
+}
+
+/* ============================================================
+   两套主题机制并存
+   登录页（Login.vue）沿用 `.dark` class；控制台（App.vue）走 daisyUI 的
+   `data-theme` 属性，由 App.vue 的 toggleTheme 设置，不会再挂 .dark。
+   故这里把仅靠 `.dark` 生效的几处补一份 data-theme 版本。
+
+   注意：本段必须位于文件末尾 —— `html:not(.dark) body`（上方亮色覆盖）
+   与本段选择器特指度相同，靠书写顺序决定胜负。
+   ============================================================ */
+html[data-theme='dark'] body {
+    background-color: #080b14;
+}
+html[data-theme='dark'] .terminal-box {
+    background-color: #06080f !important;
 }

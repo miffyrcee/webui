@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
 import tailwindcss from '@tailwindcss/vite';
 
 // 多页构建：主控台 + 登录页
@@ -9,7 +10,7 @@ const fromConfig = (rel) => fileURLToPath(new URL(rel, import.meta.url));
 
 export default defineConfig({
   root: fromConfig('./frontend'),
-  plugins: [tailwindcss()],
+  plugins: [vue(), tailwindcss()],
   build: {
     outDir: fromConfig('./dist'),
     emptyOutDir: true,

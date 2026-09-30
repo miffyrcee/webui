@@ -1,24 +1,65 @@
 /// Utility functions for AT response processing
 
 /// Decode UCS2 hex-encoded string (e.g. "4E2D56FD79FB52A8" -> "中国联通")
+///
+/// 返回空串表示「这不是一段 UCS2 编码」，调用方应保留原文。
+///
+/// 注意入参常是**已经被转义过的普通短信正文**：形如 `1234`、`12345678` 的
+/// 验证码同样满足「长度为 4 的倍数且全为十六进制」。若不加甄别地按 4 位一组
+/// 解读，`1234` 会变成 U+1234（ሴ）之类的生僻字符。因此这里要求整串至少含有
+/// 一个真正的 UCS2 特征字符：CJK/全角等宽字符，或 UCS2 下的 ASCII（高字节 0x00）。
 pub fn decode_hex_ucs2(hex: &str) -> String {
-    if hex.len() % 4 != 0 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+    if hex.is_empty() || hex.len() % 4 != 0 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
         return String::new();
     }
-    let mut bytes = Vec::new();
+
+    // 整串由十进制数字构成 → 必然是验证码一类的普通正文。仅靠下面的字符区间
+    // 判断并不够：`12345678` 的第二组 0x5678 恰好落在 CJK 区间内。
+    if hex.chars().all(|c| c.is_ascii_digit()) {
+        return String::new();
+    }
+
+    let mut codes = Vec::with_capacity(hex.len() / 4);
     for i in (0..hex.len()).step_by(4) {
-        if let Ok(code) = u16::from_str_radix(&hex[i..i + 4], 16) {
-            match code {
-                0x0000..=0x007F => bytes.push(code as u8),
-                0x0080..=0x07FF => {
-                    bytes.push(0xC0 | (code >> 6) as u8);
-                    bytes.push(0x80 | (code & 0x3F) as u8);
-                }
-                _ => {
-                    bytes.push(0xE0 | (code >> 12) as u8);
-                    bytes.push(0x80 | ((code >> 6) & 0x3F) as u8);
-                    bytes.push(0x80 | (code & 0x3F) as u8);
-                }
+        match u16::from_str_radix(&hex[i..i + 4], 16) {
+            Ok(code) => codes.push(code),
+            Err(_) => return String::new(),
+        }
+    }
+
+    let has_cjk = codes.iter().any(|&c| {
+        (0x4E00..=0x9FFF).contains(&c)     // CJK 统一表意文字
+            || (0x3400..=0x4DBF).contains(&c) // 扩展 A
+            || (0x3000..=0x303F).contains(&c) // CJK 标点
+            || (0xFF00..=0xFFEF).contains(&c) // 全角/半角形式
+            || (0x2000..=0x206F).contains(&c) // 常用标点
+    });
+    let has_ucs2_ascii = codes.iter().any(|&c| (0x0020..=0x007E).contains(&c));
+
+    if !has_cjk && !has_ucs2_ascii {
+        return String::new();
+    }
+
+    // 含 C0 控制字符的解读结果必定是误判（真短信不会有裸控制符）
+    if codes
+        .iter()
+        .any(|&c| (0x0001..=0x0008).contains(&c) || (0x000E..=0x001F).contains(&c))
+    {
+        return String::new();
+    }
+
+    let mut bytes = Vec::with_capacity(codes.len() * 3);
+    for code in codes {
+        match code {
+            0x0000..=0x007F => bytes.push(code as u8),
+            0x0080..=0x07FF => {
+                bytes.push(0xC0 | (code >> 6) as u8);
+                bytes.push(0x80 | (code & 0x3F) as u8);
+            }
+            _ => {
+                bytes.push(0xE0 | (code >> 12) as u8);
+                bytes.push(0x80 | ((code >> 6) & 0x3F) as u8);
+                bytes.push(0x80 | (code & 0x3F) as u8);
             }
         }
     }
@@ -153,7 +194,9 @@ pub fn decode_cmgl_body(response: &str) -> String {
             result.push('\n');
         } else if in_body {
             let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed == "OK" {
+            // 只有 OK 才代表正文结束：空行属于正文内容的一部分，若在此终止，
+            // 空行之后的行会被当作「正文外」原样透传，UCS2 正文将不再被解码。
+            if trimmed == "OK" {
                 in_body = false;
                 result.push_str(line);
                 result.push('\n');
@@ -182,6 +225,20 @@ mod tests {
     fn test_decode_hex_ucs2() {
         assert_eq!(decode_hex_ucs2("4E2D56FD79FB52A8"), "中国移动");
         assert_eq!(decode_hex_ucs2("invalid"), "");
+        // UCS2 编码的纯 ASCII 文本（高字节 0x00）仍应正常还原
+        assert_eq!(decode_hex_ucs2("004F004B"), "OK");
+    }
+
+    #[test]
+    fn test_decode_hex_ucs2_rejects_plain_digits() {
+        // 4/8 位纯数字验证码同样满足「长度 4 的倍数且全为 hex」，
+        // 必须原样返回空串让调用方保留原文，否则 "1234" 会变成 U+1234（ሴ）。
+        // "12345678" 的第二组 0x5678 落在 CJK 区间，只靠区间判断会漏判。
+        assert_eq!(decode_hex_ucs2("1234"), "");
+        assert_eq!(decode_hex_ucs2("12345678"), "");
+        assert_eq!(decode_hex_ucs2(""), "");
+        // 非纯数字的普通 hex 文本同样不该被误判
+        assert_eq!(decode_hex_ucs2("ABCDEF12"), "");
     }
 
     #[test]

@@ -63,9 +63,14 @@ impl HardwareBackend for RealBackend {
     async fn read_sms_list(&self) -> String {
         let _ = send_at_command_inner(&self.serial_path, "AT+CMGF=1").await;
         let _ = send_at_command_inner(&self.serial_path, "AT+CSCS=\"GSM\"").await;
-        send_at_command_inner(&self.serial_path, "AT+CMGL=\"ALL\"")
-            .await
-            .unwrap_or_else(|_| "+CMGL: 0 messages\r\nOK\r\n".to_string())
+        // 短信条数多时模组逐条吐出 +CMGL 记录，默认 10s 超时会中途截断正文
+        send_at_command_inner_with_timeout(
+            &self.serial_path,
+            "AT+CMGL=\"ALL\"",
+            Duration::from_secs(45),
+        )
+        .await
+        .unwrap_or_else(|_| "+CMGL: 0 messages\r\nOK\r\n".to_string())
     }
 
     async fn configure_apn(
@@ -89,6 +94,10 @@ impl HardwareBackend for RealBackend {
                 &format!("AT+CGAUTH=1,{},\"{}\",\"{}\"", auth_type, user, pass),
             )
             .await?;
+        } else {
+            // 用户清空账号密码时必须显式关闭鉴权：仅跳过 AT+CGAUTH 会保留模组里
+            // 上一次写入的 username/password，导致「清空后仍鉴权失败」
+            let _ = send_at_command_inner(&self.serial_path, "AT+CGAUTH=1,0").await;
         }
         Ok(format!("APN {} 设置已应用", apn))
     }

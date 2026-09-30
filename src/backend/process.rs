@@ -7,13 +7,28 @@ use serde::Serialize;
 use crate::at::{decode_hex_ucs2, parser::ParsedLine};
 use crate::logger::push_log;
 
+/// 串口助手子进程名（Windows 需带 .exe 后缀）
+#[cfg(windows)]
+const EXE_NAME: &str = "atcmd_rs.exe";
+#[cfg(not(windows))]
+const EXE_NAME: &str = "atcmd_rs";
+
 pub fn spawn_atcmd_rs(
     serial_path: &str,
     cmd: &str,
     sms_message: Option<&str>,
     hex_body: Option<&str>,
 ) -> Result<tokio::process::Child, String> {
-    let mut command = tokio::process::Command::new("atcmd_rs");
+    // 优先取与本进程同目录的 atcmd_rs：cargo 会把同 crate 的两个 bin 输出到同一
+    // 目录（target/debug 或 target/release），部署时也常整体拷贝。
+    // 之前的裸 "atcmd_rs" 只能靠系统 PATH 解析，换个部署路径就 "启动失败"。
+    let bin_path = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join(EXE_NAME)))
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| std::path::PathBuf::from(EXE_NAME));
+
+    let mut command = tokio::process::Command::new(bin_path);
     command.arg("-p").arg(serial_path);
     if let Some(message) = sms_message {
         command.arg("--message").arg(message);

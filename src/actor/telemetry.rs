@@ -67,11 +67,17 @@ pub struct TelemetryData {
 
 impl GlobalTelemetry {
     /// 从 TelemetryData（解析器填充）和当前全局状态合并构造 GlobalTelemetry。
+    ///
+    /// `cpu_usage` / `memory_usage` 由调用方本轮实测后传入：它们是空口无关的
+    /// 主机侧瞬时负载，必须每轮覆盖。此前实现直接沿用 `g` 里的旧值，配合调用方
+    /// 「旧值为 None 才回填」的写法，导致首轮拿到数字后永久冻结在初始值。
     pub fn from_telemetry_and_global(
         t: &TelemetryData,
         g: &GlobalTelemetry,
         uptime: Option<String>,
         updated: Option<String>,
+        cpu_usage: Option<String>,
+        memory_usage: Option<String>,
     ) -> Self {
         // 设备/链路固有状态：本轮没读到（None）时沿用上一次的已知值，
         // 避免单条 AT 指令偶发超时导致卡槽状态、连接状态在界面上闪烁。
@@ -117,8 +123,8 @@ impl GlobalTelemetry {
             active_sim: g.active_sim.clone(),
             network_provider: g.network_provider.clone(),
             apn: g.apn.clone(),
-            cpu_usage: g.cpu_usage.clone(),
-            memory_usage: g.memory_usage.clone(),
+            cpu_usage,
+            memory_usage,
             uptime,
             updated,
         }
@@ -155,8 +161,14 @@ mod tests {
             ..Default::default()
         };
 
-        let merged =
-            GlobalTelemetry::from_telemetry_and_global(&TelemetryData::default(), &g, None, None);
+        let merged = GlobalTelemetry::from_telemetry_and_global(
+            &TelemetryData::default(),
+            &g,
+            None,
+            None,
+            None,
+            None,
+        );
 
         assert_eq!(merged.ipv4, None);
         assert_eq!(merged.ipv6, None);
@@ -177,8 +189,14 @@ mod tests {
             ..Default::default()
         };
 
-        let merged =
-            GlobalTelemetry::from_telemetry_and_global(&TelemetryData::default(), &g, None, None);
+        let merged = GlobalTelemetry::from_telemetry_and_global(
+            &TelemetryData::default(),
+            &g,
+            None,
+            None,
+            None,
+            None,
+        );
 
         assert_eq!(merged.sim_status, Some("READY".to_string()));
         assert_eq!(merged.internet_connection, Some("Connected".to_string()));
@@ -197,10 +215,32 @@ mod tests {
             ..Default::default()
         };
 
-        let merged = GlobalTelemetry::from_telemetry_and_global(&t, &g, None, None);
+        let merged = GlobalTelemetry::from_telemetry_and_global(&t, &g, None, None, None, None);
 
         assert_eq!(merged.ipv4, Some("10.0.0.2".to_string()));
         assert_eq!(merged.pci, Some("250".to_string()));
+    }
+
+    #[test]
+    fn host_load_is_overwritten_every_round() {
+        // 主机负载必须每轮被本轮实测值覆盖：若沿用旧值，界面会在首轮之后永久冻结
+        let g = GlobalTelemetry {
+            cpu_usage: Some("1%".to_string()),
+            memory_usage: Some("1%".to_string()),
+            ..Default::default()
+        };
+
+        let merged = GlobalTelemetry::from_telemetry_and_global(
+            &TelemetryData::default(),
+            &g,
+            None,
+            None,
+            Some("37%".to_string()),
+            Some("52%".to_string()),
+        );
+
+        assert_eq!(merged.cpu_usage, Some("37%".to_string()));
+        assert_eq!(merged.memory_usage, Some("52%".to_string()));
     }
 
     #[test]
@@ -210,8 +250,14 @@ mod tests {
             ipv4: Some("10.0.0.1".to_string()),
             ..Default::default()
         };
-        let merged =
-            GlobalTelemetry::from_telemetry_and_global(&TelemetryData::default(), &g, None, None);
+        let merged = GlobalTelemetry::from_telemetry_and_global(
+            &TelemetryData::default(),
+            &g,
+            None,
+            None,
+            None,
+            None,
+        );
         let json: serde_json::Value = serde_json::from_str(&serialize_global(&merged, "delta"))
             .expect("序列化结果必须是合法 JSON");
 

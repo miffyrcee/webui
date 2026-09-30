@@ -655,7 +655,25 @@ onMounted(() => {
       ui.globalLoading = false;
       net.scan.scanning = false;
       net.scan.btnText = '触发扫频';
+      // 超时同样要解锁互斥标志位，否则频段/U 盘按钮会永久置灰
+      net.bandResetPending = false;
+      usb.applying = false;
       logs.backend.push(`✗ [超时] ${expect} 未收到硬件回执`);
+    },
+    // 断线会批量中止所有 pending：各 store 的「进行中」状态必须在这里统一解锁，
+    // 否则重连成功后 UI 仍停在 ⏳ 进行中（后端永远不会再补发这次回执）
+    onPendingAborted(reason) {
+      ui.globalLoading = false;
+      net.scan.scanning = false;
+      net.scan.btnText = '触发扫频';
+      net.bandResetPending = false;
+      usb.applying = false;
+      net.netStatusText = '✗ 通信中断';
+      net.simSlotStatusText = '';
+      net.bandLockStatusText = '就绪';
+      net.cellLock.statusText = '就绪';
+      usb.statusText = '通信已断开';
+      logs.backend.push(`✗ [通信中断] 进行中的操作已被取消: ${reason}`);
     },
   });
 

@@ -208,27 +208,17 @@ function splitQuoted(line) {
 }
 
 /**
- * 部分模组把短信正文以 UCS2 十六进制返回（每 4 个 hex 一个字符）。
- * 只在整个字符串都是偶数长度 hex 时才解码，否则原样返回（避免误伤普通文本）。
- */
-export function decodeUcs2Hex(text) {
-  if (typeof text !== 'string' || !text) return text;
-  if (!/^[0-9A-Fa-f]+$/.test(text) || text.length % 4 !== 0) return text;
-  let out = '';
-  for (let i = 0; i < text.length; i += 4) {
-    out += String.fromCharCode(Number.parseInt(text.substring(i, i + 4), 16));
-  }
-  return out;
-}
-
-/**
  * 解析 `+CMGL` 列表原始文本（后端 `sms_list` 的 data 就是这种裸文本）。
  *
  * 格式：
  *   +CMGL: <index>,<stat>,<oa>,<alpha>,<scts>
- *   <正文，可多行>
+ *   <正文，可多行，可含空行>
  *   +CMGL: ...
  *   OK
+ *
+ * 正文不做任何解码：后端 `decode_cmgl_body` 已按 UCS2 还原过（见 src/at/utils.rs）。
+ * 此前在前端再解一次，会把「1234」这类纯数字正文当成 UCS2 十六进制，
+ * 转出 U+1234 之类的生僻字符。
  */
 export function parseCmgl(text) {
   if (typeof text !== 'string' || text === '') return [];
@@ -251,8 +241,10 @@ export function parseCmgl(text) {
     i++;
     const body = [];
     while (i < lines.length) {
-      const bodyLine = lines[i].trim();
-      if (bodyLine.startsWith('+CMGL:') || bodyLine === 'OK' || bodyLine === '') break;
+      const bodyLine = lines[i];
+      const trimmed = bodyLine.trim();
+      // 只有下一条短信头或结束符 OK 才终止正文：空行属于正文内容的一部分
+      if (trimmed.startsWith('+CMGL:') || trimmed === 'OK') break;
       body.push(bodyLine);
       i++;
     }
@@ -261,7 +253,7 @@ export function parseCmgl(text) {
       index: Number.isNaN(index) ? messages.length : index,
       sender,
       timestamp,
-      text: decodeUcs2Hex(body.join('\n')),
+      text: body.join('\n').trim(),
     });
   }
 

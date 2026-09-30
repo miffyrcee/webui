@@ -83,7 +83,9 @@ pub async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
     let (_guard, is_view_active) = ActiveViewGuard::new(state.clone());
     let mut current_is_active = true;
 
-    let (local_tx, mut local_rx) = mpsc::channel::<String>(10);
+    // 通道传输整帧 Message 而非 String：反向代理/客户端的心跳 Ping 需要原样回 Pong，
+    // 用 String 通道就没有承载 Pong 帧的位置。
+    let (local_tx, mut local_rx) = mpsc::channel::<Message>(16);
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
     // 发送全量快照作为第一条消息（零锁读取 watch，borrow 不跨越 .await）
@@ -114,7 +116,7 @@ pub async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                         }
                     }
                     Some(reply) = local_rx.recv() => {
-                        if ws_sender.send(Message::Text(reply.into())).await.is_err() {
+                        if ws_sender.send(reply).await.is_err() {
                             break;
                         }
                     }
@@ -125,7 +127,24 @@ pub async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
 
         _ = async {
             let state_inner = state.clone();
-            while let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
+            // 必须显式处理控制帧：原先只匹配 `Ok(Message::Text(_))`，反向代理/浏览器
+            // 发来的 Ping 会让 while 条件不成立而直接退出接收流，连接被瞬间掐断。
+            while let Some(msg) = ws_receiver.next().await {
+                let text = match msg {
+                    Ok(Message::Text(t)) => t,
+                    Ok(Message::Ping(data)) => {
+                        // 心跳必须原样回 Pong，且不能打断后续指令的接收
+                        if local_tx.send(Message::Pong(data)).await.is_err() {
+                            break;
+                        }
+                        continue;
+                    }
+                    Ok(Message::Pong(_)) => continue,
+                    Ok(Message::Close(_)) => break,
+                    Ok(_) => continue,
+                    Err(_) => break,
+                };
+
                 if let Ok(cmd) = serde_json::from_str::<WsCommand>(&text) {
                     let (resp_tx, resp_rx) = oneshot::channel();
 
@@ -172,7 +191,7 @@ pub async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                                     }
                                 })
                             };
-                            let _ = local_tx.send(info_json.to_string()).await;
+                            let _ = local_tx.send(Message::Text(info_json.to_string().into())).await;
                             continue;
                         }
                         "get_backend_log" => {
@@ -181,7 +200,7 @@ pub async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
                                 "type": "backend_log",
                                 "data": logs
                             });
-                            let _ = local_tx.send(log_json.to_string()).await;
+                            let _ = local_tx.send(Message::Text(log_json.to_string().into())).await;
                             continue;
                         }
                         "set_apn" => {
@@ -301,13 +320,17 @@ pub async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
 
                     if state_inner.command_tx.send(AtRequest { action, resp_tx }).await.is_ok() {
                         if let Ok(reply) = resp_rx.await {
-                            if local_tx.send(reply.to_string()).await.is_err() {
+                            if local_tx
+                                .send(Message::Text(reply.to_string().into()))
+                                .await
+                                .is_err()
+                            {
                                 break;
                             }
                         }
                     }
                 } else {
-                    push_log("WARN", "WS", &format!("WS 收到无法解析的消息: {:?}", text));
+                    push_log("WARN", "WS", &format!("WS 收到无法解析的消息: {:?}", text.as_str()));
                 }
             }
             push_log("INFO", "WS", "浏览器主动断开 WebSocket 连接（接收流正常结束）");

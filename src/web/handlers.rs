@@ -39,7 +39,6 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
 
 #[derive(Deserialize)]
 pub struct LoginPayload {
-    #[allow(dead_code)]
     pub username: String,
     pub nonce: String,
     pub response: String,
@@ -112,6 +111,22 @@ pub async fn login_post_handler(
             .into_response();
     }
 
+    // 用户名此前只参与前端摘要计算、后端从不校验（字段被标记为 dead_code），
+    // 任意用户名只要摘要对得上就能通过。这里显式比对，且放在 nonce 校验之后，
+    // 避免攻击者用一个无效 nonce 反复探测用户名是否存在。
+    if payload.username.trim() != state.admin_username {
+        push_log(
+            "WARN",
+            "Auth",
+            &format!("登录失败(用户名不存在): 用户 '{}' 从 {}", payload.username, ip),
+        );
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"success": false, "msg": "用户名或密码错误"})),
+        )
+            .into_response();
+    }
+
     // SHA256(nonce + username + SHA256(admin_password))
     let expected_response = hash_password_sha256(&format!(
         "{}{}{}",
@@ -144,7 +159,10 @@ pub async fn login_post_handler(
 
         push_log("INFO", "Auth", &format!("管理员登录成功 (来源: {})", ip));
 
-        let cookie = build_auth_cookie(&token, state.enable_https);
+        let cookie = build_auth_cookie(
+            &token,
+            state.enable_https.load(std::sync::atomic::Ordering::Acquire),
+        );
 
         Response::builder()
             .status(StatusCode::OK)

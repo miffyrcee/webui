@@ -59,8 +59,12 @@ pub struct AppState {
     pub admin_pass_sha: String,
     /// 管理员用户名
     pub admin_username: String,
-    /// 当前是否以 HTTPS 提供服务（决定登录 Cookie 是否可带 Secure）
-    pub enable_https: bool,
+    /// 当前是否**实际**以 HTTPS 提供服务（决定登录 Cookie 是否可带 Secure）。
+    ///
+    /// 必须是运行期可变的原子量而非配置快照：TLS 初始化失败会回退到纯 HTTP，
+    /// 此时若仍按配置值给 Cookie 加 `Secure`，浏览器会直接丢弃它 ——
+    /// 表现为登录接口 200 却始终停留在登录页。
+    pub enable_https: AtomicBool,
 }
 
 impl AppState {
@@ -83,7 +87,7 @@ impl AppState {
             jwt_secret: config.jwt_secret.clone(),
             admin_pass_sha: config.admin_pass_sha.clone(),
             admin_username: config.admin_username.clone(),
-            enable_https: config.enable_https,
+            enable_https: AtomicBool::new(config.enable_https),
         });
 
         (state, command_rx, telemetry_tx)

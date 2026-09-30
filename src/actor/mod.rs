@@ -626,18 +626,14 @@ pub async fn hardware_task(
                         g
                     } else {
                         let current = state.telemetry_rx.borrow();
-                        let mut g = GlobalTelemetry::from_telemetry_and_global(
+                        let g = GlobalTelemetry::from_telemetry_and_global(
                             &telemetry, &current,
                             Some(format!("{} minutes", uptime_mins)),
                             Some(updated_str),
+                            cpu_usage,
+                            memory_usage,
                         );
                         drop(current);
-                        if g.cpu_usage.is_none() {
-                            g.cpu_usage = cpu_usage;
-                        }
-                        if g.memory_usage.is_none() {
-                            g.memory_usage = memory_usage;
-                        }
                         g
                     };
 

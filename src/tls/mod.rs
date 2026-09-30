@@ -80,8 +80,17 @@ pub fn create_http_redirect_app(https_port: u16) -> Router {
             .and_then(|h| h.to_str().ok())
             .unwrap_or("localhost");
 
-        // 剥离请求头里的旧端口号
-        let hostname = host_header.split(':').next().unwrap_or(host_header);
+        // 剥离请求头里的旧端口号。
+        // IPv6 字面量形如 `[2409::1]:80`，其中的冒号属于地址本身：按 ':' 直接切割
+        // 只会得到孤零零的 `[`。必须整体取到闭合方括号为止。
+        let hostname = if host_header.starts_with('[') {
+            match host_header.find(']') {
+                Some(end) => &host_header[..=end],
+                None => host_header,
+            }
+        } else {
+            host_header.split(':').next().unwrap_or(host_header)
+        };
 
         let target_url = if https_port == 443 {
             format!("https://{}{}", hostname, uri)

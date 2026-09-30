@@ -41,7 +41,13 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // 组装路由并按配置启动监听（HTTPS / HTTP 重定向 / 纯 HTTP 回退）
-    serve_web(build_router(app_state), &config, &device_name).await;
+    serve_web(
+        build_router(app_state.clone()),
+        &config,
+        &device_name,
+        app_state,
+    )
+    .await;
 
     Ok(())
 }

@@ -7,6 +7,16 @@
     <title>登录 - RM520N 5G WebUI</title>
     <meta name="theme-color" content="#f8f9fe" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#080b14" media="(prefers-color-scheme: dark)">
+    <script>
+        // 与 index.html 同样的首屏主题落定逻辑；登录页额外挂 .dark class，
+        // 因为 style.css 里登录页的亮色覆盖规则全部基于 `html:not(.dark)`。
+        try {
+            var t = localStorage.getItem('theme')
+                || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', t);
+            document.documentElement.classList.toggle('dark', t === 'dark');
+        } catch (e) { /* 隐私模式下 localStorage 不可用，退回系统偏好 */ }
+    </script>
     <link rel="stylesheet" href="./src/css/style.css">
     <script type="module" src="./src/js/login.js"></script>
 </head>

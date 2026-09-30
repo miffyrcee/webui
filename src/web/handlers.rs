@@ -4,7 +4,7 @@ use axum::{
     Json,
     extract::State,
     http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Redirect, Response},
+    response::{Html, IntoResponse, Redirect, Response},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -14,7 +14,10 @@ use crate::auth::{
     verify_stateless_nonce,
 };
 use crate::logger::push_log;
-use crate::web::{assets::embedded_file, state::AppState};
+use crate::web::{
+    assets::{INDEX_HTML, LOGIN_HTML},
+    state::AppState,
+};
 
 pub struct AppError(pub anyhow::Error);
 
@@ -72,7 +75,7 @@ pub async fn index_handler(
     if !is_authenticated(&headers, &state.jwt_secret) {
         return Ok(Redirect::to("/login").into_response());
     }
-    embedded_file("index.html").ok_or_else(|| AppError(anyhow::anyhow!("嵌入资源缺失: index.html")))
+    Ok(Html(INDEX_HTML).into_response())
 }
 
 pub async fn login_get_handler(
@@ -82,7 +85,7 @@ pub async fn login_get_handler(
     if is_authenticated(&headers, &state.jwt_secret) {
         return Ok(Redirect::to("/").into_response());
     }
-    embedded_file("login.html").ok_or_else(|| AppError(anyhow::anyhow!("嵌入资源缺失: login.html")))
+    Ok(Html(LOGIN_HTML).into_response())
 }
 
 pub async fn login_post_handler(

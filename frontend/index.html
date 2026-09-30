@@ -7,6 +7,16 @@
     <title>RM520N 5G WebUI</title>
     <meta name="theme-color" content="#f8f9fe" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#080a14" media="(prefers-color-scheme: dark)">
+    <script>
+        // 在首屏绘制前落定 data-theme：daisyUI 的 --prefersdark 已按系统偏好给出默认值，
+        // 这里只需把 localStorage 里的用户选择覆盖上去，避免先渲染默认主题再闪一下。
+        // 控制台不挂 .dark class（见 style.css 的说明），主题只由 data-theme 驱动。
+        try {
+            var t = localStorage.getItem('theme')
+                || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', t);
+        } catch (e) { /* 隐私模式下 localStorage 不可用，退回系统偏好 */ }
+    </script>
     <link rel="stylesheet" href="./src/css/style.css">
     <script type="module" src="./src/js/main.js"></script>
 </head>

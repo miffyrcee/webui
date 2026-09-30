@@ -5,9 +5,10 @@
  * 流程固定为 /api/get_nonce → sha256(nonce + username + sha256(password)) → /api/login，
  * 密码本身从不离开浏览器，服务端只见到一次性 nonce 的响应值。
  *
- * 主题机制与登录页既有样式保持一致：切换 html 的 `.dark` class
- * （style.css 里的登录页覆盖规则全部基于该类），localStorage 的 'theme'
- * 键与控制台共用，故两页之间的主题偏好是连续的。
+ * 主题机制统一到 daisyUI 的 `data-theme` 属性（与控制台 App.vue 一致），
+ * localStorage 的 'theme' 键两页共用，故登录页切完主题进控制台能无缝继承。
+ * 同时保留 `.dark` class：style.css 里的登录页亮色覆盖规则全部基于 `html:not(.dark)`，
+ * 两者一起写才不会让登录页自己掉回亮色样式。
  */
 import { ref, onMounted } from 'vue';
 import { sha256 } from './sha256.js';
@@ -16,15 +17,18 @@ const username = ref('admin');
 const password = ref('');
 const errorText = ref('');
 const submitting = ref(false);
+const isDark = ref(true);
 
 const THEME_KEY = 'theme';
 
 function applyTheme(dark) {
+  isDark.value = dark;
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
   document.documentElement.classList.toggle('dark', dark);
 }
 
 function toggleTheme() {
-  const dark = !document.documentElement.classList.contains('dark');
+  const dark = !isDark.value;
   applyTheme(dark);
   localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light');
 }
@@ -82,10 +86,10 @@ onMounted(() => {
   <!-- 主题切换按钮 -->
   <button type="button" title="切换白天/夜晚模式" @click="toggleTheme"
     class="login-theme-toggle fixed top-5 right-5 z-50 p-2.5 rounded-xl bg-white/10 dark:bg-white/10 border border-white/15 dark:border-white/10 text-slate-300 dark:text-slate-400 hover:bg-white/20 hover:text-white transition-all duration-200 cursor-pointer">
-    <svg aria-hidden="true" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+    <svg v-if="isDark" aria-hidden="true" class="w-4 h-4 block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m12.728 12.728l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
     </svg>
-    <svg aria-hidden="true" class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+    <svg v-else aria-hidden="true" class="w-4 h-4 block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
     </svg>
   </button>
